@@ -21,6 +21,7 @@ import {
   Pagination,
   ToggleGroup,
   ToggleGroupItem,
+  Badge,
 } from "@patternfly/react-core";
 import { SearchIcon } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
@@ -50,6 +51,8 @@ export const SearchView: React.FC = () => {
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(50);
   const [total, setTotal] = useState(0);
+  const [totalInstalled, setTotalInstalled] = useState(0);
+  const [totalNotInstalled, setTotalNotInstalled] = useState(0);
   const [repositories, setRepositories] = useState<string[]>([]);
 
   const filteredResults = useMemo(() => {
@@ -65,6 +68,8 @@ export const SearchView: React.FC = () => {
       const response = await searchPackages({ query, offset, limit: pageSize, installed });
       setResults(response.results);
       setTotal(response.total);
+      setTotalInstalled(response.total_installed);
+      setTotalNotInstalled(response.total_not_installed);
       if (updateRepos) {
         setRepositories(response.repositories);
       }
@@ -72,6 +77,8 @@ export const SearchView: React.FC = () => {
       setError(ex instanceof Error ? ex.message : String(ex));
       setResults([]);
       setTotal(0);
+      setTotalInstalled(0);
+      setTotalNotInstalled(0);
       if (updateRepos) {
         setRepositories([]);
       }
@@ -161,17 +168,17 @@ export const SearchView: React.FC = () => {
               <ToolbarItem>
                 <ToggleGroup aria-label="Installed filter">
                   <ToggleGroupItem
-                    text="All"
+                    text={<>All <Badge isRead>{totalInstalled + totalNotInstalled}</Badge></>}
                     isSelected={installedFilter === "all"}
                     onChange={() => handleInstalledFilterChange("all")}
                   />
                   <ToggleGroupItem
-                    text="Installed"
+                    text={<>Installed <Badge isRead>{totalInstalled}</Badge></>}
                     isSelected={installedFilter === "installed"}
                     onChange={() => handleInstalledFilterChange("installed")}
                   />
                   <ToggleGroupItem
-                    text="Not installed"
+                    text={<>Not installed <Badge isRead>{totalNotInstalled}</Badge></>}
                     isSelected={installedFilter === "not-installed"}
                     onChange={() => handleInstalledFilterChange("not-installed")}
                   />
