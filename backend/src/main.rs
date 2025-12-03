@@ -141,21 +141,13 @@ fn list_installed(
         _ => None,
     });
 
-    let mut total_explicit = 0usize;
-    let mut total_dependency = 0usize;
     let mut repo_set: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    // First pass: collect all packages with their repos and count totals
+    // First pass: collect all packages with their repos
     let all_with_repos: Vec<_> = localdb
         .pkgs()
         .iter()
         .map(|pkg| {
-            // Count totals for ALL packages (before any filtering)
-            match pkg.reason() {
-                alpm::PackageReason::Explicit => total_explicit += 1,
-                alpm::PackageReason::Depend => total_dependency += 1,
-            }
-
             let repo = find_package_repo(&handle, pkg.name());
             if let Some(ref r) = repo {
                 repo_set.insert(r.clone());
@@ -166,8 +158,10 @@ fn list_installed(
         })
         .collect();
 
-    // Second pass: apply filters
-    let filtered: Vec<_> = all_with_repos
+    // Second pass: apply search and repo filters, count by reason
+    let mut total_explicit = 0usize;
+    let mut total_dependency = 0usize;
+    let search_and_repo_filtered: Vec<_> = all_with_repos
         .iter()
         .filter(|(pkg, repo)| {
             if let Some(ref query) = search_lower {
@@ -181,12 +175,6 @@ fn list_installed(
                 }
             }
 
-            if let Some(reason) = filter_reason {
-                if pkg.reason() != reason {
-                    return false;
-                }
-            }
-
             if let Some(repo_f) = repo_filter {
                 let pkg_repo = repo.as_deref().unwrap_or("local");
                 if pkg_repo != repo_f {
@@ -194,6 +182,23 @@ fn list_installed(
                 }
             }
 
+            // Count after search/repo filter but before reason filter
+            match pkg.reason() {
+                alpm::PackageReason::Explicit => total_explicit += 1,
+                alpm::PackageReason::Depend => total_dependency += 1,
+            }
+
+            true
+        })
+        .collect();
+
+    // Third pass: apply reason filter
+    let filtered: Vec<_> = search_and_repo_filtered
+        .into_iter()
+        .filter(|(pkg, _repo)| {
+            if let Some(reason) = filter_reason {
+                return pkg.reason() == reason;
+            }
             true
         })
         .collect();
