@@ -1,8 +1,9 @@
 use alpm::Alpm;
+use alpm_utils::{alpm_with_conf, DbListExt};
 use anyhow::{Context, Result};
+use pacmanconf::Config;
 use serde::Serialize;
 use std::env;
-use std::fs;
 
 #[cfg(test)]
 mod tests;
@@ -76,7 +77,8 @@ struct SearchResult {
 }
 
 fn get_handle() -> Result<Alpm> {
-    Alpm::new("/", "/var/lib/pacman").context("Failed to initialize alpm handle")
+    let conf = Config::new().context("Failed to parse pacman.conf")?;
+    alpm_with_conf(&conf).context("Failed to initialize alpm handle")
 }
 
 fn validate_package_name(name: &str) -> Result<()> {
@@ -85,13 +87,6 @@ fn validate_package_name(name: &str) -> Result<()> {
     }
     if name.len() > 256 {
         anyhow::bail!("Package name too long (max 256)");
-    }
-    // Arch package naming: lowercase alphanumeric, @, ., _, +, -
-    if !name
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '@' | '.' | '_' | '+' | '-'))
-    {
-        anyhow::bail!("Invalid package name: {}", name);
     }
     Ok(())
 }
@@ -119,79 +114,14 @@ fn validate_pagination(offset: usize, limit: usize) -> Result<()> {
     Ok(())
 }
 
-fn parse_repos_from_string(content: &str) -> Vec<String> {
-    content
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if line.starts_with('[') && line.ends_with(']') {
-                let repo = &line[1..line.len() - 1];
-                if repo != "options" {
-                    return Some(repo.to_string());
-                }
-            }
-            None
-        })
-        .collect()
-}
-
-fn parse_repos_from_pacman_conf() -> Result<Vec<String>> {
-    let content = fs::read_to_string("/etc/pacman.conf")
-        .context("Failed to read /etc/pacman.conf")?;
-    let repos = parse_repos_from_string(&content);
-    if repos.is_empty() {
-        anyhow::bail!("No repositories found in /etc/pacman.conf");
-    }
-    Ok(repos)
-}
-
-fn register_syncdbs(handle: &mut Alpm) -> Result<Vec<String>> {
-    let repos = parse_repos_from_pacman_conf()?;
-    let mut failed: Vec<String> = Vec::new();
-    let mut warnings: Vec<String> = Vec::new();
-
-    for repo in &repos {
-        if handle
-            .register_syncdb(repo.as_str(), alpm::SigLevel::USE_DEFAULT)
-            .is_err()
-        {
-            failed.push(repo.clone());
-        }
-    }
-
-    if !failed.is_empty() {
-        warnings.push(format!(
-            "Failed to register repositories: {}",
-            failed.join(", ")
-        ));
-    }
-
-    if handle.syncdbs().is_empty() {
-        anyhow::bail!("No sync databases registered");
-    }
-
-    Ok(warnings)
-}
 
 fn find_package_repo(handle: &Alpm, pkg_name: &str) -> Option<String> {
-    for syncdb in handle.syncdbs() {
-        if syncdb.pkg(pkg_name).is_ok() {
-            return Some(syncdb.name().to_string());
-        }
-    }
-    None
-}
-
-fn build_package_repo_map(handle: &Alpm) -> std::collections::HashMap<String, String> {
-    let mut map = std::collections::HashMap::new();
-    for syncdb in handle.syncdbs() {
-        let repo_name = syncdb.name().to_string();
-        for pkg in syncdb.pkgs() {
-            map.entry(pkg.name().to_string())
-                .or_insert_with(|| repo_name.clone());
-        }
-    }
-    map
+    handle
+        .syncdbs()
+        .pkg(pkg_name)
+        .ok()
+        .and_then(|pkg| pkg.db())
+        .map(|db| db.name().to_string())
 }
 
 fn list_installed(
@@ -201,13 +131,7 @@ fn list_installed(
     filter: Option<&str>,
     repo_filter: Option<&str>,
 ) -> Result<()> {
-    let mut handle = get_handle()?;
-    // Register sync DBs so we can look up which repo each package came from
-    let warnings = register_syncdbs(&mut handle).unwrap_or_default();
-
-    // Build package->repo lookup map once (O(total_sync_packages) instead of O(n*m))
-    let repo_map = build_package_repo_map(&handle);
-
+    let handle = get_handle()?;
     let localdb = handle.localdb();
 
     let search_lower = search.map(|s| s.to_lowercase());
@@ -232,7 +156,7 @@ fn list_installed(
                 alpm::PackageReason::Depend => total_dependency += 1,
             }
 
-            let repo = repo_map.get(pkg.name()).cloned();
+            let repo = find_package_repo(&handle, pkg.name());
             if let Some(ref r) = repo {
                 repo_set.insert(r.clone());
             } else {
@@ -303,7 +227,7 @@ fn list_installed(
         total_explicit,
         total_dependency,
         repositories,
-        warnings,
+        warnings: Vec::new(),
     };
 
     println!("{}", serde_json::to_string(&response)?);
@@ -311,39 +235,33 @@ fn list_installed(
 }
 
 fn check_updates() -> Result<()> {
-    let mut handle = get_handle()?;
-    let warnings = register_syncdbs(&mut handle)?;
-
+    let handle = get_handle()?;
     let localdb = handle.localdb();
     let mut updates: Vec<UpdateInfo> = Vec::new();
 
     for pkg in localdb.pkgs() {
-        for syncdb in handle.syncdbs() {
-            if let Ok(syncpkg) = syncdb.pkg(pkg.name()) {
-                if alpm::vercmp(syncpkg.version().as_str(), pkg.version().as_str())
-                    == std::cmp::Ordering::Greater
-                {
-                    updates.push(UpdateInfo {
-                        name: pkg.name().to_string(),
-                        current_version: pkg.version().to_string(),
-                        new_version: syncpkg.version().to_string(),
-                        download_size: syncpkg.download_size(),
-                    });
-                    break;
-                }
+        if let Ok(syncpkg) = handle.syncdbs().pkg(pkg.name()) {
+            if syncpkg.version() > pkg.version() {
+                updates.push(UpdateInfo {
+                    name: pkg.name().to_string(),
+                    current_version: pkg.version().to_string(),
+                    new_version: syncpkg.version().to_string(),
+                    download_size: syncpkg.download_size(),
+                });
             }
         }
     }
 
-    let response = UpdatesResponse { updates, warnings };
+    let response = UpdatesResponse {
+        updates,
+        warnings: Vec::new(),
+    };
     println!("{}", serde_json::to_string(&response)?);
     Ok(())
 }
 
-fn package_info(name: &str) -> Result<()> {
-    let mut handle = get_handle()?;
-    let _ = register_syncdbs(&mut handle);
-
+fn local_package_info(name: &str) -> Result<()> {
+    let handle = get_handle()?;
     let localdb = handle.localdb();
 
     let pkg = localdb
@@ -393,9 +311,7 @@ struct SearchResponse {
 }
 
 fn search(query: &str, offset: usize, limit: usize, installed_filter: Option<bool>) -> Result<()> {
-    let mut handle = get_handle()?;
-    register_syncdbs(&mut handle)?;
-
+    let handle = get_handle()?;
     let localdb = handle.localdb();
     let mut all_results: Vec<SearchResult> = Vec::new();
     let mut repo_set: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -465,8 +381,7 @@ struct SyncPackageDetails {
 }
 
 fn sync_package_info(name: &str, repo: Option<&str>) -> Result<()> {
-    let mut handle = get_handle()?;
-    register_syncdbs(&mut handle)?;
+    let handle = get_handle()?;
 
     // If repo specified, search only that repo; otherwise search all
     let pkg_result = if let Some(repo_name) = repo {
@@ -519,7 +434,8 @@ fn print_usage() {
     eprintln!("                         filter: all|explicit|dependency");
     eprintln!("                         repo: all|core|extra|multilib|local|...");
     eprintln!("  check-updates          Check for available updates");
-    eprintln!("  package-info NAME      Get detailed info for an installed package");
+    eprintln!("  local-package-info NAME");
+    eprintln!("                         Get detailed info for an installed package");
     eprintln!("  sync-package-info NAME [REPO]");
     eprintln!("                         Get detailed info for a package from sync databases");
     eprintln!("  search QUERY [offset] [limit] [installed]");
@@ -546,12 +462,12 @@ fn main() {
                 .and_then(|_| list_installed(offset, limit, search, filter, repo_filter))
         }
         "check-updates" => check_updates(),
-        "package-info" => {
+        "local-package-info" => {
             if args.len() < 3 {
-                eprintln!("Error: package-info requires a package name");
+                eprintln!("Error: local-package-info requires a package name");
                 std::process::exit(1);
             }
-            validate_package_name(&args[2]).and_then(|_| package_info(&args[2]))
+            validate_package_name(&args[2]).and_then(|_| local_package_info(&args[2]))
         }
         "search" => {
             if args.len() < 3 {

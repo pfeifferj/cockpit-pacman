@@ -187,7 +187,7 @@ export async function checkUpdates(): Promise<UpdatesResponse> {
 }
 
 export async function getPackageInfo(name: string): Promise<PackageDetails> {
-  return runBackend<PackageDetails>("package-info", [name]);
+  return runBackend<PackageDetails>("local-package-info", [name]);
 }
 
 export async function searchPackages(params: SearchParams): Promise<SearchResponse> {

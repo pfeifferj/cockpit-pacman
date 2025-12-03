@@ -1,41 +1,5 @@
 use super::*;
 
-// --- Parsing tests ---
-
-#[test]
-fn test_parse_repos_basic() {
-    let config = "[core]\nInclude = /etc/pacman.d/mirrorlist\n\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n";
-    let repos = parse_repos_from_string(config);
-    assert_eq!(repos, vec!["core", "extra"]);
-}
-
-#[test]
-fn test_parse_repos_filters_options() {
-    let config = "[options]\nHoldPkg = pacman\n\n[core]\n";
-    let repos = parse_repos_from_string(config);
-    assert_eq!(repos, vec!["core"]);
-}
-
-#[test]
-fn test_parse_repos_empty_config() {
-    let repos = parse_repos_from_string("");
-    assert!(repos.is_empty());
-}
-
-#[test]
-fn test_parse_repos_with_comments() {
-    let config = "# Comment\n[core]\n# Another comment\n[extra]\n";
-    let repos = parse_repos_from_string(config);
-    assert_eq!(repos, vec!["core", "extra"]);
-}
-
-#[test]
-fn test_parse_repos_multilib() {
-    let config = "[core]\n[extra]\n[multilib]\n";
-    let repos = parse_repos_from_string(config);
-    assert_eq!(repos, vec!["core", "extra", "multilib"]);
-}
-
 // --- Serialization tests ---
 
 #[test]
@@ -164,15 +128,13 @@ fn test_validate_package_name_valid() {
     assert!(validate_package_name("r").is_ok());
     assert!(validate_package_name("gtk4").is_ok());
     assert!(validate_package_name("xorg-server").is_ok());
+    assert!(validate_package_name("Linux").is_ok()); // uppercase ok - ALPM allows it
+    assert!(validate_package_name("foo;bar").is_ok()); // special chars ok
 }
 
 #[test]
 fn test_validate_package_name_invalid() {
     assert!(validate_package_name("").is_err());
-    assert!(validate_package_name("Linux").is_err()); // uppercase
-    assert!(validate_package_name("foo bar").is_err()); // space
-    assert!(validate_package_name("foo;bar").is_err()); // semicolon
-    assert!(validate_package_name("foo/bar").is_err()); // slash
     assert!(validate_package_name(&"a".repeat(300)).is_err()); // too long
 }
 
