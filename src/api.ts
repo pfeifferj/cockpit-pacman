@@ -85,6 +85,8 @@ export interface SearchResult {
 export interface SearchResponse {
   results: SearchResult[];
   total: number;
+  total_installed: number;
+  total_not_installed: number;
   repositories: string[];
 }
 

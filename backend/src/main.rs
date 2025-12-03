@@ -312,15 +312,21 @@ fn local_package_info(name: &str) -> Result<()> {
 struct SearchResponse {
     results: Vec<SearchResult>,
     total: usize,
+    total_installed: usize,
+    total_not_installed: usize,
     repositories: Vec<String>,
 }
 
 fn search(query: &str, offset: usize, limit: usize, installed_filter: Option<bool>) -> Result<()> {
     let handle = get_handle()?;
     let localdb = handle.localdb();
-    let mut all_results: Vec<SearchResult> = Vec::new();
     let mut repo_set: std::collections::HashSet<String> = std::collections::HashSet::new();
     let query_lower = query.to_lowercase();
+
+    // First pass: collect all matching packages and count by installed status
+    let mut total_installed = 0usize;
+    let mut total_not_installed = 0usize;
+    let mut all_matches: Vec<SearchResult> = Vec::new();
 
     for syncdb in handle.syncdbs() {
         for pkg in syncdb.pkgs() {
@@ -336,13 +342,13 @@ fn search(query: &str, offset: usize, limit: usize, installed_filter: Option<boo
                 let local_pkg = localdb.pkg(pkg.name()).ok();
                 let is_installed = local_pkg.is_some();
 
-                if let Some(filter) = installed_filter {
-                    if is_installed != filter {
-                        continue;
-                    }
+                if is_installed {
+                    total_installed += 1;
+                } else {
+                    total_not_installed += 1;
                 }
 
-                all_results.push(SearchResult {
+                all_matches.push(SearchResult {
                     name: pkg.name().to_string(),
                     version: pkg.version().to_string(),
                     description: pkg.desc().map(|s| s.to_string()),
@@ -354,12 +360,25 @@ fn search(query: &str, offset: usize, limit: usize, installed_filter: Option<boo
         }
     }
 
-    let total = all_results.len();
-    let results: Vec<SearchResult> = all_results.into_iter().skip(offset).take(limit).collect();
+    // Second pass: apply installed filter
+    let filtered: Vec<SearchResult> = if let Some(filter) = installed_filter {
+        all_matches.into_iter().filter(|r| r.installed == filter).collect()
+    } else {
+        all_matches
+    };
+
+    let total = filtered.len();
+    let results: Vec<SearchResult> = filtered.into_iter().skip(offset).take(limit).collect();
     let mut repositories: Vec<String> = repo_set.into_iter().collect();
     repositories.sort();
 
-    let response = SearchResponse { results, total, repositories };
+    let response = SearchResponse {
+        results,
+        total,
+        total_installed,
+        total_not_installed,
+        repositories,
+    };
     println!("{}", serde_json::to_string(&response)?);
     Ok(())
 }
