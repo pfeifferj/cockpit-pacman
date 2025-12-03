@@ -1,0 +1,9 @@
+node_modules/
+dist/
+backend/target/
+*.log
+*.tsbuildinfo
+.DS_Store
+*.swp
+*.swo
+coverage/

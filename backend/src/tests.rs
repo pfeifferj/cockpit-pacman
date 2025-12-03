@@ -1,0 +1,207 @@
+use super::*;
+
+// --- Parsing tests ---
+
+#[test]
+fn test_parse_repos_basic() {
+    let config = "[core]\nInclude = /etc/pacman.d/mirrorlist\n\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n";
+    let repos = parse_repos_from_string(config);
+    assert_eq!(repos, vec!["core", "extra"]);
+}
+
+#[test]
+fn test_parse_repos_filters_options() {
+    let config = "[options]\nHoldPkg = pacman\n\n[core]\n";
+    let repos = parse_repos_from_string(config);
+    assert_eq!(repos, vec!["core"]);
+}
+
+#[test]
+fn test_parse_repos_empty_config() {
+    let repos = parse_repos_from_string("");
+    assert!(repos.is_empty());
+}
+
+#[test]
+fn test_parse_repos_with_comments() {
+    let config = "# Comment\n[core]\n# Another comment\n[extra]\n";
+    let repos = parse_repos_from_string(config);
+    assert_eq!(repos, vec!["core", "extra"]);
+}
+
+#[test]
+fn test_parse_repos_multilib() {
+    let config = "[core]\n[extra]\n[multilib]\n";
+    let repos = parse_repos_from_string(config);
+    assert_eq!(repos, vec!["core", "extra", "multilib"]);
+}
+
+// --- Serialization tests ---
+
+#[test]
+fn test_package_serialization() {
+    let pkg = Package {
+        name: "linux".to_string(),
+        version: "6.7.0-arch1-1".to_string(),
+        description: Some("The Linux kernel".to_string()),
+        installed_size: 150_000_000,
+        install_date: Some(1704067200),
+        reason: "explicit".to_string(),
+        repository: Some("core".to_string()),
+    };
+
+    let json = serde_json::to_string(&pkg).unwrap();
+    assert!(json.contains("\"name\":\"linux\""));
+    assert!(json.contains("\"version\":\"6.7.0-arch1-1\""));
+    assert!(json.contains("\"reason\":\"explicit\""));
+}
+
+#[test]
+fn test_package_list_response_serialization() {
+    let response = PackageListResponse {
+        packages: vec![],
+        total: 100,
+        total_explicit: 60,
+        total_dependency: 40,
+        repositories: vec!["core".to_string(), "extra".to_string()],
+        warnings: vec![],
+    };
+
+    let json = serde_json::to_string(&response).unwrap();
+    assert!(json.contains("\"total\":100"));
+    assert!(json.contains("\"total_explicit\":60"));
+    assert!(json.contains("\"total_dependency\":40"));
+}
+
+#[test]
+fn test_updates_response_serialization() {
+    let response = UpdatesResponse {
+        updates: vec![UpdateInfo {
+            name: "linux".to_string(),
+            current_version: "6.7.0-arch1-1".to_string(),
+            new_version: "6.7.1-arch1-1".to_string(),
+            download_size: 150_000_000,
+        }],
+        warnings: vec![],
+    };
+
+    let json = serde_json::to_string(&response).unwrap();
+    assert!(json.contains("\"name\":\"linux\""));
+    assert!(json.contains("\"current_version\":\"6.7.0-arch1-1\""));
+    assert!(json.contains("\"new_version\":\"6.7.1-arch1-1\""));
+}
+
+#[test]
+fn test_package_details_serialization() {
+    let details = PackageDetails {
+        name: "linux".to_string(),
+        version: "6.7.0-arch1-1".to_string(),
+        description: Some("The Linux kernel".to_string()),
+        url: Some("https://kernel.org/".to_string()),
+        licenses: vec!["GPL-2.0-only".to_string()],
+        groups: vec![],
+        provides: vec!["WIREGUARD-MODULE".to_string()],
+        depends: vec!["coreutils".to_string(), "kmod".to_string()],
+        optdepends: vec![],
+        conflicts: vec![],
+        replaces: vec![],
+        installed_size: 150_000_000,
+        packager: Some("Arch Linux".to_string()),
+        architecture: Some("x86_64".to_string()),
+        build_date: 1704067200,
+        install_date: Some(1704067200),
+        reason: "explicit".to_string(),
+        validation: vec!["pgp".to_string()],
+        repository: Some("core".to_string()),
+    };
+
+    let json = serde_json::to_string(&details).unwrap();
+    assert!(json.contains("\"licenses\":[\"GPL-2.0-only\"]"));
+    assert!(json.contains("\"depends\":[\"coreutils\",\"kmod\"]"));
+    assert!(json.contains("\"architecture\":\"x86_64\""));
+}
+
+#[test]
+fn test_search_result_serialization() {
+    let result = SearchResult {
+        name: "linux".to_string(),
+        version: "6.7.1-arch1-1".to_string(),
+        description: Some("The Linux kernel".to_string()),
+        repository: "core".to_string(),
+        installed: true,
+        installed_version: Some("6.7.0-arch1-1".to_string()),
+    };
+
+    let json = serde_json::to_string(&result).unwrap();
+    assert!(json.contains("\"repository\":\"core\""));
+}
+
+#[test]
+fn test_package_null_fields() {
+    let pkg = Package {
+        name: "test".to_string(),
+        version: "1.0".to_string(),
+        description: None,
+        installed_size: 1000,
+        install_date: None,
+        reason: "dependency".to_string(),
+        repository: None,
+    };
+
+    let json = serde_json::to_string(&pkg).unwrap();
+    assert!(json.contains("\"description\":null"));
+    assert!(json.contains("\"install_date\":null"));
+    assert!(json.contains("\"repository\":null"));
+}
+
+// --- Validation tests ---
+
+#[test]
+fn test_validate_package_name_valid() {
+    assert!(validate_package_name("linux").is_ok());
+    assert!(validate_package_name("python-pip").is_ok());
+    assert!(validate_package_name("lib32-gcc-libs").is_ok());
+    assert!(validate_package_name("r").is_ok());
+    assert!(validate_package_name("gtk4").is_ok());
+    assert!(validate_package_name("xorg-server").is_ok());
+}
+
+#[test]
+fn test_validate_package_name_invalid() {
+    assert!(validate_package_name("").is_err());
+    assert!(validate_package_name("Linux").is_err()); // uppercase
+    assert!(validate_package_name("foo bar").is_err()); // space
+    assert!(validate_package_name("foo;bar").is_err()); // semicolon
+    assert!(validate_package_name("foo/bar").is_err()); // slash
+    assert!(validate_package_name(&"a".repeat(300)).is_err()); // too long
+}
+
+#[test]
+fn test_validate_search_query_valid() {
+    assert!(validate_search_query("linux").is_ok());
+    assert!(validate_search_query("Python HTTP").is_ok()); // mixed case ok for search
+    assert!(validate_search_query("lib").is_ok());
+}
+
+#[test]
+fn test_validate_search_query_invalid() {
+    assert!(validate_search_query("").is_err());
+    assert!(validate_search_query(&"a".repeat(300)).is_err());
+    assert!(validate_search_query("foo\x00bar").is_err()); // null byte
+    assert!(validate_search_query("foo\nbar").is_err()); // newline
+}
+
+#[test]
+fn test_validate_pagination_valid() {
+    assert!(validate_pagination(0, 50).is_ok());
+    assert!(validate_pagination(100, 100).is_ok());
+    assert!(validate_pagination(0, 1000).is_ok());
+    assert!(validate_pagination(1_000_000, 1).is_ok());
+}
+
+#[test]
+fn test_validate_pagination_invalid() {
+    assert!(validate_pagination(0, 0).is_err()); // zero limit
+    assert!(validate_pagination(0, 1001).is_err()); // limit too high
+    assert!(validate_pagination(2_000_000, 50).is_err()); // offset too high
+}
