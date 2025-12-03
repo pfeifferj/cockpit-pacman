@@ -1,0 +1,19 @@
+{
+  "version": 0,
+  "require": {
+    "cockpit": "300"
+  },
+  "menu": {
+    "pacman": {
+      "label": "Pacman",
+      "path": "index.html",
+      "order": 50
+    }
+  },
+  "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'",
+  "conditions": [
+    {
+      "path-exists": "/usr/bin/pacman"
+    }
+  ]
+}
