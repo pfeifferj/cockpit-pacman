@@ -27,11 +27,14 @@ import {
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
   UpdateInfo,
+  SyncPackageDetails,
   checkUpdates,
   runUpgrade,
   syncDatabase,
+  getSyncPackageInfo,
   formatSize,
 } from "../api";
+import { PackageDetailsModal } from "./PackageDetailsModal";
 
 type ViewState =
   | "loading"
@@ -49,6 +52,8 @@ export const UpdatesView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const cancelRef = useRef<(() => void) | null>(null);
+  const [selectedPackage, setSelectedPackage] = useState<SyncPackageDetails | null>(null);
+  const [packageLoading, setPackageLoading] = useState(false);
 
   const loadUpdates = useCallback(async () => {
     setState("checking");
@@ -116,6 +121,22 @@ export const UpdatesView: React.FC = () => {
       setState("available");
       setLog("");
     }
+  };
+
+  const handlePackageClick = async (pkgName: string) => {
+    setPackageLoading(true);
+    try {
+      const details = await getSyncPackageInfo(pkgName);
+      setSelectedPackage(details);
+    } catch (ex) {
+      console.error("Failed to load package details:", ex);
+    } finally {
+      setPackageLoading(false);
+    }
+  };
+
+  const handleCloseModal = () => {
+    setSelectedPackage(null);
   };
 
   const totalDownloadSize = updates.reduce((sum, u) => sum + u.download_size, 0);
@@ -301,7 +322,11 @@ export const UpdatesView: React.FC = () => {
           </Thead>
           <Tbody>
             {updates.map((update) => (
-              <Tr key={update.name}>
+              <Tr
+                key={update.name}
+                isClickable
+                onRowClick={() => handlePackageClick(update.name)}
+              >
                 <Td dataLabel="Package">{update.name}</Td>
                 <Td dataLabel="Current Version">{update.current_version}</Td>
                 <Td dataLabel="New Version">{update.new_version}</Td>
@@ -311,6 +336,12 @@ export const UpdatesView: React.FC = () => {
           </Tbody>
         </Table>
       </CardBody>
+
+      <PackageDetailsModal
+        packageDetails={selectedPackage}
+        isLoading={packageLoading}
+        onClose={handleCloseModal}
+      />
     </Card>
   );
 };

@@ -88,6 +88,21 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
             </DescriptionListGroup>
           )}
 
+          {packageDetails.repository && ["core", "extra", "multilib"].includes(packageDetails.repository) && (
+            <DescriptionListGroup>
+              <DescriptionListTerm>Package Source</DescriptionListTerm>
+              <DescriptionListDescription>
+                <a
+                  href={`https://gitlab.archlinux.org/archlinux/packaging/packages/${packageDetails.name}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  View on Arch GitLab
+                </a>
+              </DescriptionListDescription>
+            </DescriptionListGroup>
+          )}
+
           {!isInstalled && "download_size" in packageDetails && (
             <DescriptionListGroup>
               <DescriptionListTerm>Download Size</DescriptionListTerm>
