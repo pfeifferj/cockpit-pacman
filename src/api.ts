@@ -202,27 +202,131 @@ export async function getSyncPackageInfo(name: string, repo?: string): Promise<S
   return runBackend<SyncPackageDetails>("sync-package-info", args);
 }
 
+// Stream event types from backend
+export interface StreamEventLog {
+  type: "log";
+  level: string;
+  message: string;
+}
+
+export interface StreamEventProgress {
+  type: "progress";
+  operation: string;
+  package: string;
+  percent: number;
+  current: number;
+  total: number;
+}
+
+export interface StreamEventDownload {
+  type: "download";
+  filename: string;
+  event: string;
+  downloaded?: number;
+  total?: number;
+}
+
+export interface StreamEventEvent {
+  type: "event";
+  event: string;
+  package?: string;
+}
+
+export interface StreamEventComplete {
+  type: "complete";
+  success: boolean;
+  message?: string;
+}
+
+export type StreamEvent =
+  | StreamEventLog
+  | StreamEventProgress
+  | StreamEventDownload
+  | StreamEventEvent
+  | StreamEventComplete;
+
 export interface UpgradeCallbacks {
-  onData: (data: string) => void;
+  onEvent?: (event: StreamEvent) => void;
+  onData?: (data: string) => void;
   onComplete: () => void;
   onError: (error: string) => void;
 }
 
-export function runUpgrade(callbacks: UpgradeCallbacks): { cancel: () => void } {
-  let output = "";
+function runStreamingBackend(
+  command: string,
+  args: string[],
+  callbacks: UpgradeCallbacks
+): { cancel: () => void } {
+  let buffer = "";
   const proc = cockpit.spawn(
-    ["pacman", "-Syu", "--noconfirm"],
+    [BACKEND_PATH, command, ...args],
     { superuser: "require", err: "out" }
   );
 
   proc.stream((data) => {
-    output += data;
-    callbacks.onData(data);
+    buffer += data;
+    // Process complete JSON lines
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line) as StreamEvent;
+        callbacks.onEvent?.(event);
+
+        // Also provide raw data callback for backward compatibility
+        if (event.type === "log") {
+          callbacks.onData?.(`[${event.level}] ${event.message}\n`);
+        } else if (event.type === "progress") {
+          callbacks.onData?.(`[${event.operation}] ${event.package} ${event.percent}%\n`);
+        } else if (event.type === "download") {
+          if (event.event === "progress" && event.downloaded && event.total) {
+            const pct = Math.round((event.downloaded / event.total) * 100);
+            callbacks.onData?.(`Downloading ${event.filename}: ${pct}%\n`);
+          } else if (event.event === "completed") {
+            callbacks.onData?.(`Downloaded ${event.filename}\n`);
+          }
+        } else if (event.type === "event") {
+          callbacks.onData?.(`${event.event}${event.package ? `: ${event.package}` : ""}\n`);
+        } else if (event.type === "complete") {
+          if (event.success) {
+            callbacks.onComplete();
+          } else {
+            callbacks.onError(event.message || "Operation failed");
+          }
+        }
+      } catch {
+        // Not valid JSON, treat as raw output
+        callbacks.onData?.(line + "\n");
+      }
+    }
   });
-  proc.then(() => callbacks.onComplete());
+
+  proc.then(() => {
+    // Process any remaining buffer
+    if (buffer.trim()) {
+      try {
+        const event = JSON.parse(buffer) as StreamEvent;
+        if (event.type === "complete") {
+          if (event.success) {
+            callbacks.onComplete();
+          } else {
+            callbacks.onError(event.message || "Operation failed");
+          }
+          return;
+        }
+      } catch {
+        // Ignore
+      }
+    }
+    // If no complete event was received, assume success
+    callbacks.onComplete();
+  });
+
   proc.catch((ex: unknown) => {
     const errObj = ex as { message?: string; exit_status?: number };
-    const message = errObj.message || output.trim() || `pacman -Syu failed (exit ${errObj.exit_status ?? "unknown"})`;
+    const message = errObj.message || `Operation failed (exit ${errObj.exit_status ?? "unknown"})`;
     callbacks.onError(message);
   });
 
@@ -231,27 +335,12 @@ export function runUpgrade(callbacks: UpgradeCallbacks): { cancel: () => void } 
   };
 }
 
+export function runUpgrade(callbacks: UpgradeCallbacks): { cancel: () => void } {
+  return runStreamingBackend("upgrade", [], callbacks);
+}
+
 export function syncDatabase(callbacks: UpgradeCallbacks): { cancel: () => void } {
-  let output = "";
-  const proc = cockpit.spawn(
-    ["pacman", "-Sy"],
-    { superuser: "require", err: "out" }
-  );
-
-  proc.stream((data) => {
-    output += data;
-    callbacks.onData(data);
-  });
-  proc.then(() => callbacks.onComplete());
-  proc.catch((ex: unknown) => {
-    const errObj = ex as { message?: string; exit_status?: number };
-    const message = errObj.message || output.trim() || `pacman -Sy failed (exit ${errObj.exit_status ?? "unknown"})`;
-    callbacks.onError(message);
-  });
-
-  return {
-    cancel: () => proc.close("cancelled"),
-  };
+  return runStreamingBackend("sync-database", ["true"], callbacks);
 }
 
 export function formatSize(bytes: number): string {
