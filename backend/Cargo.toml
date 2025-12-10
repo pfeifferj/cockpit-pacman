@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-alpm = "4"
-alpm-utils = "4"
+alpm = "5"
+alpm-utils = "5"
 pacmanconf = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

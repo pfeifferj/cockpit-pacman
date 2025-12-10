@@ -1,9 +1,10 @@
-use alpm::Alpm;
+use alpm::{Alpm, AnyDownloadEvent, AnyEvent, AnyQuestion, DownloadEvent, Event, LogLevel, PackageOperation, Progress, Question, TransFlag};
 use alpm_utils::{alpm_with_conf, DbListExt};
 use anyhow::{Context, Result};
 use pacmanconf::Config;
 use serde::Serialize;
 use std::env;
+use std::io::{self, Write};
 
 #[cfg(test)]
 mod tests;
@@ -79,6 +80,62 @@ struct SearchResult {
 fn get_handle() -> Result<Alpm> {
     let conf = Config::new().context("Failed to parse pacman.conf")?;
     alpm_with_conf(&conf).context("Failed to initialize alpm handle")
+}
+
+fn get_handle_mut() -> Result<Alpm> {
+    let conf = Config::new().context("Failed to parse pacman.conf")?;
+    alpm_with_conf(&conf).context("Failed to initialize alpm handle")
+}
+
+// Streaming event types for real-time progress updates
+#[derive(Serialize)]
+#[serde(tag = "type")]
+enum StreamEvent {
+    #[serde(rename = "log")]
+    Log { level: String, message: String },
+    #[serde(rename = "progress")]
+    Progress {
+        operation: String,
+        package: String,
+        percent: i32,
+        current: usize,
+        total: usize,
+    },
+    #[serde(rename = "download")]
+    Download {
+        filename: String,
+        event: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        downloaded: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        total: Option<i64>,
+    },
+    #[serde(rename = "event")]
+    Event { event: String, package: Option<String> },
+    #[serde(rename = "complete")]
+    Complete { success: bool, message: Option<String> },
+}
+
+fn emit_event(event: &StreamEvent) {
+    if let Ok(json) = serde_json::to_string(event) {
+        println!("{}", json);
+        let _ = io::stdout().flush();
+    }
+}
+
+fn progress_to_string(progress: Progress) -> &'static str {
+    match progress {
+        Progress::AddStart => "add_start",
+        Progress::UpgradeStart => "upgrade_start",
+        Progress::DowngradeStart => "downgrade_start",
+        Progress::ReinstallStart => "reinstall_start",
+        Progress::RemoveStart => "remove_start",
+        Progress::ConflictsStart => "conflicts_start",
+        Progress::DiskspaceStart => "diskspace_start",
+        Progress::IntegrityStart => "integrity_start",
+        Progress::LoadStart => "load_start",
+        Progress::KeyringStart => "keyring_start",
+    }
 }
 
 fn validate_package_name(name: &str) -> Result<()> {
@@ -262,6 +319,205 @@ fn check_updates() -> Result<()> {
         warnings: Vec::new(),
     };
     println!("{}", serde_json::to_string(&response)?);
+    Ok(())
+}
+
+fn sync_database(force: bool) -> Result<()> {
+    let mut handle = get_handle_mut()?;
+
+    // Set up callbacks for progress reporting
+    handle.set_log_cb((), |level: LogLevel, msg: &str, _: &mut ()| {
+        let level_str = match level {
+            LogLevel::ERROR => "error",
+            LogLevel::WARNING => "warning",
+            LogLevel::DEBUG => "debug",
+            LogLevel::FUNCTION => "function",
+            _ => "info",
+        };
+        emit_event(&StreamEvent::Log {
+            level: level_str.to_string(),
+            message: msg.trim().to_string(),
+        });
+    });
+
+    handle.set_dl_cb((), |filename: &str, event: AnyDownloadEvent, _: &mut ()| {
+        let (event_str, downloaded, total): (&str, Option<i64>, Option<i64>) = match event.event() {
+            DownloadEvent::Init(_) => ("init", None, None),
+            DownloadEvent::Progress(p) => ("progress", Some(p.downloaded), Some(p.total)),
+            DownloadEvent::Retry(_) => ("retry", None, None),
+            DownloadEvent::Completed(c) => ("completed", None, Some(c.total)),
+        };
+        emit_event(&StreamEvent::Download {
+            filename: filename.to_string(),
+            event: event_str.to_string(),
+            downloaded,
+            total,
+        });
+    });
+
+    // Update all sync databases
+    let result = handle.syncdbs_mut().update(force);
+
+    match result {
+        Ok(_) => {
+            emit_event(&StreamEvent::Complete {
+                success: true,
+                message: None,
+            });
+            Ok(())
+        }
+        Err(e) => {
+            emit_event(&StreamEvent::Complete {
+                success: false,
+                message: Some(e.to_string()),
+            });
+            Err(e.into())
+        }
+    }
+}
+
+fn run_upgrade() -> Result<()> {
+    let mut handle = get_handle_mut()?;
+
+    // Set up callbacks for progress reporting
+    handle.set_log_cb((), |level: LogLevel, msg: &str, _: &mut ()| {
+        let level_str = match level {
+            LogLevel::ERROR => "error",
+            LogLevel::WARNING => "warning",
+            LogLevel::DEBUG => "debug",
+            LogLevel::FUNCTION => "function",
+            _ => "info",
+        };
+        emit_event(&StreamEvent::Log {
+            level: level_str.to_string(),
+            message: msg.trim().to_string(),
+        });
+    });
+
+    handle.set_dl_cb((), |filename: &str, event: AnyDownloadEvent, _: &mut ()| {
+        let (event_str, downloaded, total): (&str, Option<i64>, Option<i64>) = match event.event() {
+            DownloadEvent::Init(_) => ("init", None, None),
+            DownloadEvent::Progress(p) => ("progress", Some(p.downloaded), Some(p.total)),
+            DownloadEvent::Retry(_) => ("retry", None, None),
+            DownloadEvent::Completed(c) => ("completed", None, Some(c.total)),
+        };
+        emit_event(&StreamEvent::Download {
+            filename: filename.to_string(),
+            event: event_str.to_string(),
+            downloaded,
+            total,
+        });
+    });
+
+    handle.set_progress_cb(
+        (),
+        |progress: Progress, pkgname: &str, percent: i32, howmany: usize, current: usize, _: &mut ()| {
+            emit_event(&StreamEvent::Progress {
+                operation: progress_to_string(progress).to_string(),
+                package: pkgname.to_string(),
+                percent,
+                current,
+                total: howmany,
+            });
+        },
+    );
+
+    handle.set_event_cb((), |event: AnyEvent, _: &mut ()| {
+        let (event_str, pkg_name) = match event.event() {
+            Event::PackageOperationStart(op) | Event::PackageOperationDone(op) => {
+                let (op_name, pkg_name) = match op.operation() {
+                    PackageOperation::Install(pkg) => ("install", pkg.name().to_string()),
+                    PackageOperation::Upgrade(old, _new) => ("upgrade", old.name().to_string()),
+                    PackageOperation::Reinstall(pkg, _) => ("reinstall", pkg.name().to_string()),
+                    PackageOperation::Downgrade(old, _new) => ("downgrade", old.name().to_string()),
+                    PackageOperation::Remove(pkg) => ("remove", pkg.name().to_string()),
+                };
+                (op_name.to_string(), Some(pkg_name))
+            }
+            Event::ScriptletInfo(info) => ("scriptlet".to_string(), Some(info.line().to_string())),
+            Event::DatabaseMissing(db) => ("db_missing".to_string(), Some(db.dbname().to_string())),
+            Event::RetrieveStart => ("retrieve_start".to_string(), None),
+            Event::RetrieveDone => ("retrieve_done".to_string(), None),
+            Event::RetrieveFailed => ("retrieve_failed".to_string(), None),
+            Event::TransactionStart => ("transaction_start".to_string(), None),
+            Event::TransactionDone => ("transaction_done".to_string(), None),
+            Event::HookStart(_) => ("hook_start".to_string(), None),
+            Event::HookDone(_) => ("hook_done".to_string(), None),
+            Event::HookRunStart(h) => ("hook_run_start".to_string(), Some(h.name().to_string())),
+            Event::HookRunDone(h) => ("hook_run_done".to_string(), Some(h.name().to_string())),
+            _ => ("other".to_string(), None),
+        };
+        emit_event(&StreamEvent::Event {
+            event: event_str,
+            package: pkg_name,
+        });
+    });
+
+    // Auto-approve questions (like --noconfirm)
+    handle.set_question_cb((), |mut question: AnyQuestion, _: &mut ()| {
+        match question.question() {
+            Question::Conflict(_) => question.set_answer(true),
+            Question::Corrupted(_) => question.set_answer(false), // Don't install corrupted packages
+            Question::RemovePkgs(_) => question.set_answer(true),
+            Question::Replace(_) => question.set_answer(true),
+            Question::InstallIgnorepkg(_) => question.set_answer(false),
+            Question::SelectProvider(mut q) => q.set_index(0), // Use first provider
+            Question::ImportKey(_) => question.set_answer(true),
+        }
+    });
+
+    // Initialize transaction
+    handle
+        .trans_init(TransFlag::NONE)
+        .context("Failed to initialize transaction")?;
+
+    // Mark packages for system upgrade
+    handle
+        .sync_sysupgrade(false)
+        .context("Failed to prepare system upgrade")?;
+
+    // Prepare the transaction (resolve dependencies)
+    // Convert error to string immediately to release the borrow
+    let prepare_err: Option<String> = handle.trans_prepare().err().map(|e| e.to_string());
+    if let Some(err_msg) = prepare_err {
+        let _ = handle.trans_release();
+        emit_event(&StreamEvent::Complete {
+            success: false,
+            message: Some(format!("Failed to prepare transaction: {}", err_msg)),
+        });
+        return Err(anyhow::anyhow!("Failed to prepare transaction: {}", err_msg));
+    }
+
+    // Check if there's anything to do
+    if handle.trans_add().is_empty() && handle.trans_remove().is_empty() {
+        let _ = handle.trans_release();
+        emit_event(&StreamEvent::Complete {
+            success: true,
+            message: Some("System is up to date".to_string()),
+        });
+        return Ok(());
+    }
+
+    // Commit the transaction
+    // Convert error to string immediately to release the borrow
+    let commit_err: Option<String> = handle.trans_commit().err().map(|e| e.to_string());
+    if let Some(err_msg) = commit_err {
+        let _ = handle.trans_release();
+        emit_event(&StreamEvent::Complete {
+            success: false,
+            message: Some(format!("Failed to commit transaction: {}", err_msg)),
+        });
+        return Err(anyhow::anyhow!("Failed to commit transaction: {}", err_msg));
+    }
+
+    // Release the transaction
+    let _ = handle.trans_release();
+
+    emit_event(&StreamEvent::Complete {
+        success: true,
+        message: None,
+    });
+
     Ok(())
 }
 
@@ -458,6 +714,9 @@ fn print_usage() {
     eprintln!("                         filter: all|explicit|dependency");
     eprintln!("                         repo: all|core|extra|multilib|local|...");
     eprintln!("  check-updates          Check for available updates");
+    eprintln!("  sync-database [force]  Sync package databases (requires root)");
+    eprintln!("                         force: true|false (default: true)");
+    eprintln!("  upgrade                Perform system upgrade (requires root)");
     eprintln!("  local-package-info NAME");
     eprintln!("                         Get detailed info for an installed package");
     eprintln!("  sync-package-info NAME [REPO]");
@@ -486,6 +745,11 @@ fn main() {
                 .and_then(|_| list_installed(offset, limit, search, filter, repo_filter))
         }
         "check-updates" => check_updates(),
+        "sync-database" => {
+            let force = args.get(2).map(|s| s == "true").unwrap_or(true);
+            sync_database(force)
+        }
+        "upgrade" => run_upgrade(),
         "local-package-info" => {
             if args.len() < 3 {
                 eprintln!("Error: local-package-info requires a package name");
