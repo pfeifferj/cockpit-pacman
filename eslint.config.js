@@ -27,6 +27,7 @@ export default [
         cockpit: "readonly",
         MutationObserver: "readonly",
         MouseEvent: "readonly",
+        HTMLDivElement: "readonly",
       },
     },
     plugins: {
