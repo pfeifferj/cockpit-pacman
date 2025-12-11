@@ -42,6 +42,8 @@ struct UpdateInfo {
     current_version: String,
     new_version: String,
     download_size: i64,
+    current_size: i64,
+    new_size: i64,
     repository: String,
 }
 
@@ -390,6 +392,8 @@ fn check_updates() -> Result<()> {
                         current_version: pkg.version().to_string(),
                         new_version: syncpkg.version().to_string(),
                         download_size: syncpkg.download_size(),
+                        current_size: pkg.isize(),
+                        new_size: syncpkg.isize(),
                         repository: syncdb.name().to_string(),
                     });
                 }

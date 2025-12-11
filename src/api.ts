@@ -53,6 +53,8 @@ export interface UpdateInfo {
   current_version: string;
   new_version: string;
   download_size: number;
+  current_size: number;
+  new_size: number;
   repository: string;
 }
 
