@@ -105,8 +105,8 @@ export const UpdatesView: React.FC = () => {
     return result;
   }, [updates, searchFilter, repoFilter]);
 
-  // Column indices: 0=name, 1=repository, 2=current_version, 3=new_version, 4=download_size
-  const sortableColumns = [0, 1, 4]; // name, repository, download_size
+  // Column indices: 0=name, 1=repository, 2=current_version, 3=new_version, 4=current_size, 5=new_size, 6=net_size, 7=download_size
+  const sortableColumns = [0, 1, 4, 5, 6, 7]; // name, repository, sizes
 
   const getSortParams = (columnIndex: number): ThProps["sort"] | undefined => {
     if (!sortableColumns.includes(columnIndex)) return undefined;
@@ -136,7 +136,16 @@ export const UpdatesView: React.FC = () => {
         case 1: // repository
           comparison = a.repository.localeCompare(b.repository);
           break;
-        case 4: // download_size
+        case 4: // current_size
+          comparison = a.current_size - b.current_size;
+          break;
+        case 5: // new_size
+          comparison = a.new_size - b.new_size;
+          break;
+        case 6: // net_size (new - current)
+          comparison = (a.new_size - a.current_size) - (b.new_size - b.current_size);
+          break;
+        case 7: // download_size
           comparison = a.download_size - b.download_size;
           break;
         default:
@@ -277,6 +286,9 @@ export const UpdatesView: React.FC = () => {
   };
 
   const totalDownloadSize = updates.reduce((sum, u) => sum + u.download_size, 0);
+  const totalCurrentSize = updates.reduce((sum, u) => sum + u.current_size, 0);
+  const totalNewSize = updates.reduce((sum, u) => sum + u.new_size, 0);
+  const totalNetSize = totalNewSize - totalCurrentSize;
 
   if (state === "loading" || state === "checking") {
     return (
@@ -426,15 +438,40 @@ export const UpdatesView: React.FC = () => {
             </ul>
           </Alert>
         )}
-        <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsCenter" }}>
+        <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
           <FlexItem>
-            <CardTitle style={{ margin: 0 }}>
+            <CardTitle style={{ margin: 0, marginBottom: "1rem" }}>
               {updates.length} update{updates.length !== 1 ? "s" : ""} available
               {filteredUpdates.length !== updates.length && ` (${filteredUpdates.length} shown)`}
             </CardTitle>
-            <span style={{ color: "var(--pf-v5-global--Color--200)" }}>
-              Total download: {formatSize(totalDownloadSize)}
-            </span>
+            <Flex spaceItems={{ default: "spaceItemsLg" }}>
+              <FlexItem>
+                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-v5-global--BackgroundColor--200)", borderRadius: "6px" }}>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600 }}>{formatSize(totalCurrentSize)}</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--pf-v5-global--Color--200)", textTransform: "uppercase" }}>Current</div>
+                </div>
+              </FlexItem>
+              <FlexItem>
+                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-v5-global--BackgroundColor--200)", borderRadius: "6px" }}>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600 }}>{formatSize(totalNewSize)}</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--pf-v5-global--Color--200)", textTransform: "uppercase" }}>New</div>
+                </div>
+              </FlexItem>
+              <FlexItem>
+                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-v5-global--BackgroundColor--200)", borderRadius: "6px" }}>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: totalNetSize > 0 ? "var(--pf-v5-global--danger-color--100)" : totalNetSize < 0 ? "var(--pf-v5-global--success-color--100)" : undefined }}>
+                    {totalNetSize >= 0 ? "+" : "-"}{formatSize(Math.abs(totalNetSize))}
+                  </div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--pf-v5-global--Color--200)", textTransform: "uppercase" }}>Net Change</div>
+                </div>
+              </FlexItem>
+              <FlexItem>
+                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-v5-global--BackgroundColor--200)", borderRadius: "6px" }}>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-v5-global--info-color--100)" }}>{formatSize(totalDownloadSize)}</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--pf-v5-global--Color--200)", textTransform: "uppercase" }}>Download</div>
+                </div>
+              </FlexItem>
+            </Flex>
           </FlexItem>
           <FlexItem>
             <Button
@@ -507,29 +544,40 @@ export const UpdatesView: React.FC = () => {
               <Th sort={getSortParams(1)}>Repository</Th>
               <Th>Current Version</Th>
               <Th>New Version</Th>
-              <Th sort={getSortParams(4)}>Download Size</Th>
+              <Th sort={getSortParams(4)}>Current Size</Th>
+              <Th sort={getSortParams(5)}>New Size</Th>
+              <Th sort={getSortParams(6)}>Net</Th>
+              <Th sort={getSortParams(7)}>Download</Th>
             </Tr>
           </Thead>
           <Tbody>
-            {sortedUpdates.map((update) => (
-              <Tr
-                key={update.name}
-                isClickable
-                onRowClick={() => handlePackageClick(update.name)}
-              >
-                <Td dataLabel="Package">
-                  <Button variant="link" isInline style={{ padding: 0 }}>
-                    {update.name}
-                  </Button>
-                </Td>
-                <Td dataLabel="Repository">
-                  <Label color="blue">{update.repository}</Label>
-                </Td>
-                <Td dataLabel="Current Version">{update.current_version}</Td>
-                <Td dataLabel="New Version">{update.new_version}</Td>
-                <Td dataLabel="Download Size">{formatSize(update.download_size)}</Td>
-              </Tr>
-            ))}
+            {sortedUpdates.map((update) => {
+              const netSize = update.new_size - update.current_size;
+              return (
+                <Tr
+                  key={update.name}
+                  isClickable
+                  onRowClick={() => handlePackageClick(update.name)}
+                >
+                  <Td dataLabel="Package">
+                    <Button variant="link" isInline style={{ padding: 0 }}>
+                      {update.name}
+                    </Button>
+                  </Td>
+                  <Td dataLabel="Repository">
+                    <Label color="blue">{update.repository}</Label>
+                  </Td>
+                  <Td dataLabel="Current Version">{update.current_version}</Td>
+                  <Td dataLabel="New Version">{update.new_version}</Td>
+                  <Td dataLabel="Current Size">{formatSize(update.current_size)}</Td>
+                  <Td dataLabel="New Size">{formatSize(update.new_size)}</Td>
+                  <Td dataLabel="Net" style={{ color: netSize > 0 ? "var(--pf-v5-global--danger-color--100)" : netSize < 0 ? "var(--pf-v5-global--success-color--100)" : undefined }}>
+                    {netSize >= 0 ? "+" : ""}{formatSize(Math.abs(netSize))}
+                  </Td>
+                  <Td dataLabel="Download">{formatSize(update.download_size)}</Td>
+                </Tr>
+              );
+            })}
           </Tbody>
         </Table>
       </CardBody>
