@@ -17,8 +17,9 @@ import {
   Select,
   SelectOption,
   SelectList,
+  Button,
 } from "@patternfly/react-core";
-import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
+import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
 import {
   Package,
   PackageDetails,
@@ -57,6 +58,8 @@ export const PackageList: React.FC = () => {
   const [repositories, setRepositories] = useState<string[]>([]);
   const [repoFilter, setRepoFilter] = useState("all");
   const [repoSelectOpen, setRepoSelectOpen] = useState(false);
+  const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
+  const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Debounced auto-search when input changes
@@ -153,6 +156,46 @@ export const PackageList: React.FC = () => {
     setPerPage(newPerPage);
     setPage(1);
   };
+
+  // Column indices: 0=name, 1=version, 2=description, 3=size, 4=reason
+  const sortableColumns = [0, 3, 4]; // name, size, reason
+
+  const getSortParams = (columnIndex: number): ThProps["sort"] | undefined => {
+    if (!sortableColumns.includes(columnIndex)) return undefined;
+    return {
+      sortBy: {
+        index: activeSortIndex ?? undefined,
+        direction: activeSortDirection,
+      },
+      onSort: (_event, index, direction) => {
+        setActiveSortIndex(index);
+        setActiveSortDirection(direction);
+      },
+      columnIndex,
+    };
+  };
+
+  const sortedPackages = React.useMemo(() => {
+    if (activeSortIndex === null) return packages;
+
+    return [...packages].sort((a, b) => {
+      let comparison = 0;
+      switch (activeSortIndex) {
+        case 0: // name
+          comparison = a.name.localeCompare(b.name);
+          break;
+        case 3: // size
+          comparison = a.installed_size - b.installed_size;
+          break;
+        case 4: // reason
+          comparison = a.reason.localeCompare(b.reason);
+          break;
+        default:
+          return 0;
+      }
+      return activeSortDirection === "asc" ? comparison : -comparison;
+    });
+  }, [packages, activeSortIndex, activeSortDirection]);
 
   if (error && packages.length === 0) {
     return (
@@ -251,21 +294,25 @@ export const PackageList: React.FC = () => {
           <Table aria-label="Installed packages" variant="compact">
             <Thead>
               <Tr>
-                <Th>Name</Th>
+                <Th sort={getSortParams(0)}>Name</Th>
                 <Th>Version</Th>
                 <Th>Description</Th>
-                <Th>Size</Th>
-                <Th>Reason</Th>
+                <Th sort={getSortParams(3)}>Size</Th>
+                <Th sort={getSortParams(4)}>Reason</Th>
               </Tr>
             </Thead>
             <Tbody>
-              {packages.map((pkg) => (
+              {sortedPackages.map((pkg) => (
                 <Tr
                   key={pkg.name}
                   isClickable
                   onRowClick={() => handleRowClick(pkg.name)}
                 >
-                  <Td dataLabel="Name">{pkg.name}</Td>
+                  <Td dataLabel="Name">
+                    <Button variant="link" isInline style={{ padding: 0 }}>
+                      {pkg.name}
+                    </Button>
+                  </Td>
                   <Td dataLabel="Version">{pkg.version}</Td>
                   <Td dataLabel="Description">{pkg.description || "-"}</Td>
                   <Td dataLabel="Size">{formatSize(pkg.installed_size)}</Td>

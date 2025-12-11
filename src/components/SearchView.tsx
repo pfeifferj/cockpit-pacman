@@ -22,9 +22,10 @@ import {
   ToggleGroup,
   ToggleGroupItem,
   Badge,
+  Button,
 } from "@patternfly/react-core";
 import { SearchIcon } from "@patternfly/react-icons";
-import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
+import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
 import { SearchResult, SyncPackageDetails, searchPackages, getSyncPackageInfo, InstalledFilterType } from "../api";
 import { sanitizeSearchInput } from "../utils";
 import { PackageDetailsModal } from "./PackageDetailsModal";
@@ -54,6 +55,8 @@ export const SearchView: React.FC = () => {
   const [totalInstalled, setTotalInstalled] = useState(0);
   const [totalNotInstalled, setTotalNotInstalled] = useState(0);
   const [repositories, setRepositories] = useState<string[]>([]);
+  const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
+  const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
 
   const filteredResults = useMemo(() => {
     if (repoFilter === "all") return results;
@@ -149,6 +152,46 @@ export const SearchView: React.FC = () => {
       setDetailsLoading(false);
     }
   };
+
+  // Column indices: 0=name, 1=version, 2=description, 3=repository, 4=status
+  const sortableColumns = [0, 3, 4]; // name, repository, status
+
+  const getSortParams = (columnIndex: number): ThProps["sort"] | undefined => {
+    if (!sortableColumns.includes(columnIndex)) return undefined;
+    return {
+      sortBy: {
+        index: activeSortIndex ?? undefined,
+        direction: activeSortDirection,
+      },
+      onSort: (_event, index, direction) => {
+        setActiveSortIndex(index);
+        setActiveSortDirection(direction);
+      },
+      columnIndex,
+    };
+  };
+
+  const sortedResults = useMemo(() => {
+    if (activeSortIndex === null) return filteredResults;
+
+    return [...filteredResults].sort((a, b) => {
+      let comparison = 0;
+      switch (activeSortIndex) {
+        case 0: // name
+          comparison = a.name.localeCompare(b.name);
+          break;
+        case 3: // repository
+          comparison = a.repository.localeCompare(b.repository);
+          break;
+        case 4: // status (installed)
+          comparison = (a.installed ? 1 : 0) - (b.installed ? 1 : 0);
+          break;
+        default:
+          return 0;
+      }
+      return activeSortDirection === "asc" ? comparison : -comparison;
+    });
+  }, [filteredResults, activeSortIndex, activeSortDirection]);
 
   return (
     <Card>
@@ -275,21 +318,25 @@ export const SearchView: React.FC = () => {
             <Table aria-label="Search results" variant="compact">
               <Thead>
                 <Tr>
-                  <Th>Name</Th>
+                  <Th sort={getSortParams(0)}>Name</Th>
                   <Th>Version</Th>
                   <Th>Description</Th>
-                  <Th>Repository</Th>
-                  <Th>Status</Th>
+                  <Th sort={getSortParams(3)}>Repository</Th>
+                  <Th sort={getSortParams(4)}>Status</Th>
                 </Tr>
               </Thead>
               <Tbody>
-                {filteredResults.map((pkg: SearchResult) => (
+                {sortedResults.map((pkg: SearchResult) => (
                   <Tr
                     key={`${pkg.repository}/${pkg.name}`}
                     isClickable
                     onRowClick={() => handleRowClick(pkg.name, pkg.repository)}
                   >
-                    <Td dataLabel="Name">{pkg.name}</Td>
+                    <Td dataLabel="Name">
+                      <Button variant="link" isInline style={{ padding: 0 }}>
+                        {pkg.name}
+                      </Button>
+                    </Td>
                     <Td dataLabel="Version">{pkg.version}</Td>
                     <Td dataLabel="Description">{pkg.description || "-"}</Td>
                     <Td dataLabel="Repository">
