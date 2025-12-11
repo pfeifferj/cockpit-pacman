@@ -168,7 +168,7 @@ describe("getPackageInfo", () => {
     expect(mockSpawn).toHaveBeenCalledWith(
       [
         "/usr/libexec/cockpit-pacman/cockpit-pacman-backend",
-        "package-info",
+        "local-package-info",
         "linux",
       ],
       { superuser: "try", err: "message" }
