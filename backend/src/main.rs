@@ -42,6 +42,7 @@ struct UpdateInfo {
     current_version: String,
     new_version: String,
     download_size: i64,
+    repository: String,
 }
 
 #[derive(Serialize)]
@@ -114,6 +115,50 @@ enum StreamEvent {
     Event { event: String, package: Option<String> },
     #[serde(rename = "complete")]
     Complete { success: bool, message: Option<String> },
+}
+
+#[derive(Serialize, Clone)]
+struct KeyInfo {
+    fingerprint: String,
+    uid: String,
+}
+
+// Preflight check response types
+#[derive(Serialize)]
+struct PreflightResponse {
+    success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    conflicts: Vec<ConflictInfo>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    replacements: Vec<ReplacementInfo>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    removals: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    providers: Vec<ProviderChoice>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    import_keys: Vec<KeyInfo>,
+    packages_to_upgrade: usize,
+    total_download_size: i64,
+}
+
+#[derive(Serialize, Clone)]
+struct ConflictInfo {
+    package1: String,
+    package2: String,
+}
+
+#[derive(Serialize, Clone)]
+struct ReplacementInfo {
+    old_package: String,
+    new_package: String,
+}
+
+#[derive(Serialize, Clone)]
+struct ProviderChoice {
+    dependency: String,
+    providers: Vec<String>,
 }
 
 fn emit_event(event: &StreamEvent) {
@@ -302,14 +347,19 @@ fn check_updates() -> Result<()> {
     let mut updates: Vec<UpdateInfo> = Vec::new();
 
     for pkg in localdb.pkgs() {
-        if let Ok(syncpkg) = handle.syncdbs().pkg(pkg.name()) {
-            if syncpkg.version() > pkg.version() {
-                updates.push(UpdateInfo {
-                    name: pkg.name().to_string(),
-                    current_version: pkg.version().to_string(),
-                    new_version: syncpkg.version().to_string(),
-                    download_size: syncpkg.download_size(),
-                });
+        // Find the sync package and its repository
+        for syncdb in handle.syncdbs() {
+            if let Ok(syncpkg) = syncdb.pkg(pkg.name()) {
+                if syncpkg.version() > pkg.version() {
+                    updates.push(UpdateInfo {
+                        name: pkg.name().to_string(),
+                        current_version: pkg.version().to_string(),
+                        new_version: syncpkg.version().to_string(),
+                        download_size: syncpkg.download_size(),
+                        repository: syncdb.name().to_string(),
+                    });
+                }
+                break; // Found the package, no need to check other repos
             }
         }
     }
@@ -317,6 +367,170 @@ fn check_updates() -> Result<()> {
     let response = UpdatesResponse {
         updates,
         warnings: Vec::new(),
+    };
+    println!("{}", serde_json::to_string(&response)?);
+    Ok(())
+}
+
+fn preflight_upgrade() -> Result<()> {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let mut handle = get_handle_mut()?;
+
+    // Collected issues that need user confirmation
+    let conflicts: Rc<RefCell<Vec<ConflictInfo>>> = Rc::new(RefCell::new(Vec::new()));
+    let replacements: Rc<RefCell<Vec<ReplacementInfo>>> = Rc::new(RefCell::new(Vec::new()));
+    let removals: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+    let providers: Rc<RefCell<Vec<ProviderChoice>>> = Rc::new(RefCell::new(Vec::new()));
+    let import_keys: Rc<RefCell<Vec<KeyInfo>>> = Rc::new(RefCell::new(Vec::new()));
+
+    // Set up question callback to collect issues instead of answering
+    let conflicts_cb = Rc::clone(&conflicts);
+    let replacements_cb = Rc::clone(&replacements);
+    let removals_cb = Rc::clone(&removals);
+    let providers_cb = Rc::clone(&providers);
+    let import_keys_cb = Rc::clone(&import_keys);
+
+    handle.set_question_cb((), move |mut question: AnyQuestion, _: &mut ()| {
+        match question.question() {
+            Question::Conflict(q) => {
+                conflicts_cb.borrow_mut().push(ConflictInfo {
+                    package1: q.conflict().package1().name().to_string(),
+                    package2: q.conflict().package2().name().to_string(),
+                });
+                // Answer true to continue collecting more issues
+                question.set_answer(true);
+            }
+            Question::Corrupted(_) => {
+                // Never allow corrupted packages
+                question.set_answer(false);
+            }
+            Question::RemovePkgs(q) => {
+                let pkgs: Vec<String> = q.packages().iter().map(|p| p.name().to_string()).collect();
+                removals_cb.borrow_mut().extend(pkgs);
+                question.set_answer(true);
+            }
+            Question::Replace(q) => {
+                replacements_cb.borrow_mut().push(ReplacementInfo {
+                    old_package: q.oldpkg().name().to_string(),
+                    new_package: q.newpkg().name().to_string(),
+                });
+                question.set_answer(true);
+            }
+            Question::InstallIgnorepkg(_) => {
+                question.set_answer(false);
+            }
+            Question::SelectProvider(mut q) => {
+                let provider_list: Vec<String> = q.providers().iter().map(|p| p.name().to_string()).collect();
+                providers_cb.borrow_mut().push(ProviderChoice {
+                    dependency: q.depend().name().to_string(),
+                    providers: provider_list,
+                });
+                // Select first provider to continue (this is just for preflight)
+                q.set_index(0);
+            }
+            Question::ImportKey(q) => {
+                import_keys_cb.borrow_mut().push(KeyInfo {
+                    fingerprint: q.fingerprint().to_string(),
+                    uid: q.uid().to_string(),
+                });
+                // Answer true to continue collecting
+                question.set_answer(true);
+            }
+        }
+    });
+
+    // Initialize transaction
+    if let Err(e) = handle.trans_init(TransFlag::NONE) {
+        let response = PreflightResponse {
+            success: false,
+            error: Some(format!("Failed to initialize transaction: {}", e)),
+            conflicts: Vec::new(),
+            replacements: Vec::new(),
+            removals: Vec::new(),
+            providers: Vec::new(),
+            import_keys: Vec::new(),
+            packages_to_upgrade: 0,
+            total_download_size: 0,
+        };
+        println!("{}", serde_json::to_string(&response)?);
+        return Ok(());
+    }
+
+    // Mark packages for system upgrade
+    if let Err(e) = handle.sync_sysupgrade(false) {
+        let _ = handle.trans_release();
+        let response = PreflightResponse {
+            success: false,
+            error: Some(format!("Failed to prepare system upgrade: {}", e)),
+            conflicts: Vec::new(),
+            replacements: Vec::new(),
+            removals: Vec::new(),
+            providers: Vec::new(),
+            import_keys: Vec::new(),
+            packages_to_upgrade: 0,
+            total_download_size: 0,
+        };
+        println!("{}", serde_json::to_string(&response)?);
+        return Ok(());
+    }
+
+    // Prepare the transaction (this triggers question callbacks)
+    let prepare_success = handle.trans_prepare().is_ok();
+
+    // Get package counts before releasing
+    let packages_to_upgrade = handle.trans_add().len();
+    let total_download_size: i64 = handle.trans_add().iter().map(|p| p.download_size()).sum();
+
+    // Release the transaction (we're just doing preflight)
+    let _ = handle.trans_release();
+
+    // Check if prepare failed
+    if !prepare_success {
+        let response = PreflightResponse {
+            success: false,
+            error: Some("Failed to prepare transaction".to_string()),
+            conflicts: conflicts.borrow().clone(),
+            replacements: replacements.borrow().clone(),
+            removals: removals.borrow().clone(),
+            providers: providers.borrow().clone(),
+            import_keys: import_keys.borrow().clone(),
+            packages_to_upgrade: 0,
+            total_download_size: 0,
+        };
+        println!("{}", serde_json::to_string(&response)?);
+        return Ok(());
+    }
+
+    // Check if there's anything to do
+    if packages_to_upgrade == 0 {
+        let response = PreflightResponse {
+            success: true,
+            error: None,
+            conflicts: Vec::new(),
+            replacements: Vec::new(),
+            removals: Vec::new(),
+            providers: Vec::new(),
+            import_keys: Vec::new(),
+            packages_to_upgrade: 0,
+            total_download_size: 0,
+        };
+        println!("{}", serde_json::to_string(&response)?);
+        return Ok(());
+    }
+
+    // Return collected issues
+    let response = PreflightResponse {
+        success: true,
+        error: None,
+        conflicts: conflicts.borrow().clone(),
+        replacements: replacements.borrow().clone(),
+        removals: removals.borrow().clone(),
+        providers: providers.borrow().clone(),
+        import_keys: import_keys.borrow().clone(),
+        packages_to_upgrade,
+        total_download_size,
     };
     println!("{}", serde_json::to_string(&response)?);
     Ok(())
@@ -453,16 +667,74 @@ fn run_upgrade() -> Result<()> {
         });
     });
 
-    // Auto-approve questions (like --noconfirm)
+    // Handle questions - user has already confirmed via preflight check
+    // The frontend must call preflight-upgrade first and show the user what will happen
+    // before calling upgrade. This callback approves the pre-confirmed actions.
     handle.set_question_cb((), |mut question: AnyQuestion, _: &mut ()| {
         match question.question() {
-            Question::Conflict(_) => question.set_answer(true),
-            Question::Corrupted(_) => question.set_answer(false), // Don't install corrupted packages
-            Question::RemovePkgs(_) => question.set_answer(true),
-            Question::Replace(_) => question.set_answer(true),
-            Question::InstallIgnorepkg(_) => question.set_answer(false),
-            Question::SelectProvider(mut q) => q.set_index(0), // Use first provider
-            Question::ImportKey(_) => question.set_answer(true),
+            Question::Conflict(q) => {
+                // User confirmed conflicts in preflight modal
+                let pkg1 = q.conflict().package1().name().to_string();
+                let pkg2 = q.conflict().package2().name().to_string();
+                emit_event(&StreamEvent::Log {
+                    level: "info".to_string(),
+                    message: format!("Resolving conflict between {} and {}", pkg1, pkg2),
+                });
+                question.set_answer(true);
+            }
+            Question::Corrupted(q) => {
+                // NEVER install corrupted packages - this is not user-confirmable
+                let pkg_name = q.filepath().to_string();
+                emit_event(&StreamEvent::Log {
+                    level: "error".to_string(),
+                    message: format!("Package {} is corrupted - aborting", pkg_name),
+                });
+                question.set_answer(false);
+            }
+            Question::RemovePkgs(q) => {
+                // User confirmed removals in preflight modal
+                let pkgs: Vec<String> = q.packages().iter().map(|p| p.name().to_string()).collect();
+                emit_event(&StreamEvent::Log {
+                    level: "info".to_string(),
+                    message: format!("Removing packages as confirmed: {}", pkgs.join(", ")),
+                });
+                question.set_answer(true);
+            }
+            Question::Replace(q) => {
+                // User confirmed replacements in preflight modal
+                let old_pkg = q.oldpkg().name().to_string();
+                let new_pkg = q.newpkg().name().to_string();
+                emit_event(&StreamEvent::Log {
+                    level: "info".to_string(),
+                    message: format!("Replacing {} with {}", old_pkg, new_pkg),
+                });
+                question.set_answer(true);
+            }
+            Question::InstallIgnorepkg(_) => {
+                // Don't install ignored packages
+                question.set_answer(false);
+            }
+            Question::SelectProvider(mut q) => {
+                // For now, select first provider (user saw this in preflight)
+                // Future: could pass selected provider index from frontend
+                let providers: Vec<String> = q.providers().iter().map(|p| p.name().to_string()).collect();
+                let dep = q.depend().name().to_string();
+                emit_event(&StreamEvent::Log {
+                    level: "info".to_string(),
+                    message: format!("Selecting {} as provider for {}", providers.first().unwrap_or(&"unknown".to_string()), dep),
+                });
+                q.set_index(0);
+            }
+            Question::ImportKey(q) => {
+                // User confirmed key import in preflight modal
+                let fingerprint = q.fingerprint().to_string();
+                let uid = q.uid().to_string();
+                emit_event(&StreamEvent::Log {
+                    level: "info".to_string(),
+                    message: format!("Importing PGP key {} ({})", fingerprint, uid),
+                });
+                question.set_answer(true);
+            }
         }
     });
 
@@ -714,6 +986,8 @@ fn print_usage() {
     eprintln!("                         filter: all|explicit|dependency");
     eprintln!("                         repo: all|core|extra|multilib|local|...");
     eprintln!("  check-updates          Check for available updates");
+    eprintln!("  preflight-upgrade      Check what the upgrade will do (requires root)");
+    eprintln!("                         Returns conflicts, replacements, keys to import");
     eprintln!("  sync-database [force]  Sync package databases (requires root)");
     eprintln!("                         force: true|false (default: true)");
     eprintln!("  upgrade                Perform system upgrade (requires root)");
@@ -745,6 +1019,7 @@ fn main() {
                 .and_then(|_| list_installed(offset, limit, search, filter, repo_filter))
         }
         "check-updates" => check_updates(),
+        "preflight-upgrade" => preflight_upgrade(),
         "sync-database" => {
             let force = args.get(2).map(|s| s == "true").unwrap_or(true);
             sync_database(force)
