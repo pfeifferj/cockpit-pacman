@@ -72,6 +72,8 @@ describe("listInstalled", () => {
         "",
         "all",
         "all",
+        "",
+        "",
       ],
       { superuser: "try", err: "message" }
     );
@@ -90,6 +92,8 @@ describe("listInstalled", () => {
       search: "linux",
       filter: "explicit",
       repo: "core",
+      sortBy: "name",
+      sortDir: "desc",
     });
 
     expect(mockSpawn).toHaveBeenCalledWith(
@@ -101,6 +105,8 @@ describe("listInstalled", () => {
         "linux",
         "explicit",
         "core",
+        "name",
+        "desc",
       ],
       { superuser: "try", err: "message" }
     );
@@ -198,6 +204,8 @@ describe("searchPackages", () => {
         "0",
         "50",
         "all",
+        "",
+        "",
       ],
       { superuser: "try", err: "message" }
     );

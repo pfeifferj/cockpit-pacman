@@ -63,12 +63,30 @@ export const SearchView: React.FC = () => {
     return results.filter((r: SearchResult) => r.repository === repoFilter);
   }, [results, repoFilter]);
 
-  const fetchResults = async (query: string, pageNum: number, pageSize: number, installed: InstalledFilterType, updateRepos = false) => {
+  // Map column index to backend sort field
+  const getSortField = (index: number | null): string => {
+    if (index === null) return "";
+    switch (index) {
+      case 0: return "name";
+      case 3: return "repository";
+      case 4: return "status";
+      default: return "";
+    }
+  };
+
+  const fetchResults = async (query: string, pageNum: number, pageSize: number, installed: InstalledFilterType, updateRepos = false, sortIdx: number | null = null, sortDirection: "asc" | "desc" = "asc") => {
     setLoading(true);
     setError(null);
     try {
       const offset = (pageNum - 1) * pageSize;
-      const response = await searchPackages({ query, offset, limit: pageSize, installed });
+      const response = await searchPackages({
+        query,
+        offset,
+        limit: pageSize,
+        installed,
+        sortBy: getSortField(sortIdx),
+        sortDir: sortDirection,
+      });
       setResults(response.results);
       setTotal(response.total);
       setTotalInstalled(response.total_installed);
@@ -102,6 +120,7 @@ export const SearchView: React.FC = () => {
     setRepoFilter("all");
     setInstalledFilter("all");
     setPage(1);
+    setActiveSortIndex(null); // Reset sort on new search
     await fetchResults(query, 1, perPage, "all", true);
   };
 
@@ -116,12 +135,13 @@ export const SearchView: React.FC = () => {
     setPage(1);
     setTotal(0);
     setRepositories([]);
+    setActiveSortIndex(null);
   };
 
   const handleSetPage = (_event: React.MouseEvent | React.KeyboardEvent | MouseEvent, newPage: number) => {
     setPage(newPage);
     if (currentQuery) {
-      fetchResults(currentQuery, newPage, perPage, installedFilter);
+      fetchResults(currentQuery, newPage, perPage, installedFilter, false, activeSortIndex, activeSortDirection);
     }
   };
 
@@ -129,7 +149,7 @@ export const SearchView: React.FC = () => {
     setPerPage(newPerPage);
     setPage(1);
     if (currentQuery) {
-      fetchResults(currentQuery, 1, newPerPage, installedFilter);
+      fetchResults(currentQuery, 1, newPerPage, installedFilter, false, activeSortIndex, activeSortDirection);
     }
   };
 
@@ -137,7 +157,7 @@ export const SearchView: React.FC = () => {
     setInstalledFilter(value);
     setPage(1);
     if (currentQuery) {
-      fetchResults(currentQuery, 1, perPage, value);
+      fetchResults(currentQuery, 1, perPage, value, false, activeSortIndex, activeSortDirection);
     }
   };
 
@@ -162,36 +182,19 @@ export const SearchView: React.FC = () => {
       sortBy: {
         index: activeSortIndex ?? undefined,
         direction: activeSortDirection,
+        defaultDirection: "desc", // Start with Z-A since data is already A-Z
       },
       onSort: (_event, index, direction) => {
         setActiveSortIndex(index);
         setActiveSortDirection(direction);
+        setPage(1);
+        if (currentQuery) {
+          fetchResults(currentQuery, 1, perPage, installedFilter, false, index, direction);
+        }
       },
       columnIndex,
     };
   };
-
-  const sortedResults = useMemo(() => {
-    if (activeSortIndex === null) return filteredResults;
-
-    return [...filteredResults].sort((a, b) => {
-      let comparison = 0;
-      switch (activeSortIndex) {
-        case 0: // name
-          comparison = a.name.localeCompare(b.name);
-          break;
-        case 3: // repository
-          comparison = a.repository.localeCompare(b.repository);
-          break;
-        case 4: // status (installed)
-          comparison = (a.installed ? 1 : 0) - (b.installed ? 1 : 0);
-          break;
-        default:
-          return 0;
-      }
-      return activeSortDirection === "asc" ? comparison : -comparison;
-    });
-  }, [filteredResults, activeSortIndex, activeSortDirection]);
 
   return (
     <Card>
@@ -326,7 +329,7 @@ export const SearchView: React.FC = () => {
                 </Tr>
               </Thead>
               <Tbody>
-                {sortedResults.map((pkg: SearchResult) => (
+                {filteredResults.map((pkg: SearchResult) => (
                   <Tr
                     key={`${pkg.repository}/${pkg.name}`}
                     isClickable

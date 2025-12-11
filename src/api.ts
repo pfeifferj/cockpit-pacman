@@ -36,12 +36,16 @@ export interface UpdatesResponse {
 
 export type FilterType = "all" | "explicit" | "dependency";
 
+export type SortDirection = "asc" | "desc";
+
 export interface ListInstalledParams {
   offset?: number;
   limit?: number;
   search?: string;
   filter?: FilterType;
   repo?: string;
+  sortBy?: string;
+  sortDir?: SortDirection;
 }
 
 export interface UpdateInfo {
@@ -98,6 +102,8 @@ export interface SearchParams {
   offset?: number;
   limit?: number;
   installed?: InstalledFilterType;
+  sortBy?: string;
+  sortDir?: SortDirection;
 }
 
 export interface SyncPackageDetails {
@@ -208,13 +214,15 @@ async function runBackend<T>(command: string, args: string[] = []): Promise<T> {
 export async function listInstalled(
   params: ListInstalledParams = {}
 ): Promise<PackageListResponse> {
-  const { offset = 0, limit = 50, search = "", filter = "all", repo = "all" } = params;
+  const { offset = 0, limit = 50, search = "", filter = "all", repo = "all", sortBy = "", sortDir = "" } = params;
   return runBackend<PackageListResponse>("list-installed", [
     String(offset),
     String(limit),
     search,
     filter,
     repo,
+    sortBy,
+    sortDir,
   ]);
 }
 
@@ -227,8 +235,8 @@ export async function getPackageInfo(name: string): Promise<PackageDetails> {
 }
 
 export async function searchPackages(params: SearchParams): Promise<SearchResponse> {
-  const { query, offset = 0, limit = 100, installed = "all" } = params;
-  return runBackend<SearchResponse>("search", [query, String(offset), String(limit), installed]);
+  const { query, offset = 0, limit = 100, installed = "all", sortBy = "", sortDir = "" } = params;
+  return runBackend<SearchResponse>("search", [query, String(offset), String(limit), installed, sortBy, sortDir]);
 }
 
 export async function getSyncPackageInfo(name: string, repo?: string): Promise<SyncPackageDetails> {

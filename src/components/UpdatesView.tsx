@@ -114,6 +114,7 @@ export const UpdatesView: React.FC = () => {
       sortBy: {
         index: activeSortIndex ?? undefined,
         direction: activeSortDirection,
+        defaultDirection: "desc", // Start with Z-A since data is already A-Z
       },
       onSort: (_event, index, direction) => {
         setActiveSortIndex(index);

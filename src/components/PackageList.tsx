@@ -83,6 +83,17 @@ export const PackageList: React.FC = () => {
     };
   }, [searchInput, searchValue]);
 
+  // Map column index to backend sort field
+  const getSortField = (index: number | null): string => {
+    if (index === null) return "";
+    switch (index) {
+      case 0: return "name";
+      case 3: return "size";
+      case 4: return "reason";
+      default: return "";
+    }
+  };
+
   const loadPackages = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -94,6 +105,8 @@ export const PackageList: React.FC = () => {
         search: searchValue,
         filter,
         repo: repoFilter,
+        sortBy: getSortField(activeSortIndex),
+        sortDir: activeSortDirection,
       });
       setPackages(response.packages);
       setTotal(response.total);
@@ -105,7 +118,7 @@ export const PackageList: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, perPage, searchValue, filter, repoFilter]);
+  }, [page, perPage, searchValue, filter, repoFilter, activeSortIndex, activeSortDirection]);
 
   useEffect(() => {
     loadPackages();
@@ -166,36 +179,16 @@ export const PackageList: React.FC = () => {
       sortBy: {
         index: activeSortIndex ?? undefined,
         direction: activeSortDirection,
+        defaultDirection: "desc", // Start with Z-A since data is already A-Z
       },
       onSort: (_event, index, direction) => {
         setActiveSortIndex(index);
         setActiveSortDirection(direction);
+        setPage(1); // Reset to first page when sorting changes
       },
       columnIndex,
     };
   };
-
-  const sortedPackages = React.useMemo(() => {
-    if (activeSortIndex === null) return packages;
-
-    return [...packages].sort((a, b) => {
-      let comparison = 0;
-      switch (activeSortIndex) {
-        case 0: // name
-          comparison = a.name.localeCompare(b.name);
-          break;
-        case 3: // size
-          comparison = a.installed_size - b.installed_size;
-          break;
-        case 4: // reason
-          comparison = a.reason.localeCompare(b.reason);
-          break;
-        default:
-          return 0;
-      }
-      return activeSortDirection === "asc" ? comparison : -comparison;
-    });
-  }, [packages, activeSortIndex, activeSortDirection]);
 
   if (error && packages.length === 0) {
     return (
@@ -302,7 +295,7 @@ export const PackageList: React.FC = () => {
               </Tr>
             </Thead>
             <Tbody>
-              {sortedPackages.map((pkg) => (
+              {packages.map((pkg) => (
                 <Tr
                   key={pkg.name}
                   isClickable
