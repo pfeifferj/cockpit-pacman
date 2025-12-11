@@ -232,6 +232,8 @@ fn list_installed(
     search: Option<&str>,
     filter: Option<&str>,
     repo_filter: Option<&str>,
+    sort_by: Option<&str>,
+    sort_dir: Option<&str>,
 ) -> Result<()> {
     let handle = get_handle()?;
     let localdb = handle.localdb();
@@ -295,7 +297,7 @@ fn list_installed(
         .collect();
 
     // Third pass: apply reason filter
-    let filtered: Vec<_> = search_and_repo_filtered
+    let mut filtered: Vec<_> = search_and_repo_filtered
         .into_iter()
         .filter(|(pkg, _repo)| {
             if let Some(reason) = filter_reason {
@@ -304,6 +306,38 @@ fn list_installed(
             true
         })
         .collect();
+
+    // Sort before pagination
+    let ascending = sort_dir != Some("desc");
+    match sort_by {
+        Some("name") => {
+            filtered.sort_by(|(a, _), (b, _)| {
+                let cmp = a.name().cmp(b.name());
+                if ascending { cmp } else { cmp.reverse() }
+            });
+        }
+        Some("size") => {
+            filtered.sort_by(|(a, _), (b, _)| {
+                let cmp = a.isize().cmp(&b.isize());
+                if ascending { cmp } else { cmp.reverse() }
+            });
+        }
+        Some("reason") => {
+            filtered.sort_by(|(a, _), (b, _)| {
+                let reason_a = match a.reason() {
+                    alpm::PackageReason::Explicit => "explicit",
+                    alpm::PackageReason::Depend => "dependency",
+                };
+                let reason_b = match b.reason() {
+                    alpm::PackageReason::Explicit => "explicit",
+                    alpm::PackageReason::Depend => "dependency",
+                };
+                let cmp = reason_a.cmp(reason_b);
+                if ascending { cmp } else { cmp.reverse() }
+            });
+        }
+        _ => {} // No sorting or unknown column - keep default order
+    }
 
     let total = filtered.len();
 
@@ -845,7 +879,7 @@ struct SearchResponse {
     repositories: Vec<String>,
 }
 
-fn search(query: &str, offset: usize, limit: usize, installed_filter: Option<bool>) -> Result<()> {
+fn search(query: &str, offset: usize, limit: usize, installed_filter: Option<bool>, sort_by: Option<&str>, sort_dir: Option<&str>) -> Result<()> {
     let handle = get_handle()?;
     let localdb = handle.localdb();
     let mut repo_set: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -889,11 +923,35 @@ fn search(query: &str, offset: usize, limit: usize, installed_filter: Option<boo
     }
 
     // Second pass: apply installed filter
-    let filtered: Vec<SearchResult> = if let Some(filter) = installed_filter {
+    let mut filtered: Vec<SearchResult> = if let Some(filter) = installed_filter {
         all_matches.into_iter().filter(|r| r.installed == filter).collect()
     } else {
         all_matches
     };
+
+    // Sort before pagination
+    let ascending = sort_dir != Some("desc");
+    match sort_by {
+        Some("name") => {
+            filtered.sort_by(|a, b| {
+                let cmp = a.name.cmp(&b.name);
+                if ascending { cmp } else { cmp.reverse() }
+            });
+        }
+        Some("repository") => {
+            filtered.sort_by(|a, b| {
+                let cmp = a.repository.cmp(&b.repository);
+                if ascending { cmp } else { cmp.reverse() }
+            });
+        }
+        Some("status") => {
+            filtered.sort_by(|a, b| {
+                let cmp = a.installed.cmp(&b.installed);
+                if ascending { cmp } else { cmp.reverse() }
+            });
+        }
+        _ => {} // No sorting or unknown column
+    }
 
     let total = filtered.len();
     let results: Vec<SearchResult> = filtered.into_iter().skip(offset).take(limit).collect();
@@ -981,10 +1039,12 @@ fn print_usage() {
     eprintln!("Usage: cockpit-pacman-backend <command> [args]");
     eprintln!();
     eprintln!("Commands:");
-    eprintln!("  list-installed [offset] [limit] [search] [filter] [repo]");
+    eprintln!("  list-installed [offset] [limit] [search] [filter] [repo] [sort_by] [sort_dir]");
     eprintln!("                         List installed packages (paginated)");
     eprintln!("                         filter: all|explicit|dependency");
     eprintln!("                         repo: all|core|extra|multilib|local|...");
+    eprintln!("                         sort_by: name|size|reason");
+    eprintln!("                         sort_dir: asc|desc");
     eprintln!("  check-updates          Check for available updates");
     eprintln!("  preflight-upgrade      Check what the upgrade will do (requires root)");
     eprintln!("                         Returns conflicts, replacements, keys to import");
@@ -995,9 +1055,11 @@ fn print_usage() {
     eprintln!("                         Get detailed info for an installed package");
     eprintln!("  sync-package-info NAME [REPO]");
     eprintln!("                         Get detailed info for a package from sync databases");
-    eprintln!("  search QUERY [offset] [limit] [installed]");
+    eprintln!("  search QUERY [offset] [limit] [installed] [sort_by] [sort_dir]");
     eprintln!("                         Search packages by name/description (paginated)");
     eprintln!("                         installed: all|installed|not-installed");
+    eprintln!("                         sort_by: name|repository|status");
+    eprintln!("                         sort_dir: asc|desc");
 }
 
 fn main() {
@@ -1015,8 +1077,10 @@ fn main() {
             let search = args.get(4).map(|s| s.as_str()).filter(|s| !s.is_empty());
             let filter = args.get(5).map(|s| s.as_str()).filter(|s| !s.is_empty() && *s != "all");
             let repo_filter = args.get(6).map(|s| s.as_str()).filter(|s| !s.is_empty() && *s != "all");
+            let sort_by = args.get(7).map(|s| s.as_str()).filter(|s| !s.is_empty());
+            let sort_dir = args.get(8).map(|s| s.as_str()).filter(|s| !s.is_empty());
             validate_pagination(offset, limit)
-                .and_then(|_| list_installed(offset, limit, search, filter, repo_filter))
+                .and_then(|_| list_installed(offset, limit, search, filter, repo_filter, sort_by, sort_dir))
         }
         "check-updates" => check_updates(),
         "preflight-upgrade" => preflight_upgrade(),
@@ -1044,9 +1108,11 @@ fn main() {
                 "not-installed" => Some(false),
                 _ => None,
             });
+            let sort_by = args.get(6).map(|s| s.as_str()).filter(|s| !s.is_empty());
+            let sort_dir = args.get(7).map(|s| s.as_str()).filter(|s| !s.is_empty());
             validate_search_query(&args[2])
                 .and_then(|_| validate_pagination(offset, limit))
-                .and_then(|_| search(&args[2], offset, limit, installed_filter))
+                .and_then(|_| search(&args[2], offset, limit, installed_filter, sort_by, sort_dir))
         }
         "sync-package-info" => {
             if args.len() < 3 {
