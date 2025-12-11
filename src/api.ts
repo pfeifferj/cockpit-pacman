@@ -49,6 +49,7 @@ export interface UpdateInfo {
   current_version: string;
   new_version: string;
   download_size: number;
+  repository: string;
 }
 
 export interface PackageDetails {
@@ -117,6 +118,39 @@ export interface SyncPackageDetails {
   architecture: string | null;
   build_date: number | null;
   repository: string;
+}
+
+// Preflight upgrade types
+export interface ConflictInfo {
+  package1: string;
+  package2: string;
+}
+
+export interface ReplacementInfo {
+  old_package: string;
+  new_package: string;
+}
+
+export interface ProviderChoice {
+  dependency: string;
+  providers: string[];
+}
+
+export interface PreflightKeyInfo {
+  fingerprint: string;
+  uid: string;
+}
+
+export interface PreflightResponse {
+  success: boolean;
+  error?: string;
+  conflicts: ConflictInfo[];
+  replacements: ReplacementInfo[];
+  removals: string[];
+  providers: ProviderChoice[];
+  import_keys: PreflightKeyInfo[];
+  packages_to_upgrade: number;
+  total_download_size: number;
 }
 
 const BACKEND_TIMEOUT_MS = 30000;
@@ -202,6 +236,10 @@ export async function getSyncPackageInfo(name: string, repo?: string): Promise<S
   return runBackend<SyncPackageDetails>("sync-package-info", args);
 }
 
+export async function preflightUpgrade(): Promise<PreflightResponse> {
+  return runBackend<PreflightResponse>("preflight-upgrade");
+}
+
 // Stream event types from backend
 export interface StreamEventLog {
   type: "log";
@@ -258,6 +296,18 @@ function runStreamingBackend(
   callbacks: UpgradeCallbacks
 ): { cancel: () => void } {
   let buffer = "";
+  let receivedComplete = false;
+
+  const markComplete = (success: boolean, message?: string) => {
+    if (receivedComplete) return; // Prevent duplicate callbacks
+    receivedComplete = true;
+    if (success) {
+      callbacks.onComplete();
+    } else {
+      callbacks.onError(message || "Operation failed");
+    }
+  };
+
   const proc = cockpit.spawn(
     [BACKEND_PATH, command, ...args],
     { superuser: "require", err: "out" }
@@ -290,11 +340,7 @@ function runStreamingBackend(
         } else if (event.type === "event") {
           callbacks.onData?.(`${event.event}${event.package ? `: ${event.package}` : ""}\n`);
         } else if (event.type === "complete") {
-          if (event.success) {
-            callbacks.onComplete();
-          } else {
-            callbacks.onError(event.message || "Operation failed");
-          }
+          markComplete(event.success, event.message);
         }
       } catch {
         // Not valid JSON, treat as raw output
@@ -309,25 +355,24 @@ function runStreamingBackend(
       try {
         const event = JSON.parse(buffer) as StreamEvent;
         if (event.type === "complete") {
-          if (event.success) {
-            callbacks.onComplete();
-          } else {
-            callbacks.onError(event.message || "Operation failed");
-          }
+          markComplete(event.success, event.message);
           return;
         }
       } catch {
-        // Ignore
+        // Not valid JSON - fall through to error handling
       }
     }
-    // If no complete event was received, assume success
-    callbacks.onComplete();
+    // If no complete event was received, this is an error condition
+    // The backend should always emit a complete event
+    if (!receivedComplete) {
+      markComplete(false, "Backend process ended without sending completion status");
+    }
   });
 
   proc.catch((ex: unknown) => {
     const errObj = ex as { message?: string; exit_status?: number };
     const message = errObj.message || `Operation failed (exit ${errObj.exit_status ?? "unknown"})`;
-    callbacks.onError(message);
+    markComplete(false, message);
   });
 
   return {
