@@ -1,17 +1,19 @@
 import React from "react";
 import {
-  Modal,
-  ModalVariant,
-  Spinner,
-  DescriptionList,
-  DescriptionListGroup,
-  DescriptionListTerm,
-  DescriptionListDescription,
-  Label,
-  LabelGroup,
-  Popover,
-  Icon,
-} from "@patternfly/react-core";
+	Spinner,
+	DescriptionList,
+	DescriptionListGroup,
+	DescriptionListTerm,
+	DescriptionListDescription,
+	Label,
+	LabelGroup,
+	Popover,
+	Icon
+} from '@patternfly/react-core';
+import {
+	Modal,
+	ModalVariant
+} from '@patternfly/react-core/deprecated';
 import { OutlinedQuestionCircleIcon } from "@patternfly/react-icons";
 import { PackageDetails, SyncPackageDetails, formatSize, formatDate } from "../api";
 
@@ -56,10 +58,10 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
           <DescriptionListGroup>
             <DescriptionListTerm>Repository</DescriptionListTerm>
             <DescriptionListDescription>
-              {packageDetails.repository || "local"}
+              {packageDetails.repository || "user"}
               {isInstalled && !packageDetails.repository && (
                 <Popover
-                  headerContent="Local Package"
+                  headerContent="User Package"
                   bodyContent="This package is not from an official repository. It may have been installed from the AUR, built manually with makepkg, or installed from a local PKGBUILD."
                 >
                   <Icon isInline style={{ marginLeft: "0.5em", cursor: "pointer" }}>

@@ -207,7 +207,7 @@ export const PackageList: React.FC = () => {
       <CardBody>
         <Toolbar>
           <ToolbarContent>
-            <ToolbarItem variant="search-filter">
+            <ToolbarItem >
               <SearchInput
                 placeholder="Search packages..."
                 value={searchInput}
@@ -265,7 +265,7 @@ export const PackageList: React.FC = () => {
                 </SelectList>
               </Select>
             </ToolbarItem>
-            <ToolbarItem variant="pagination" align={{ default: "alignRight" }}>
+            <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
               <Pagination
                 itemCount={total}
                 perPage={perPage}
@@ -322,7 +322,7 @@ export const PackageList: React.FC = () => {
 
         <Toolbar>
           <ToolbarContent>
-            <ToolbarItem variant="pagination" align={{ default: "alignRight" }}>
+            <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
               <Pagination
                 itemCount={total}
                 perPage={perPage}

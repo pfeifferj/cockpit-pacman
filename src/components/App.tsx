@@ -14,8 +14,8 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string | number>(0);
 
   return (
-    <Page>
-      <PageSection variant="light">
+    <Page className="no-masthead-sidebar pf-m-no-sidebar">
+      <PageSection hasBodyWrapper={false} >
         <Tabs
           activeKey={activeTab}
           onSelect={(_event, tabIndex) => setActiveTab(tabIndex)}

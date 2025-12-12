@@ -13,9 +13,9 @@ function applyTheme() {
   const isDark = cockpitTheme === "dark" || (cockpitTheme !== "light" && systemDark);
 
   if (isDark) {
-    html.classList.add("pf-v5-theme-dark");
+    html.classList.add("pf-v6-theme-dark");
   } else {
-    html.classList.remove("pf-v5-theme-dark");
+    html.classList.remove("pf-v6-theme-dark");
   }
 }
 
