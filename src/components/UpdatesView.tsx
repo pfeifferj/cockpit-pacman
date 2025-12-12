@@ -1,42 +1,41 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
-  Card,
-  CardBody,
-  CardTitle,
-  Button,
-  Alert,
-  AlertActionCloseButton,
-  EmptyState,
-  EmptyStateHeader,
-  EmptyStateIcon,
-  EmptyStateBody,
-  EmptyStateActions,
-  EmptyStateFooter,
-  Spinner,
-  Progress,
-  ProgressMeasureLocation,
-  CodeBlock,
-  CodeBlockCode,
-  Flex,
-  FlexItem,
-  SearchInput,
-  Toolbar,
-  ToolbarContent,
-  ToolbarItem,
-  Label,
-  MenuToggle,
-  MenuToggleElement,
-  Select,
-  SelectOption,
-  SelectList,
-  Modal,
-  ModalVariant,
-  List,
-  ListItem,
-  TextContent,
-  Text,
-  TextVariants,
-} from "@patternfly/react-core";
+	Card,
+	CardBody,
+	CardTitle,
+	Button,
+	Alert,
+	AlertActionCloseButton,
+	EmptyState,
+	EmptyStateBody,
+	EmptyStateActions,
+	EmptyStateFooter,
+	Spinner,
+	Progress,
+	ProgressMeasureLocation,
+	CodeBlock,
+	CodeBlockCode,
+	Flex,
+	FlexItem,
+	SearchInput,
+	Toolbar,
+	ToolbarContent,
+	ToolbarItem,
+	Label,
+	MenuToggle,
+	MenuToggleElement,
+	Select,
+	SelectOption,
+	SelectList,
+	List,
+	ListItem,
+	Content,
+	ContentVariants
+} from '@patternfly/react-core';
+import {
+	Modal,
+	ModalVariant
+} from '@patternfly/react-core/deprecated';
 import {
   CheckCircleIcon,
   SyncAltIcon,
@@ -105,8 +104,8 @@ export const UpdatesView: React.FC = () => {
     return result;
   }, [updates, searchFilter, repoFilter]);
 
-  // Column indices: 0=name, 1=repository, 2=current_version, 3=new_version, 4=current_size, 5=new_size, 6=net_size, 7=download_size
-  const sortableColumns = [0, 1, 4, 5, 6, 7]; // name, repository, sizes
+  // Column indices: 0=name, 1=repository, 2=version, 3=download, 4=installed_size, 5=net
+  const sortableColumns = [0, 1, 3, 4, 5]; // name, repository, download, installed, net
 
   const getSortParams = (columnIndex: number): ThProps["sort"] | undefined => {
     if (!sortableColumns.includes(columnIndex)) return undefined;
@@ -136,17 +135,14 @@ export const UpdatesView: React.FC = () => {
         case 1: // repository
           comparison = a.repository.localeCompare(b.repository);
           break;
-        case 4: // current_size
-          comparison = a.current_size - b.current_size;
+        case 3: // download_size
+          comparison = a.download_size - b.download_size;
           break;
-        case 5: // new_size
+        case 4: // new_size (installed size after upgrade)
           comparison = a.new_size - b.new_size;
           break;
-        case 6: // net_size (new - current)
+        case 5: // net_size (new - current)
           comparison = (a.new_size - a.current_size) - (b.new_size - b.current_size);
-          break;
-        case 7: // download_size
-          comparison = a.download_size - b.download_size;
           break;
         default:
           return 0;
@@ -294,12 +290,7 @@ export const UpdatesView: React.FC = () => {
     return (
       <Card>
         <CardBody>
-          <EmptyState>
-            <EmptyStateHeader
-              titleText="Checking for updates"
-              icon={<EmptyStateIcon icon={Spinner} />}
-              headingLevel="h2"
-            />
+          <EmptyState  headingLevel="h2" icon={Spinner}  titleText="Checking for updates">
             <EmptyStateBody>
               Querying package databases...
             </EmptyStateBody>
@@ -364,12 +355,7 @@ export const UpdatesView: React.FC = () => {
     return (
       <Card>
         <CardBody>
-          <EmptyState>
-            <EmptyStateHeader
-              titleText="System Updated"
-              icon={<EmptyStateIcon icon={CheckCircleIcon} color="green" />}
-              headingLevel="h2"
-            />
+          <EmptyState  headingLevel="h2" icon={CheckCircleIcon}  titleText="System Updated">
             <EmptyStateBody>
               All packages have been updated successfully.
             </EmptyStateBody>
@@ -402,12 +388,7 @@ export const UpdatesView: React.FC = () => {
               </ul>
             </Alert>
           )}
-          <EmptyState>
-            <EmptyStateHeader
-              titleText="System is up to date"
-              icon={<EmptyStateIcon icon={CheckCircleIcon} color="green" />}
-              headingLevel="h2"
-            />
+          <EmptyState  headingLevel="h2" icon={CheckCircleIcon}  titleText="System is up to date">
             <EmptyStateBody>
               All installed packages are at their latest versions.
             </EmptyStateBody>
@@ -444,31 +425,25 @@ export const UpdatesView: React.FC = () => {
               {updates.length} update{updates.length !== 1 ? "s" : ""} available
               {filteredUpdates.length !== updates.length && ` (${filteredUpdates.length} shown)`}
             </CardTitle>
-            <Flex spaceItems={{ default: "spaceItemsLg" }}>
+            <Flex spaceItems={{ default: "spaceItemsLg" }} style={{ marginBottom: "1rem" }}>
               <FlexItem>
-                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-v5-global--BackgroundColor--200)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600 }}>{formatSize(totalCurrentSize)}</div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-v5-global--Color--200)", textTransform: "uppercase" }}>Current</div>
+                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--info--default)" }}>{formatSize(totalDownloadSize)}</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Total Download Size</div>
                 </div>
               </FlexItem>
               <FlexItem>
-                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-v5-global--BackgroundColor--200)", borderRadius: "6px" }}>
+                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
                   <div style={{ fontSize: "1.5rem", fontWeight: 600 }}>{formatSize(totalNewSize)}</div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-v5-global--Color--200)", textTransform: "uppercase" }}>New</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Total Installed Size</div>
                 </div>
               </FlexItem>
               <FlexItem>
-                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-v5-global--BackgroundColor--200)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: totalNetSize > 0 ? "var(--pf-v5-global--danger-color--100)" : totalNetSize < 0 ? "var(--pf-v5-global--success-color--100)" : undefined }}>
-                    {totalNetSize >= 0 ? "+" : "-"}{formatSize(Math.abs(totalNetSize))}
+                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: totalNetSize > 0 ? "var(--pf-t--global--color--status--danger--default)" : totalNetSize < 0 ? "var(--pf-t--global--color--status--success--default)" : undefined }}>
+                    {totalNetSize >= 0 ? "+" : ""}{formatSize(totalNetSize)}
                   </div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-v5-global--Color--200)", textTransform: "uppercase" }}>Net Change</div>
-                </div>
-              </FlexItem>
-              <FlexItem>
-                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-v5-global--BackgroundColor--200)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-v5-global--info-color--100)" }}>{formatSize(totalDownloadSize)}</div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-v5-global--Color--200)", textTransform: "uppercase" }}>Download</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Net Upgrade Size</div>
                 </div>
               </FlexItem>
             </Flex>
@@ -495,7 +470,7 @@ export const UpdatesView: React.FC = () => {
 
         <Toolbar style={{ paddingLeft: 0, paddingRight: 0 }}>
           <ToolbarContent>
-            <ToolbarItem variant="search-filter">
+            <ToolbarItem >
               <SearchInput
                 placeholder="Filter updates..."
                 value={searchFilter}
@@ -542,12 +517,10 @@ export const UpdatesView: React.FC = () => {
             <Tr>
               <Th sort={getSortParams(0)}>Package</Th>
               <Th sort={getSortParams(1)}>Repository</Th>
-              <Th>Current Version</Th>
-              <Th>New Version</Th>
-              <Th sort={getSortParams(4)}>Current Size</Th>
-              <Th sort={getSortParams(5)}>New Size</Th>
-              <Th sort={getSortParams(6)}>Net</Th>
-              <Th sort={getSortParams(7)}>Download</Th>
+              <Th>Version</Th>
+              <Th sort={getSortParams(3)}>Download</Th>
+              <Th sort={getSortParams(4)}>Installed</Th>
+              <Th sort={getSortParams(5)}>Net</Th>
             </Tr>
           </Thead>
           <Tbody>
@@ -567,14 +540,12 @@ export const UpdatesView: React.FC = () => {
                   <Td dataLabel="Repository">
                     <Label color="blue">{update.repository}</Label>
                   </Td>
-                  <Td dataLabel="Current Version">{update.current_version}</Td>
-                  <Td dataLabel="New Version">{update.new_version}</Td>
-                  <Td dataLabel="Current Size">{formatSize(update.current_size)}</Td>
-                  <Td dataLabel="New Size">{formatSize(update.new_size)}</Td>
-                  <Td dataLabel="Net" style={{ color: netSize > 0 ? "var(--pf-v5-global--danger-color--100)" : netSize < 0 ? "var(--pf-v5-global--success-color--100)" : undefined }}>
-                    {netSize >= 0 ? "+" : ""}{formatSize(Math.abs(netSize))}
-                  </Td>
+                  <Td dataLabel="Version">{update.current_version} → {update.new_version}</Td>
                   <Td dataLabel="Download">{formatSize(update.download_size)}</Td>
+                  <Td dataLabel="Installed Size">{formatSize(update.new_size)}</Td>
+                  <Td dataLabel="Net" style={{ color: netSize > 0 ? "var(--pf-t--global--color--status--danger--default)" : netSize < 0 ? "var(--pf-t--global--color--status--success--default)" : undefined }}>
+                    {netSize >= 0 ? "+" : ""}{formatSize(netSize)}
+                  </Td>
                 </Tr>
               );
             })}
@@ -603,14 +574,14 @@ export const UpdatesView: React.FC = () => {
         ]}
       >
         {preflightData && (
-          <TextContent>
-            <Text component={TextVariants.p}>
+          <Content>
+            <Content component={ContentVariants.p}>
               The following actions will be performed during this upgrade:
-            </Text>
+            </Content>
 
             {preflightData.conflicts.length > 0 && (
               <>
-                <Text component={TextVariants.h4}>Package Conflicts</Text>
+                <Content component={ContentVariants.h4}>Package Conflicts</Content>
                 <List>
                   {preflightData.conflicts.map((c, i) => (
                     <ListItem key={i}>
@@ -623,7 +594,7 @@ export const UpdatesView: React.FC = () => {
 
             {preflightData.replacements.length > 0 && (
               <>
-                <Text component={TextVariants.h4}>Package Replacements</Text>
+                <Content component={ContentVariants.h4}>Package Replacements</Content>
                 <List>
                   {preflightData.replacements.map((r, i) => (
                     <ListItem key={i}>
@@ -636,7 +607,7 @@ export const UpdatesView: React.FC = () => {
 
             {preflightData.removals.length > 0 && (
               <>
-                <Text component={TextVariants.h4}>Packages to Remove</Text>
+                <Content component={ContentVariants.h4}>Packages to Remove</Content>
                 <List>
                   {preflightData.removals.map((pkg, i) => (
                     <ListItem key={i}>{pkg}</ListItem>
@@ -647,7 +618,7 @@ export const UpdatesView: React.FC = () => {
 
             {preflightData.providers.length > 0 && (
               <>
-                <Text component={TextVariants.h4}>Provider Selections</Text>
+                <Content component={ContentVariants.h4}>Provider Selections</Content>
                 <List>
                   {preflightData.providers.map((p, i) => (
                     <ListItem key={i}>
@@ -660,7 +631,7 @@ export const UpdatesView: React.FC = () => {
 
             {preflightData.import_keys.length > 0 && (
               <>
-                <Text component={TextVariants.h4}>PGP Keys to Import</Text>
+                <Content component={ContentVariants.h4}>PGP Keys to Import</Content>
                 <List>
                   {preflightData.import_keys.map((k, i) => (
                     <ListItem key={i}>
@@ -671,11 +642,11 @@ export const UpdatesView: React.FC = () => {
               </>
             )}
 
-            <Text component={TextVariants.p} style={{ marginTop: "1rem" }}>
+            <Content component={ContentVariants.p} style={{ marginTop: "1rem" }}>
               <strong>{preflightData.packages_to_upgrade}</strong> packages will be upgraded
               (download: {formatSize(preflightData.total_download_size)})
-            </Text>
-          </TextContent>
+            </Content>
+          </Content>
         )}
       </Modal>
     </Card>

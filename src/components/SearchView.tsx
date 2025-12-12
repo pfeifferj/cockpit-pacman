@@ -10,7 +10,6 @@ import {
   ToolbarItem,
   Label,
   EmptyState,
-  EmptyStateIcon,
   EmptyStateBody,
   Title,
   MenuToggle,
@@ -201,7 +200,7 @@ export const SearchView: React.FC = () => {
       <CardBody>
         <Toolbar>
           <ToolbarContent>
-            <ToolbarItem variant="search-filter">
+            <ToolbarItem >
               <SearchInput
                 placeholder="Search Arch repositories..."
                 value={searchInput}
@@ -276,21 +275,17 @@ export const SearchView: React.FC = () => {
             <Spinner /> Searching repositories...
           </div>
         ) : !hasSearched ? (
-          <EmptyState>
-            <EmptyStateIcon icon={SearchIcon} />
-            <Title headingLevel="h4" size="lg">
+          <EmptyState titleText={<Title headingLevel="h4" size="lg">
               Search for packages
-            </Title>
+            </Title>} icon={SearchIcon}>
             <EmptyStateBody>
               Enter a search term to find packages available in the Arch Linux repositories.
             </EmptyStateBody>
           </EmptyState>
         ) : filteredResults.length === 0 ? (
-          <EmptyState>
-            <EmptyStateIcon icon={SearchIcon} />
-            <Title headingLevel="h4" size="lg">
+          <EmptyState titleText={<Title headingLevel="h4" size="lg">
               No packages found
-            </Title>
+            </Title>} icon={SearchIcon}>
             <EmptyStateBody>
               No packages matched your search. Try a different search term.
             </EmptyStateBody>
@@ -300,12 +295,12 @@ export const SearchView: React.FC = () => {
             <Toolbar>
               <ToolbarContent>
                 <ToolbarItem>
-                  <span style={{ color: "var(--pf-v5-global--Color--200)" }}>
+                  <span style={{ color: "var(--pf-t--global--text--color--subtle)" }}>
                     Found {total} package{total !== 1 ? "s" : ""}
                     {repoFilter !== "all" && ` (${filteredResults.length} in ${repoFilter})`}
                   </span>
                 </ToolbarItem>
-                <ToolbarItem variant="pagination" align={{ default: "alignRight" }}>
+                <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
                   <Pagination
                     itemCount={total}
                     perPage={perPage}
@@ -360,7 +355,7 @@ export const SearchView: React.FC = () => {
             </Table>
             <Toolbar>
               <ToolbarContent>
-                <ToolbarItem variant="pagination" align={{ default: "alignRight" }}>
+                <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
                   <Pagination
                     itemCount={total}
                     perPage={perPage}

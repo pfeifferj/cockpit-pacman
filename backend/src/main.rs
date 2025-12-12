@@ -258,7 +258,7 @@ fn list_installed(
             if let Some(ref r) = repo {
                 repo_set.insert(r.clone());
             } else {
-                repo_set.insert("local".to_string());
+                repo_set.insert("user".to_string());
             }
             (pkg, repo)
         })
@@ -282,7 +282,7 @@ fn list_installed(
             }
 
             if let Some(repo_f) = repo_filter {
-                let pkg_repo = repo.as_deref().unwrap_or("local");
+                let pkg_repo = repo.as_deref().unwrap_or("user");
                 if pkg_repo != repo_f {
                     return false;
                 }
@@ -1046,7 +1046,7 @@ fn print_usage() {
     eprintln!("  list-installed [offset] [limit] [search] [filter] [repo] [sort_by] [sort_dir]");
     eprintln!("                         List installed packages (paginated)");
     eprintln!("                         filter: all|explicit|dependency");
-    eprintln!("                         repo: all|core|extra|multilib|local|...");
+    eprintln!("                         repo: all|core|extra|multilib|user|...");
     eprintln!("                         sort_by: name|size|reason");
     eprintln!("                         sort_dir: asc|desc");
     eprintln!("  check-updates          Check for available updates");
