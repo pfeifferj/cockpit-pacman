@@ -191,11 +191,17 @@ export const PackageList: React.FC = () => {
   };
 
   if (error && packages.length === 0) {
+    const isLockError = error?.toLowerCase().includes("unable to lock database");
     return (
       <Card>
         <CardBody>
-          <Alert variant="danger" title="Error loading packages">
-            {error}
+          <Alert
+            variant={isLockError ? "warning" : "danger"}
+            title={isLockError ? "Database is locked" : "Error loading packages"}
+          >
+            {isLockError
+              ? "Another package manager operation is in progress. This could be a system upgrade, package installation, or database sync. Please wait for it to complete."
+              : error}
           </Alert>
         </CardBody>
       </Card>
