@@ -104,8 +104,7 @@ export const UpdatesView: React.FC = () => {
     return result;
   }, [updates, searchFilter, repoFilter]);
 
-  // Column indices: 0=name, 1=repository, 2=version, 3=download, 4=installed_size, 5=net
-  const sortableColumns = [0, 1, 3, 4, 5]; // name, repository, download, installed, net
+  const sortableColumns = [0, 1, 3, 4, 5]; // name, repo, download, installed, net
 
   const getSortParams = (columnIndex: number): ThProps["sort"] | undefined => {
     if (!sortableColumns.includes(columnIndex)) return undefined;
@@ -213,13 +212,13 @@ export const UpdatesView: React.FC = () => {
         return;
       }
 
-      // Check if there are any issues that need confirmation
+      // Check if there are any issues needing confirmation 
       const hasIssues =
-        preflight.conflicts.length > 0 ||
-        preflight.replacements.length > 0 ||
-        preflight.removals.length > 0 ||
-        preflight.providers.length > 0 ||
-        preflight.import_keys.length > 0;
+        (preflight.conflicts?.length ?? 0) > 0 ||
+        (preflight.replacements?.length ?? 0) > 0 ||
+        (preflight.removals?.length ?? 0) > 0 ||
+        (preflight.providers?.length ?? 0) > 0 ||
+        (preflight.import_keys?.length ?? 0) > 0;
 
       if (hasIssues) {
         // Show confirmation modal
@@ -301,15 +300,18 @@ export const UpdatesView: React.FC = () => {
   }
 
   if (state === "error") {
+    const isLockError = error?.toLowerCase().includes("unable to lock database");
     return (
       <Card>
         <CardBody>
           <Alert
-            variant="danger"
-            title="Error checking for updates"
+            variant={isLockError ? "warning" : "danger"}
+            title={isLockError ? "Database is locked" : "Error checking for updates"}
             actionClose={<AlertActionCloseButton onClose={() => setState("uptodate")} />}
           >
-            {error}
+            {isLockError
+              ? "Another package manager operation is in progress. This could be a system upgrade, package installation, or database sync. Please wait for it to complete before checking for updates."
+              : error}
           </Alert>
           <div style={{ marginTop: "1rem" }}>
             <Button variant="primary" onClick={loadUpdates}>
@@ -579,11 +581,11 @@ export const UpdatesView: React.FC = () => {
               The following actions will be performed during this upgrade:
             </Content>
 
-            {preflightData.conflicts.length > 0 && (
+            {(preflightData.conflicts?.length ?? 0) > 0 && (
               <>
                 <Content component={ContentVariants.h4}>Package Conflicts</Content>
                 <List>
-                  {preflightData.conflicts.map((c, i) => (
+                  {preflightData.conflicts!.map((c, i) => (
                     <ListItem key={i}>
                       {c.package1} conflicts with {c.package2}
                     </ListItem>
@@ -592,11 +594,11 @@ export const UpdatesView: React.FC = () => {
               </>
             )}
 
-            {preflightData.replacements.length > 0 && (
+            {(preflightData.replacements?.length ?? 0) > 0 && (
               <>
                 <Content component={ContentVariants.h4}>Package Replacements</Content>
                 <List>
-                  {preflightData.replacements.map((r, i) => (
+                  {preflightData.replacements!.map((r, i) => (
                     <ListItem key={i}>
                       {r.old_package} will be replaced by {r.new_package}
                     </ListItem>
@@ -605,22 +607,22 @@ export const UpdatesView: React.FC = () => {
               </>
             )}
 
-            {preflightData.removals.length > 0 && (
+            {(preflightData.removals?.length ?? 0) > 0 && (
               <>
                 <Content component={ContentVariants.h4}>Packages to Remove</Content>
                 <List>
-                  {preflightData.removals.map((pkg, i) => (
+                  {preflightData.removals!.map((pkg, i) => (
                     <ListItem key={i}>{pkg}</ListItem>
                   ))}
                 </List>
               </>
             )}
 
-            {preflightData.providers.length > 0 && (
+            {(preflightData.providers?.length ?? 0) > 0 && (
               <>
                 <Content component={ContentVariants.h4}>Provider Selections</Content>
                 <List>
-                  {preflightData.providers.map((p, i) => (
+                  {preflightData.providers!.map((p, i) => (
                     <ListItem key={i}>
                       {p.dependency}: {p.providers[0]} will be selected (from: {p.providers.join(", ")})
                     </ListItem>
@@ -629,11 +631,11 @@ export const UpdatesView: React.FC = () => {
               </>
             )}
 
-            {preflightData.import_keys.length > 0 && (
+            {(preflightData.import_keys?.length ?? 0) > 0 && (
               <>
                 <Content component={ContentVariants.h4}>PGP Keys to Import</Content>
                 <List>
-                  {preflightData.import_keys.map((k, i) => (
+                  {preflightData.import_keys!.map((k, i) => (
                     <ListItem key={i}>
                       {k.fingerprint} ({k.uid})
                     </ListItem>

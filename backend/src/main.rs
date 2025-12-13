@@ -3,8 +3,32 @@ use alpm_utils::{alpm_with_conf, DbListExt};
 use anyhow::{Context, Result};
 use pacmanconf::Config;
 use serde::Serialize;
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::env;
 use std::io::{self, Write};
+use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Global flag for cancellation
+static CANCELLED: AtomicBool = AtomicBool::new(false);
+
+fn is_cancelled() -> bool {
+    CANCELLED.load(Ordering::SeqCst)
+}
+
+fn setup_signal_handler() {
+    static HANDLER_SET: AtomicBool = AtomicBool::new(false);
+    if HANDLER_SET.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    if let Err(e) = ctrlc::set_handler(move || {
+        CANCELLED.store(true, Ordering::SeqCst);
+    }) {
+        eprintln!("Warning: Failed to set signal handler: {}", e);
+    }
+}
 
 #[cfg(test)]
 mod tests;
@@ -85,11 +109,6 @@ fn get_handle() -> Result<Alpm> {
     alpm_with_conf(&conf).context("Failed to initialize alpm handle")
 }
 
-fn get_handle_mut() -> Result<Alpm> {
-    let conf = Config::new().context("Failed to parse pacman.conf")?;
-    alpm_with_conf(&conf).context("Failed to initialize alpm handle")
-}
-
 // Streaming event types for real-time progress updates
 #[derive(Serialize)]
 #[serde(tag = "type")]
@@ -126,7 +145,7 @@ struct KeyInfo {
 }
 
 // Preflight check response types
-#[derive(Serialize)]
+#[derive(Serialize, Default)]
 struct PreflightResponse {
     success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -183,6 +202,49 @@ fn progress_to_string(progress: Progress) -> &'static str {
         Progress::LoadStart => "load_start",
         Progress::KeyringStart => "keyring_start",
     }
+}
+
+fn reason_to_string(reason: alpm::PackageReason) -> &'static str {
+    match reason {
+        alpm::PackageReason::Explicit => "explicit",
+        alpm::PackageReason::Depend => "dependency",
+    }
+}
+
+fn log_level_to_string(level: LogLevel) -> &'static str {
+    match level {
+        LogLevel::ERROR => "error",
+        LogLevel::WARNING => "warning",
+        LogLevel::DEBUG => "debug",
+        LogLevel::FUNCTION => "function",
+        _ => "info",
+    }
+}
+
+fn setup_log_cb(handle: &mut Alpm) {
+    handle.set_log_cb((), |level: LogLevel, msg: &str, _: &mut ()| {
+        emit_event(&StreamEvent::Log {
+            level: log_level_to_string(level).to_string(),
+            message: msg.trim().to_string(),
+        });
+    });
+}
+
+fn setup_dl_cb(handle: &mut Alpm) {
+    handle.set_dl_cb((), |filename: &str, event: AnyDownloadEvent, _: &mut ()| {
+        let (event_str, downloaded, total) = match event.event() {
+            DownloadEvent::Init(_) => ("init", None, None),
+            DownloadEvent::Progress(p) => ("progress", Some(p.downloaded), Some(p.total)),
+            DownloadEvent::Retry(_) => ("retry", None, None),
+            DownloadEvent::Completed(c) => ("completed", None, Some(c.total)),
+        };
+        emit_event(&StreamEvent::Download {
+            filename: filename.to_string(),
+            event: event_str.to_string(),
+            downloaded,
+            total,
+        });
+    });
 }
 
 fn validate_package_name(name: &str) -> Result<()> {
@@ -247,7 +309,7 @@ fn list_installed(
         _ => None,
     });
 
-    let mut repo_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut repo_set: HashSet<String> = HashSet::new();
 
     // First pass: collect all packages with their repos
     let all_with_repos: Vec<_> = localdb
@@ -353,10 +415,7 @@ fn list_installed(
             description: pkg.desc().map(|s| s.to_string()),
             installed_size: pkg.isize(),
             install_date: pkg.install_date(),
-            reason: match pkg.reason() {
-                alpm::PackageReason::Explicit => "explicit".to_string(),
-                alpm::PackageReason::Depend => "dependency".to_string(),
-            },
+            reason: reason_to_string(pkg.reason()).to_string(),
             repository: repo.clone(),
         })
         .collect();
@@ -411,24 +470,19 @@ fn check_updates() -> Result<()> {
 }
 
 fn preflight_upgrade() -> Result<()> {
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
-    let mut handle = get_handle_mut()?;
+    let mut handle = get_handle()?;
 
     // Collected issues that need user confirmation
-    let conflicts: Rc<RefCell<Vec<ConflictInfo>>> = Rc::new(RefCell::new(Vec::new()));
-    let replacements: Rc<RefCell<Vec<ReplacementInfo>>> = Rc::new(RefCell::new(Vec::new()));
-    let removals: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
-    let providers: Rc<RefCell<Vec<ProviderChoice>>> = Rc::new(RefCell::new(Vec::new()));
-    let import_keys: Rc<RefCell<Vec<KeyInfo>>> = Rc::new(RefCell::new(Vec::new()));
+    let conflicts = Rc::new(RefCell::new(Vec::<ConflictInfo>::new()));
+    let replacements = Rc::new(RefCell::new(Vec::<ReplacementInfo>::new()));
+    let removals = Rc::new(RefCell::new(Vec::<String>::new()));
+    let providers = Rc::new(RefCell::new(Vec::<ProviderChoice>::new()));
+    let import_keys = Rc::new(RefCell::new(Vec::<KeyInfo>::new()));
 
-    // Set up question callback to collect issues instead of answering
-    let conflicts_cb = Rc::clone(&conflicts);
-    let replacements_cb = Rc::clone(&replacements);
-    let removals_cb = Rc::clone(&removals);
-    let providers_cb = Rc::clone(&providers);
-    let import_keys_cb = Rc::clone(&import_keys);
+    // Clones for callback closure
+    let (conflicts_cb, replacements_cb, removals_cb, providers_cb, import_keys_cb) =
+        (Rc::clone(&conflicts), Rc::clone(&replacements), Rc::clone(&removals),
+         Rc::clone(&providers), Rc::clone(&import_keys));
 
     handle.set_question_cb((), move |mut question: AnyQuestion, _: &mut ()| {
         match question.question() {
@@ -482,15 +536,8 @@ fn preflight_upgrade() -> Result<()> {
     // Initialize transaction
     if let Err(e) = handle.trans_init(TransFlag::NONE) {
         let response = PreflightResponse {
-            success: false,
             error: Some(format!("Failed to initialize transaction: {}", e)),
-            conflicts: Vec::new(),
-            replacements: Vec::new(),
-            removals: Vec::new(),
-            providers: Vec::new(),
-            import_keys: Vec::new(),
-            packages_to_upgrade: 0,
-            total_download_size: 0,
+            ..Default::default()
         };
         println!("{}", serde_json::to_string(&response)?);
         return Ok(());
@@ -500,15 +547,8 @@ fn preflight_upgrade() -> Result<()> {
     if let Err(e) = handle.sync_sysupgrade(false) {
         let _ = handle.trans_release();
         let response = PreflightResponse {
-            success: false,
             error: Some(format!("Failed to prepare system upgrade: {}", e)),
-            conflicts: Vec::new(),
-            replacements: Vec::new(),
-            removals: Vec::new(),
-            providers: Vec::new(),
-            import_keys: Vec::new(),
-            packages_to_upgrade: 0,
-            total_download_size: 0,
+            ..Default::default()
         };
         println!("{}", serde_json::to_string(&response)?);
         return Ok(());
@@ -527,15 +567,13 @@ fn preflight_upgrade() -> Result<()> {
     // Check if prepare failed
     if !prepare_success {
         let response = PreflightResponse {
-            success: false,
             error: Some("Failed to prepare transaction".to_string()),
             conflicts: conflicts.borrow().clone(),
             replacements: replacements.borrow().clone(),
             removals: removals.borrow().clone(),
             providers: providers.borrow().clone(),
             import_keys: import_keys.borrow().clone(),
-            packages_to_upgrade: 0,
-            total_download_size: 0,
+            ..Default::default()
         };
         println!("{}", serde_json::to_string(&response)?);
         return Ok(());
@@ -545,14 +583,7 @@ fn preflight_upgrade() -> Result<()> {
     if packages_to_upgrade == 0 {
         let response = PreflightResponse {
             success: true,
-            error: None,
-            conflicts: Vec::new(),
-            replacements: Vec::new(),
-            removals: Vec::new(),
-            providers: Vec::new(),
-            import_keys: Vec::new(),
-            packages_to_upgrade: 0,
-            total_download_size: 0,
+            ..Default::default()
         };
         println!("{}", serde_json::to_string(&response)?);
         return Ok(());
@@ -575,95 +606,62 @@ fn preflight_upgrade() -> Result<()> {
 }
 
 fn sync_database(force: bool) -> Result<()> {
-    let mut handle = get_handle_mut()?;
+    setup_signal_handler();
 
-    // Set up callbacks for progress reporting
-    handle.set_log_cb((), |level: LogLevel, msg: &str, _: &mut ()| {
-        let level_str = match level {
-            LogLevel::ERROR => "error",
-            LogLevel::WARNING => "warning",
-            LogLevel::DEBUG => "debug",
-            LogLevel::FUNCTION => "function",
-            _ => "info",
-        };
-        emit_event(&StreamEvent::Log {
-            level: level_str.to_string(),
-            message: msg.trim().to_string(),
+    // Check for cancellation before starting
+    if is_cancelled() {
+        emit_event(&StreamEvent::Complete {
+            success: false,
+            message: Some("Operation cancelled".to_string()),
         });
-    });
+        return Ok(());
+    }
 
-    handle.set_dl_cb((), |filename: &str, event: AnyDownloadEvent, _: &mut ()| {
-        let (event_str, downloaded, total): (&str, Option<i64>, Option<i64>) = match event.event() {
-            DownloadEvent::Init(_) => ("init", None, None),
-            DownloadEvent::Progress(p) => ("progress", Some(p.downloaded), Some(p.total)),
-            DownloadEvent::Retry(_) => ("retry", None, None),
-            DownloadEvent::Completed(c) => ("completed", None, Some(c.total)),
-        };
-        emit_event(&StreamEvent::Download {
-            filename: filename.to_string(),
-            event: event_str.to_string(),
-            downloaded,
-            total,
-        });
-    });
+    let mut handle = get_handle()?;
+    setup_log_cb(&mut handle);
+    setup_dl_cb(&mut handle);
 
-    // Update all sync databases
-    let result = handle.syncdbs_mut().update(force);
-
-    match result {
+    match handle.syncdbs_mut().update(force) {
         Ok(_) => {
-            emit_event(&StreamEvent::Complete {
-                success: true,
-                message: None,
-            });
+            if is_cancelled() {
+                emit_event(&StreamEvent::Complete {
+                    success: false,
+                    message: Some("Operation cancelled by user".to_string()),
+                });
+            } else {
+                emit_event(&StreamEvent::Complete { success: true, message: None });
+            }
             Ok(())
         }
         Err(e) => {
-            emit_event(&StreamEvent::Complete {
-                success: false,
-                message: Some(e.to_string()),
-            });
-            Err(e.into())
+            if is_cancelled() {
+                emit_event(&StreamEvent::Complete {
+                    success: false,
+                    message: Some("Operation cancelled by user".to_string()),
+                });
+                Ok(())
+            } else {
+                emit_event(&StreamEvent::Complete { success: false, message: Some(e.to_string()) });
+                Err(e.into())
+            }
         }
     }
 }
 
 fn run_upgrade() -> Result<()> {
-    let mut handle = get_handle_mut()?;
+    setup_signal_handler();
 
-    // Set up callbacks for progress reporting
-    handle.set_log_cb((), |level: LogLevel, msg: &str, _: &mut ()| {
-        let level_str = match level {
-            LogLevel::ERROR => "error",
-            LogLevel::WARNING => "warning",
-            LogLevel::DEBUG => "debug",
-            LogLevel::FUNCTION => "function",
-            _ => "info",
-        };
-        emit_event(&StreamEvent::Log {
-            level: level_str.to_string(),
-            message: msg.trim().to_string(),
-        });
-    });
+    let mut handle = get_handle()?;
+    setup_log_cb(&mut handle);
+    setup_dl_cb(&mut handle);
 
-    handle.set_dl_cb((), |filename: &str, event: AnyDownloadEvent, _: &mut ()| {
-        let (event_str, downloaded, total): (&str, Option<i64>, Option<i64>) = match event.event() {
-            DownloadEvent::Init(_) => ("init", None, None),
-            DownloadEvent::Progress(p) => ("progress", Some(p.downloaded), Some(p.total)),
-            DownloadEvent::Retry(_) => ("retry", None, None),
-            DownloadEvent::Completed(c) => ("completed", None, Some(c.total)),
-        };
-        emit_event(&StreamEvent::Download {
-            filename: filename.to_string(),
-            event: event_str.to_string(),
-            downloaded,
-            total,
-        });
-    });
-
+    // Progress callback 
     handle.set_progress_cb(
         (),
         |progress: Progress, pkgname: &str, percent: i32, howmany: usize, current: usize, _: &mut ()| {
+            if is_cancelled() {
+                return; // Stop emitting events if cancelled
+            }
             emit_event(&StreamEvent::Progress {
                 operation: progress_to_string(progress).to_string(),
                 package: pkgname.to_string(),
@@ -705,9 +703,7 @@ fn run_upgrade() -> Result<()> {
         });
     });
 
-    // Handle questions - user has already confirmed via preflight check
-    // The frontend must call preflight-upgrade first and show the user what will happen
-    // before calling upgrade. This callback approves the pre-confirmed actions.
+    // User confirmed these in preflight modal 
     handle.set_question_cb((), |mut question: AnyQuestion, _: &mut ()| {
         match question.question() {
             Question::Conflict(q) => {
@@ -753,8 +749,7 @@ fn run_upgrade() -> Result<()> {
                 question.set_answer(false);
             }
             Question::SelectProvider(mut q) => {
-                // For now, select first provider (user saw this in preflight)
-                // Future: could pass selected provider index from frontend
+                // Select first provider (user saw options in preflight)
                 let providers: Vec<String> = q.providers().iter().map(|p| p.name().to_string()).collect();
                 let dep = q.depend().name().to_string();
                 emit_event(&StreamEvent::Log {
@@ -776,18 +771,52 @@ fn run_upgrade() -> Result<()> {
         }
     });
 
+    // Check for cancellation before starting
+    if is_cancelled() {
+        emit_event(&StreamEvent::Complete {
+            success: false,
+            message: Some("Operation cancelled".to_string()),
+        });
+        return Ok(());
+    }
+
     // Initialize transaction
     handle
         .trans_init(TransFlag::NONE)
         .context("Failed to initialize transaction")?;
 
-    // Mark packages for system upgrade
-    handle
-        .sync_sysupgrade(false)
-        .context("Failed to prepare system upgrade")?;
+    // Helper to release transaction and emit cancellation
+    let release_on_cancel = |handle: &mut Alpm| {
+        let _ = handle.trans_release();
+        emit_event(&StreamEvent::Complete {
+            success: false,
+            message: Some("Operation cancelled by user".to_string()),
+        });
+    };
 
-    // Prepare the transaction (resolve dependencies)
-    // Convert error to string immediately to release the borrow
+    // Check for cancellation after init
+    if is_cancelled() {
+        release_on_cancel(&mut handle);
+        return Ok(());
+    }
+
+    // Mark packages for system upgrade
+    if let Err(e) = handle.sync_sysupgrade(false) {
+        let _ = handle.trans_release();
+        emit_event(&StreamEvent::Complete {
+            success: false,
+            message: Some(format!("Failed to prepare system upgrade: {}", e)),
+        });
+        return Err(e.into());
+    }
+
+    // Check for cancellation before prepare
+    if is_cancelled() {
+        release_on_cancel(&mut handle);
+        return Ok(());
+    }
+
+    // Prepare transaction (resolve dependencies)
     let prepare_err: Option<String> = handle.trans_prepare().err().map(|e| e.to_string());
     if let Some(err_msg) = prepare_err {
         let _ = handle.trans_release();
@@ -808,15 +837,22 @@ fn run_upgrade() -> Result<()> {
         return Ok(());
     }
 
-    // Commit the transaction
-    // Convert error to string immediately to release the borrow
+    // Commit
     let commit_err: Option<String> = handle.trans_commit().err().map(|e| e.to_string());
     if let Some(err_msg) = commit_err {
         let _ = handle.trans_release();
-        emit_event(&StreamEvent::Complete {
-            success: false,
-            message: Some(format!("Failed to commit transaction: {}", err_msg)),
-        });
+        // Check if this was due to cancellation
+        if is_cancelled() {
+            emit_event(&StreamEvent::Complete {
+                success: false,
+                message: Some("Operation interrupted - system may be in inconsistent state".to_string()),
+            });
+        } else {
+            emit_event(&StreamEvent::Complete {
+                success: false,
+                message: Some(format!("Failed to commit transaction: {}", err_msg)),
+            });
+        }
         return Err(anyhow::anyhow!("Failed to commit transaction: {}", err_msg));
     }
 
@@ -858,10 +894,7 @@ fn local_package_info(name: &str) -> Result<()> {
         architecture: pkg.arch().map(|s| s.to_string()),
         build_date: pkg.build_date(),
         install_date: pkg.install_date(),
-        reason: match pkg.reason() {
-            alpm::PackageReason::Explicit => "explicit".to_string(),
-            alpm::PackageReason::Depend => "dependency".to_string(),
-        },
+        reason: reason_to_string(pkg.reason()).to_string(),
         validation: pkg
             .validation()
             .iter()
@@ -886,7 +919,7 @@ struct SearchResponse {
 fn search(query: &str, offset: usize, limit: usize, installed_filter: Option<bool>, sort_by: Option<&str>, sort_dir: Option<&str>) -> Result<()> {
     let handle = get_handle()?;
     let localdb = handle.localdb();
-    let mut repo_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut repo_set: HashSet<String> = HashSet::new();
     let query_lower = query.to_lowercase();
 
     // First pass: collect all matching packages and count by installed status

@@ -265,8 +265,15 @@ export const SearchView: React.FC = () => {
         </Toolbar>
 
         {error && (
-          <Alert variant="danger" title="Search failed" isInline style={{ marginBottom: "1rem" }}>
-            {error}
+          <Alert
+            variant={error.toLowerCase().includes("unable to lock database") ? "warning" : "danger"}
+            title={error.toLowerCase().includes("unable to lock database") ? "Database is locked" : "Search failed"}
+            isInline
+            style={{ marginBottom: "1rem" }}
+          >
+            {error.toLowerCase().includes("unable to lock database")
+              ? "Another package manager operation is in progress. Please wait for it to complete before searching."
+              : error}
           </Alert>
         )}
 

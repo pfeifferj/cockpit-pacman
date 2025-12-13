@@ -45,6 +45,9 @@ fn test_updates_response_serialization() {
             current_version: "6.7.0-arch1-1".to_string(),
             new_version: "6.7.1-arch1-1".to_string(),
             download_size: 150_000_000,
+            current_size: 140_000_000,
+            new_size: 145_000_000,
+            repository: "core".to_string(),
         }],
         warnings: vec![],
     };

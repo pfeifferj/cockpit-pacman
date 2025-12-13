@@ -152,11 +152,11 @@ export interface PreflightKeyInfo {
 export interface PreflightResponse {
   success: boolean;
   error?: string;
-  conflicts: ConflictInfo[];
-  replacements: ReplacementInfo[];
-  removals: string[];
-  providers: ProviderChoice[];
-  import_keys: PreflightKeyInfo[];
+  conflicts?: ConflictInfo[];
+  replacements?: ReplacementInfo[];
+  removals?: string[];
+  providers?: ProviderChoice[];
+  import_keys?: PreflightKeyInfo[];
   packages_to_upgrade: number;
   total_download_size: number;
 }
