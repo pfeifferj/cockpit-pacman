@@ -1,4 +1,7 @@
-use alpm::{Alpm, AnyDownloadEvent, AnyEvent, AnyQuestion, DownloadEvent, Event, LogLevel, PackageOperation, Progress, Question, TransFlag};
+use alpm::{
+    Alpm, AnyDownloadEvent, AnyEvent, AnyQuestion, DownloadEvent, Event, LogLevel,
+    PackageOperation, Progress, Question, TransFlag,
+};
 use alpm_utils::{alpm_with_conf, DbListExt};
 use anyhow::{Context, Result};
 use pacmanconf::Config;
@@ -133,9 +136,15 @@ enum StreamEvent {
         total: Option<i64>,
     },
     #[serde(rename = "event")]
-    Event { event: String, package: Option<String> },
+    Event {
+        event: String,
+        package: Option<String>,
+    },
     #[serde(rename = "complete")]
-    Complete { success: bool, message: Option<String> },
+    Complete {
+        success: bool,
+        message: Option<String>,
+    },
 }
 
 #[derive(Serialize, Clone)]
@@ -280,7 +289,6 @@ fn validate_pagination(offset: usize, limit: usize) -> Result<()> {
     Ok(())
 }
 
-
 fn find_package_repo(handle: &Alpm, pkg_name: &str) -> Option<String> {
     handle
         .syncdbs()
@@ -377,13 +385,21 @@ fn list_installed(
         Some("name") => {
             filtered.sort_by(|(a, _), (b, _)| {
                 let cmp = a.name().cmp(b.name());
-                if ascending { cmp } else { cmp.reverse() }
+                if ascending {
+                    cmp
+                } else {
+                    cmp.reverse()
+                }
             });
         }
         Some("size") => {
             filtered.sort_by(|(a, _), (b, _)| {
                 let cmp = a.isize().cmp(&b.isize());
-                if ascending { cmp } else { cmp.reverse() }
+                if ascending {
+                    cmp
+                } else {
+                    cmp.reverse()
+                }
             });
         }
         Some("reason") => {
@@ -397,7 +413,11 @@ fn list_installed(
                     alpm::PackageReason::Depend => "dependency",
                 };
                 let cmp = reason_a.cmp(reason_b);
-                if ascending { cmp } else { cmp.reverse() }
+                if ascending {
+                    cmp
+                } else {
+                    cmp.reverse()
+                }
             });
         }
         _ => {} // No sorting or unknown column - keep default order
@@ -480,9 +500,13 @@ fn preflight_upgrade() -> Result<()> {
     let import_keys = Rc::new(RefCell::new(Vec::<KeyInfo>::new()));
 
     // Clones for callback closure
-    let (conflicts_cb, replacements_cb, removals_cb, providers_cb, import_keys_cb) =
-        (Rc::clone(&conflicts), Rc::clone(&replacements), Rc::clone(&removals),
-         Rc::clone(&providers), Rc::clone(&import_keys));
+    let (conflicts_cb, replacements_cb, removals_cb, providers_cb, import_keys_cb) = (
+        Rc::clone(&conflicts),
+        Rc::clone(&replacements),
+        Rc::clone(&removals),
+        Rc::clone(&providers),
+        Rc::clone(&import_keys),
+    );
 
     handle.set_question_cb((), move |mut question: AnyQuestion, _: &mut ()| {
         match question.question() {
@@ -514,7 +538,8 @@ fn preflight_upgrade() -> Result<()> {
                 question.set_answer(false);
             }
             Question::SelectProvider(mut q) => {
-                let provider_list: Vec<String> = q.providers().iter().map(|p| p.name().to_string()).collect();
+                let provider_list: Vec<String> =
+                    q.providers().iter().map(|p| p.name().to_string()).collect();
                 providers_cb.borrow_mut().push(ProviderChoice {
                     dependency: q.depend().name().to_string(),
                     providers: provider_list,
@@ -629,7 +654,10 @@ fn sync_database(force: bool) -> Result<()> {
                     message: Some("Operation cancelled by user".to_string()),
                 });
             } else {
-                emit_event(&StreamEvent::Complete { success: true, message: None });
+                emit_event(&StreamEvent::Complete {
+                    success: true,
+                    message: None,
+                });
             }
             Ok(())
         }
@@ -641,7 +669,10 @@ fn sync_database(force: bool) -> Result<()> {
                 });
                 Ok(())
             } else {
-                emit_event(&StreamEvent::Complete { success: false, message: Some(e.to_string()) });
+                emit_event(&StreamEvent::Complete {
+                    success: false,
+                    message: Some(e.to_string()),
+                });
                 Err(e.into())
             }
         }
@@ -655,10 +686,15 @@ fn run_upgrade() -> Result<()> {
     setup_log_cb(&mut handle);
     setup_dl_cb(&mut handle);
 
-    // Progress callback 
+    // Progress callback
     handle.set_progress_cb(
         (),
-        |progress: Progress, pkgname: &str, percent: i32, howmany: usize, current: usize, _: &mut ()| {
+        |progress: Progress,
+         pkgname: &str,
+         percent: i32,
+         howmany: usize,
+         current: usize,
+         _: &mut ()| {
             if is_cancelled() {
                 return; // Stop emitting events if cancelled
             }
@@ -703,7 +739,7 @@ fn run_upgrade() -> Result<()> {
         });
     });
 
-    // User confirmed these in preflight modal 
+    // User confirmed these in preflight modal
     handle.set_question_cb((), |mut question: AnyQuestion, _: &mut ()| {
         match question.question() {
             Question::Conflict(q) => {
@@ -750,11 +786,16 @@ fn run_upgrade() -> Result<()> {
             }
             Question::SelectProvider(mut q) => {
                 // Select first provider (user saw options in preflight)
-                let providers: Vec<String> = q.providers().iter().map(|p| p.name().to_string()).collect();
+                let providers: Vec<String> =
+                    q.providers().iter().map(|p| p.name().to_string()).collect();
                 let dep = q.depend().name().to_string();
                 emit_event(&StreamEvent::Log {
                     level: "info".to_string(),
-                    message: format!("Selecting {} as provider for {}", providers.first().unwrap_or(&"unknown".to_string()), dep),
+                    message: format!(
+                        "Selecting {} as provider for {}",
+                        providers.first().unwrap_or(&"unknown".to_string()),
+                        dep
+                    ),
                 });
                 q.set_index(0);
             }
@@ -824,7 +865,10 @@ fn run_upgrade() -> Result<()> {
             success: false,
             message: Some(format!("Failed to prepare transaction: {}", err_msg)),
         });
-        return Err(anyhow::anyhow!("Failed to prepare transaction: {}", err_msg));
+        return Err(anyhow::anyhow!(
+            "Failed to prepare transaction: {}",
+            err_msg
+        ));
     }
 
     // Check if there's anything to do
@@ -845,7 +889,9 @@ fn run_upgrade() -> Result<()> {
         if is_cancelled() {
             emit_event(&StreamEvent::Complete {
                 success: false,
-                message: Some("Operation interrupted - system may be in inconsistent state".to_string()),
+                message: Some(
+                    "Operation interrupted - system may be in inconsistent state".to_string(),
+                ),
             });
         } else {
             emit_event(&StreamEvent::Complete {
@@ -884,11 +930,27 @@ fn local_package_info(name: &str) -> Result<()> {
         url: pkg.url().map(|s| s.to_string()),
         licenses: pkg.licenses().iter().map(|s| s.to_string()).collect(),
         groups: pkg.groups().iter().map(|s| s.to_string()).collect(),
-        provides: pkg.provides().iter().map(|d| d.name().to_string()).collect(),
+        provides: pkg
+            .provides()
+            .iter()
+            .map(|d| d.name().to_string())
+            .collect(),
         depends: pkg.depends().iter().map(|d| d.name().to_string()).collect(),
-        optdepends: pkg.optdepends().iter().map(|d| d.name().to_string()).collect(),
-        conflicts: pkg.conflicts().iter().map(|d| d.name().to_string()).collect(),
-        replaces: pkg.replaces().iter().map(|d| d.name().to_string()).collect(),
+        optdepends: pkg
+            .optdepends()
+            .iter()
+            .map(|d| d.name().to_string())
+            .collect(),
+        conflicts: pkg
+            .conflicts()
+            .iter()
+            .map(|d| d.name().to_string())
+            .collect(),
+        replaces: pkg
+            .replaces()
+            .iter()
+            .map(|d| d.name().to_string())
+            .collect(),
         installed_size: pkg.isize(),
         packager: pkg.packager().map(|s| s.to_string()),
         architecture: pkg.arch().map(|s| s.to_string()),
@@ -916,7 +978,14 @@ struct SearchResponse {
     repositories: Vec<String>,
 }
 
-fn search(query: &str, offset: usize, limit: usize, installed_filter: Option<bool>, sort_by: Option<&str>, sort_dir: Option<&str>) -> Result<()> {
+fn search(
+    query: &str,
+    offset: usize,
+    limit: usize,
+    installed_filter: Option<bool>,
+    sort_by: Option<&str>,
+    sort_dir: Option<&str>,
+) -> Result<()> {
     let handle = get_handle()?;
     let localdb = handle.localdb();
     let mut repo_set: HashSet<String> = HashSet::new();
@@ -961,7 +1030,10 @@ fn search(query: &str, offset: usize, limit: usize, installed_filter: Option<boo
 
     // Second pass: apply installed filter
     let mut filtered: Vec<SearchResult> = if let Some(filter) = installed_filter {
-        all_matches.into_iter().filter(|r| r.installed == filter).collect()
+        all_matches
+            .into_iter()
+            .filter(|r| r.installed == filter)
+            .collect()
     } else {
         all_matches
     };
@@ -972,19 +1044,31 @@ fn search(query: &str, offset: usize, limit: usize, installed_filter: Option<boo
         Some("name") => {
             filtered.sort_by(|a, b| {
                 let cmp = a.name.cmp(&b.name);
-                if ascending { cmp } else { cmp.reverse() }
+                if ascending {
+                    cmp
+                } else {
+                    cmp.reverse()
+                }
             });
         }
         Some("repository") => {
             filtered.sort_by(|a, b| {
                 let cmp = a.repository.cmp(&b.repository);
-                if ascending { cmp } else { cmp.reverse() }
+                if ascending {
+                    cmp
+                } else {
+                    cmp.reverse()
+                }
             });
         }
         Some("status") => {
             filtered.sort_by(|a, b| {
                 let cmp = a.installed.cmp(&b.installed);
-                if ascending { cmp } else { cmp.reverse() }
+                if ascending {
+                    cmp
+                } else {
+                    cmp.reverse()
+                }
             });
         }
         _ => {} // No sorting or unknown column
@@ -1055,11 +1139,27 @@ fn sync_package_info(name: &str, repo: Option<&str>) -> Result<()> {
         url: pkg.url().map(|s| s.to_string()),
         licenses: pkg.licenses().iter().map(|s| s.to_string()).collect(),
         groups: pkg.groups().iter().map(|s| s.to_string()).collect(),
-        provides: pkg.provides().iter().map(|d| d.name().to_string()).collect(),
+        provides: pkg
+            .provides()
+            .iter()
+            .map(|d| d.name().to_string())
+            .collect(),
         depends: pkg.depends().iter().map(|d| d.name().to_string()).collect(),
-        optdepends: pkg.optdepends().iter().map(|d| d.name().to_string()).collect(),
-        conflicts: pkg.conflicts().iter().map(|d| d.name().to_string()).collect(),
-        replaces: pkg.replaces().iter().map(|d| d.name().to_string()).collect(),
+        optdepends: pkg
+            .optdepends()
+            .iter()
+            .map(|d| d.name().to_string())
+            .collect(),
+        conflicts: pkg
+            .conflicts()
+            .iter()
+            .map(|d| d.name().to_string())
+            .collect(),
+        replaces: pkg
+            .replaces()
+            .iter()
+            .map(|d| d.name().to_string())
+            .collect(),
         download_size: pkg.download_size(),
         installed_size: pkg.isize(),
         packager: pkg.packager().map(|s| s.to_string()),
@@ -1112,12 +1212,27 @@ fn main() {
             let offset = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
             let limit = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(50);
             let search = args.get(4).map(|s| s.as_str()).filter(|s| !s.is_empty());
-            let filter = args.get(5).map(|s| s.as_str()).filter(|s| !s.is_empty() && *s != "all");
-            let repo_filter = args.get(6).map(|s| s.as_str()).filter(|s| !s.is_empty() && *s != "all");
+            let filter = args
+                .get(5)
+                .map(|s| s.as_str())
+                .filter(|s| !s.is_empty() && *s != "all");
+            let repo_filter = args
+                .get(6)
+                .map(|s| s.as_str())
+                .filter(|s| !s.is_empty() && *s != "all");
             let sort_by = args.get(7).map(|s| s.as_str()).filter(|s| !s.is_empty());
             let sort_dir = args.get(8).map(|s| s.as_str()).filter(|s| !s.is_empty());
-            validate_pagination(offset, limit)
-                .and_then(|_| list_installed(offset, limit, search, filter, repo_filter, sort_by, sort_dir))
+            validate_pagination(offset, limit).and_then(|_| {
+                list_installed(
+                    offset,
+                    limit,
+                    search,
+                    filter,
+                    repo_filter,
+                    sort_by,
+                    sort_dir,
+                )
+            })
         }
         "check-updates" => check_updates(),
         "preflight-upgrade" => preflight_upgrade(),

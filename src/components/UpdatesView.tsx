@@ -212,7 +212,7 @@ export const UpdatesView: React.FC = () => {
         return;
       }
 
-      // Check if there are any issues needing confirmation 
+      // Check if there are any issues needing confirmation
       const hasIssues =
         (preflight.conflicts?.length ?? 0) > 0 ||
         (preflight.replacements?.length ?? 0) > 0 ||
