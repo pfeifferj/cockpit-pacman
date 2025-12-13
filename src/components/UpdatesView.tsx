@@ -30,7 +30,8 @@ import {
 	List,
 	ListItem,
 	Content,
-	ContentVariants
+	ContentVariants,
+	ExpandableSection
 } from '@patternfly/react-core';
 import {
 	Modal,
@@ -45,6 +46,7 @@ import {
   UpdateInfo,
   SyncPackageDetails,
   PreflightResponse,
+  StreamEvent,
   checkUpdates,
   runUpgrade,
   syncDatabase,
@@ -52,7 +54,16 @@ import {
   preflightUpgrade,
   formatSize,
 } from "../api";
+
 import { PackageDetailsModal } from "./PackageDetailsModal";
+
+interface UpgradeProgress {
+  phase: "preparing" | "downloading" | "installing" | "hooks";
+  current: number;
+  total: number;
+  currentPackage: string;
+  percent: number;
+}
 
 type ViewState =
   | "loading"
@@ -81,6 +92,14 @@ export const UpdatesView: React.FC = () => {
   const [preflightLoading, setPreflightLoading] = useState(false);
   const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
   const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
+  const [upgradeProgress, setUpgradeProgress] = useState<UpgradeProgress>({
+    phase: "preparing",
+    current: 0,
+    total: 0,
+    currentPackage: "",
+    percent: 0,
+  });
+  const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
 
   const repositories = useMemo(() => {
     const repos = new Set(updates.map((u) => u.repository));
@@ -239,7 +258,47 @@ export const UpdatesView: React.FC = () => {
     setConfirmModalOpen(false);
     setState("applying");
     setLog("");
+    setUpgradeProgress({
+      phase: "preparing",
+      current: 0,
+      total: updates.length,
+      currentPackage: "",
+      percent: 0,
+    });
+
+    const handleEvent = (event: StreamEvent) => {
+      if (event.type === "download") {
+        setUpgradeProgress((prev) => ({
+          ...prev,
+          phase: "downloading",
+          currentPackage: event.filename,
+          percent: event.downloaded && event.total
+            ? Math.round((event.downloaded / event.total) * 100)
+            : prev.percent,
+        }));
+      } else if (event.type === "progress") {
+        const phase = event.operation.includes("hook") ? "hooks" : "installing";
+        setUpgradeProgress((prev) => ({
+          ...prev,
+          phase,
+          current: event.current,
+          total: event.total,
+          currentPackage: event.package,
+          percent: event.percent,
+        }));
+      } else if (event.type === "event") {
+        if (event.event.includes("hook")) {
+          setUpgradeProgress((prev) => ({
+            ...prev,
+            phase: "hooks",
+            currentPackage: event.package || "",
+          }));
+        }
+      }
+    };
+
     const { cancel } = runUpgrade({
+      onEvent: handleEvent,
       onData: (data) => setLog((prev) => prev + data),
       onComplete: () => {
         setState("success");
@@ -324,6 +383,21 @@ export const UpdatesView: React.FC = () => {
   }
 
   if (state === "applying") {
+    const phaseLabels: Record<UpgradeProgress["phase"], string> = {
+      preparing: "Preparing upgrade",
+      downloading: "Downloading packages",
+      installing: "Upgrading packages",
+      hooks: "Running post-transaction hooks",
+    };
+
+    const progressValue = upgradeProgress.total > 0
+      ? Math.round((upgradeProgress.current / upgradeProgress.total) * 100)
+      : undefined;
+
+    const progressLabel = upgradeProgress.total > 0
+      ? `${upgradeProgress.current} of ${upgradeProgress.total}`
+      : undefined;
+
     return (
       <Card>
         <CardBody>
@@ -337,17 +411,35 @@ export const UpdatesView: React.FC = () => {
               </Button>
             </FlexItem>
           </Flex>
+
+          <Content style={{ marginTop: "1rem", marginBottom: "0.5rem" }}>
+            <strong>{phaseLabels[upgradeProgress.phase]}</strong>
+            {upgradeProgress.currentPackage && (
+              <span style={{ color: "var(--pf-t--global--text--color--subtle)" }}>
+                {" "}- {upgradeProgress.currentPackage}
+              </span>
+            )}
+          </Content>
+
           <Progress
-            value={undefined}
-            measureLocation={ProgressMeasureLocation.none}
-            aria-label="Applying updates"
-            style={{ marginTop: "1rem" }}
+            value={progressValue}
+            title={progressLabel}
+            measureLocation={progressValue !== undefined ? ProgressMeasureLocation.outside : ProgressMeasureLocation.none}
+            aria-label="Upgrade progress"
           />
-          <div ref={logContainerRef} style={{ marginTop: "1rem", maxHeight: "400px", overflow: "auto" }}>
-            <CodeBlock>
-              <CodeBlockCode>{log || "Starting upgrade..."}</CodeBlockCode>
-            </CodeBlock>
-          </div>
+
+          <ExpandableSection
+            toggleText={isDetailsExpanded ? "Hide details" : "Show details"}
+            onToggle={(_event, expanded) => setIsDetailsExpanded(expanded)}
+            isExpanded={isDetailsExpanded}
+            style={{ marginTop: "1rem" }}
+          >
+            <div ref={logContainerRef} style={{ maxHeight: "300px", overflow: "auto" }}>
+              <CodeBlock>
+                <CodeBlockCode>{log || "Starting upgrade..."}</CodeBlockCode>
+              </CodeBlock>
+            </div>
+          </ExpandableSection>
         </CardBody>
       </Card>
     );
