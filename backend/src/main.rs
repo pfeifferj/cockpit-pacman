@@ -689,14 +689,14 @@ fn run_upgrade(ignore_pkgs: &[String]) -> Result<()> {
 
     let mut handle = get_handle()?;
 
-    // Set ignored packages
+    // Set ignored packages - fail fast if any are invalid
     for pkg_name in ignore_pkgs {
-        if let Err(e) = handle.add_ignorepkg(pkg_name.as_str()) {
-            emit_event(&StreamEvent::Log {
-                level: "warning".to_string(),
-                message: format!("Failed to ignore package {}: {}", pkg_name, e),
+        handle.add_ignorepkg(pkg_name.as_str()).inspect_err(|e| {
+            emit_event(&StreamEvent::Complete {
+                success: false,
+                message: Some(format!("Failed to ignore package {}: {}", pkg_name, e)),
             });
-        }
+        })?;
     }
 
     setup_log_cb(&mut handle);
@@ -1259,7 +1259,12 @@ fn main() {
             let ignore_pkgs: Vec<String> = args
                 .get(2)
                 .filter(|s| !s.is_empty())
-                .map(|s| s.split(',').map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect())
+                .map(|s| {
+                    s.split(',')
+                        .map(|p| p.trim().to_string())
+                        .filter(|p| !p.is_empty())
+                        .collect()
+                })
                 .unwrap_or_default();
             preflight_upgrade(&ignore_pkgs)
         }
@@ -1272,7 +1277,12 @@ fn main() {
             let ignore_pkgs: Vec<String> = args
                 .get(2)
                 .filter(|s| !s.is_empty())
-                .map(|s| s.split(',').map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect())
+                .map(|s| {
+                    s.split(',')
+                        .map(|p| p.trim().to_string())
+                        .filter(|p| !p.is_empty())
+                        .collect()
+                })
                 .unwrap_or_default();
             run_upgrade(&ignore_pkgs)
         }
