@@ -489,8 +489,13 @@ fn check_updates() -> Result<()> {
     Ok(())
 }
 
-fn preflight_upgrade() -> Result<()> {
+fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
     let mut handle = get_handle()?;
+
+    // Set ignored packages
+    for pkg_name in ignore_pkgs {
+        handle.add_ignorepkg(pkg_name.as_str())?;
+    }
 
     // Collected issues that need user confirmation
     let conflicts = Rc::new(RefCell::new(Vec::<ConflictInfo>::new()));
@@ -679,10 +684,21 @@ fn sync_database(force: bool) -> Result<()> {
     }
 }
 
-fn run_upgrade() -> Result<()> {
+fn run_upgrade(ignore_pkgs: &[String]) -> Result<()> {
     setup_signal_handler();
 
     let mut handle = get_handle()?;
+
+    // Set ignored packages
+    for pkg_name in ignore_pkgs {
+        if let Err(e) = handle.add_ignorepkg(pkg_name.as_str()) {
+            emit_event(&StreamEvent::Log {
+                level: "warning".to_string(),
+                message: format!("Failed to ignore package {}: {}", pkg_name, e),
+            });
+        }
+    }
+
     setup_log_cb(&mut handle);
     setup_dl_cb(&mut handle);
 
@@ -1183,11 +1199,14 @@ fn print_usage() {
     eprintln!("                         sort_by: name|size|reason");
     eprintln!("                         sort_dir: asc|desc");
     eprintln!("  check-updates          Check for available updates");
-    eprintln!("  preflight-upgrade      Check what the upgrade will do (requires root)");
+    eprintln!("  preflight-upgrade [ignore]");
+    eprintln!("                         Check what the upgrade will do (requires root)");
+    eprintln!("                         ignore: comma-separated list of packages to skip");
     eprintln!("                         Returns conflicts, replacements, keys to import");
     eprintln!("  sync-database [force]  Sync package databases (requires root)");
     eprintln!("                         force: true|false (default: true)");
-    eprintln!("  upgrade                Perform system upgrade (requires root)");
+    eprintln!("  upgrade [ignore]       Perform system upgrade (requires root)");
+    eprintln!("                         ignore: comma-separated list of packages to skip");
     eprintln!("  local-package-info NAME");
     eprintln!("                         Get detailed info for an installed package");
     eprintln!("  sync-package-info NAME [REPO]");
@@ -1235,12 +1254,28 @@ fn main() {
             })
         }
         "check-updates" => check_updates(),
-        "preflight-upgrade" => preflight_upgrade(),
+        "preflight-upgrade" => {
+            // Parse comma-separated list of packages to ignore
+            let ignore_pkgs: Vec<String> = args
+                .get(2)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.split(',').map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect())
+                .unwrap_or_default();
+            preflight_upgrade(&ignore_pkgs)
+        }
         "sync-database" => {
             let force = args.get(2).map(|s| s == "true").unwrap_or(true);
             sync_database(force)
         }
-        "upgrade" => run_upgrade(),
+        "upgrade" => {
+            // Parse comma-separated list of packages to ignore
+            let ignore_pkgs: Vec<String> = args
+                .get(2)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.split(',').map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect())
+                .unwrap_or_default();
+            run_upgrade(&ignore_pkgs)
+        }
         "local-package-info" => {
             if args.len() < 3 {
                 eprintln!("Error: local-package-info requires a package name");

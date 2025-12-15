@@ -246,8 +246,9 @@ export async function getSyncPackageInfo(name: string, repo?: string): Promise<S
   return runBackend<SyncPackageDetails>("sync-package-info", args);
 }
 
-export async function preflightUpgrade(): Promise<PreflightResponse> {
-  return runBackend<PreflightResponse>("preflight-upgrade");
+export async function preflightUpgrade(ignore?: string[]): Promise<PreflightResponse> {
+  const args = ignore && ignore.length > 0 ? [ignore.join(",")] : [];
+  return runBackend<PreflightResponse>("preflight-upgrade", args);
 }
 
 // Stream event types from backend
@@ -390,8 +391,9 @@ function runStreamingBackend(
   };
 }
 
-export function runUpgrade(callbacks: UpgradeCallbacks): { cancel: () => void } {
-  return runStreamingBackend("upgrade", [], callbacks);
+export function runUpgrade(callbacks: UpgradeCallbacks, ignore?: string[]): { cancel: () => void } {
+  const args = ignore && ignore.length > 0 ? [ignore.join(",")] : [];
+  return runStreamingBackend("upgrade", args, callbacks);
 }
 
 export function syncDatabase(callbacks: UpgradeCallbacks): { cancel: () => void } {
