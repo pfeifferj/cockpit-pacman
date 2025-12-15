@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   Card,
   CardBody,
@@ -29,7 +29,8 @@ import { SearchResult, SyncPackageDetails, searchPackages, getSyncPackageInfo, I
 import { sanitizeSearchInput } from "../utils";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 
-const MIN_SEARCH_LENGTH = 2;
+const MIN_SEARCH_LENGTH = 1;
+const SEARCH_DEBOUNCE_MS = 300;
 const PER_PAGE_OPTIONS = [
   { title: "20", value: 20 },
   { title: "50", value: 50 },
@@ -56,6 +57,67 @@ export const SearchView: React.FC = () => {
   const [repositories, setRepositories] = useState<string[]>([]);
   const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
   const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Refs to avoid stale closures in debounced callback
+  const currentQueryRef = useRef(currentQuery);
+  const perPageRef = useRef(perPage);
+  currentQueryRef.current = currentQuery;
+  perPageRef.current = perPage;
+
+  // Debounced auto-search when input changes
+  useEffect(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+
+    const query = sanitizeSearchInput(searchInput);
+    if (query.length < MIN_SEARCH_LENGTH) {
+      return;
+    }
+
+    debounceRef.current = setTimeout(async () => {
+      // Use refs to get current values, avoiding stale closure
+      if (query !== currentQueryRef.current) {
+        setCurrentQuery(query);
+        setHasSearched(true);
+        setRepoFilter("all");
+        setInstalledFilter("all");
+        setPage(1);
+        setActiveSortIndex(null);
+        setLoading(true);
+        setError(null);
+        try {
+          const response = await searchPackages({
+            query,
+            offset: 0,
+            limit: perPageRef.current,
+            installed: "all",
+          });
+          setResults(response.results);
+          setTotal(response.total);
+          setTotalInstalled(response.total_installed);
+          setTotalNotInstalled(response.total_not_installed);
+          setRepositories(response.repositories);
+        } catch (ex) {
+          setError(ex instanceof Error ? ex.message : String(ex));
+          setResults([]);
+          setTotal(0);
+          setTotalInstalled(0);
+          setTotalNotInstalled(0);
+          setRepositories([]);
+        } finally {
+          setLoading(false);
+        }
+      }
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, [searchInput]);
 
   const filteredResults = useMemo(() => {
     if (repoFilter === "all") return results;
@@ -108,6 +170,11 @@ export const SearchView: React.FC = () => {
   };
 
   const handleSearch = async () => {
+    // Cancel any pending debounce when manually searching
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+
     const query = sanitizeSearchInput(searchInput);
     if (query.length < MIN_SEARCH_LENGTH) {
       setError(`Search query must be at least ${MIN_SEARCH_LENGTH} characters`);
@@ -119,11 +186,16 @@ export const SearchView: React.FC = () => {
     setRepoFilter("all");
     setInstalledFilter("all");
     setPage(1);
-    setActiveSortIndex(null); // Reset sort on new search
+    setActiveSortIndex(null);
     await fetchResults(query, 1, perPage, "all", true);
   };
 
   const handleSearchClear = () => {
+    // Cancel any pending debounce when clearing
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+
     setSearchInput("");
     setCurrentQuery("");
     setResults([]);

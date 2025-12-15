@@ -103,6 +103,7 @@ export const UpdatesView: React.FC = () => {
   });
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   const repositories = useMemo(() => {
     const repos = new Set(updates.map((u) => u.repository));
@@ -247,6 +248,7 @@ export const UpdatesView: React.FC = () => {
   const handleRefresh = async () => {
     setState("checking");
     setLog("");
+    setSelectedPackages(new Set());
     syncDatabase({
       onData: (data) => setLog((prev) => prev + data),
       onComplete: () => loadUpdates(),
@@ -302,7 +304,7 @@ export const UpdatesView: React.FC = () => {
     setUpgradeProgress({
       phase: "preparing",
       current: 0,
-      total: updates.length,
+      total: selectedPackages.size,
       currentPackage: "",
       percent: 0,
     });
@@ -360,6 +362,8 @@ export const UpdatesView: React.FC = () => {
   };
 
   const confirmCancel = () => {
+    if (isCancelling) return;
+    setIsCancelling(true);
     setCancelModalOpen(false);
     if (cancelRef.current) {
       cancelRef.current();
@@ -367,6 +371,7 @@ export const UpdatesView: React.FC = () => {
       setState("available");
       setLog("");
     }
+    setIsCancelling(false);
   };
 
   const handlePackageClick = async (pkgName: string) => {
@@ -495,12 +500,12 @@ export const UpdatesView: React.FC = () => {
           isOpen={cancelModalOpen}
           onClose={() => setCancelModalOpen(false)}
           actions={[
-            <Button key="cancel-confirm" variant="danger" onClick={confirmCancel}>
+            <Button key="cancel-confirm" variant="danger" onClick={confirmCancel} isDisabled={isCancelling} isLoading={isCancelling}>
               {upgradeProgress.phase === "downloading" || upgradeProgress.phase === "preparing"
                 ? "Cancel Upgrade"
                 : "Cancel Anyway"}
             </Button>,
-            <Button key="cancel-dismiss" variant="link" onClick={() => setCancelModalOpen(false)}>
+            <Button key="cancel-dismiss" variant="link" onClick={() => setCancelModalOpen(false)} isDisabled={isCancelling}>
               Continue Upgrade
             </Button>,
           ]}
