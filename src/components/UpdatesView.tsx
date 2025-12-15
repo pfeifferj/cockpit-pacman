@@ -31,7 +31,8 @@ import {
 	ListItem,
 	Content,
 	ContentVariants,
-	ExpandableSection
+	ExpandableSection,
+	Checkbox
 } from '@patternfly/react-core';
 import {
 	Modal,
@@ -92,6 +93,7 @@ export const UpdatesView: React.FC = () => {
   const [preflightLoading, setPreflightLoading] = useState(false);
   const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
   const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
+  const [selectedPackages, setSelectedPackages] = useState<Set<string>>(new Set());
   const [upgradeProgress, setUpgradeProgress] = useState<UpgradeProgress>({
     phase: "preparing",
     current: 0,
@@ -100,6 +102,7 @@ export const UpdatesView: React.FC = () => {
     percent: 0,
   });
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
 
   const repositories = useMemo(() => {
     const repos = new Set(updates.map((u) => u.repository));
@@ -123,7 +126,7 @@ export const UpdatesView: React.FC = () => {
     return result;
   }, [updates, searchFilter, repoFilter]);
 
-  const sortableColumns = [0, 1, 3, 4, 5]; // name, repo, download, installed, net
+  const sortableColumns = [1, 2, 4, 5, 6]; // name, repo, download, installed, net (offset by 1 for checkbox column)
 
   const getSortParams = (columnIndex: number): ThProps["sort"] | undefined => {
     if (!sortableColumns.includes(columnIndex)) return undefined;
@@ -147,19 +150,19 @@ export const UpdatesView: React.FC = () => {
     return [...filteredUpdates].sort((a, b) => {
       let comparison = 0;
       switch (activeSortIndex) {
-        case 0: // name
+        case 1: // name
           comparison = a.name.localeCompare(b.name);
           break;
-        case 1: // repository
+        case 2: // repository
           comparison = a.repository.localeCompare(b.repository);
           break;
-        case 3: // download_size
+        case 4: // download_size
           comparison = a.download_size - b.download_size;
           break;
-        case 4: // new_size (installed size after upgrade)
+        case 5: // new_size (installed size after upgrade)
           comparison = a.new_size - b.new_size;
           break;
-        case 5: // net_size (new - current)
+        case 6: // net_size (new - current)
           comparison = (a.new_size - a.current_size) - (b.new_size - b.current_size);
           break;
         default:
@@ -168,6 +171,39 @@ export const UpdatesView: React.FC = () => {
       return activeSortDirection === "asc" ? comparison : -comparison;
     });
   }, [filteredUpdates, activeSortIndex, activeSortDirection]);
+
+  // Calculate ignored packages (unselected ones)
+  const ignoredPackages = useMemo(() => {
+    return updates.filter((u) => !selectedPackages.has(u.name)).map((u) => u.name);
+  }, [updates, selectedPackages]);
+
+  // Calculate selected updates for summary
+  const selectedUpdates = useMemo(() => {
+    return updates.filter((u) => selectedPackages.has(u.name));
+  }, [updates, selectedPackages]);
+
+  const togglePackageSelection = (pkgName: string) => {
+    setSelectedPackages((prev) => {
+      const next = new Set(prev);
+      if (next.has(pkgName)) {
+        next.delete(pkgName);
+      } else {
+        next.add(pkgName);
+      }
+      return next;
+    });
+  };
+
+  const selectAllPackages = () => {
+    setSelectedPackages(new Set(updates.map((u) => u.name)));
+  };
+
+  const deselectAllPackages = () => {
+    setSelectedPackages(new Set());
+  };
+
+  const areAllSelected = selectedPackages.size === updates.length && updates.length > 0;
+  const areSomeSelected = selectedPackages.size > 0 && selectedPackages.size < updates.length;
 
   const loadUpdates = useCallback(async () => {
     setState("checking");
@@ -187,6 +223,11 @@ export const UpdatesView: React.FC = () => {
   useEffect(() => {
     loadUpdates();
   }, [loadUpdates]);
+
+  // Initialize all packages as selected when updates load
+  useEffect(() => {
+    setSelectedPackages(new Set(updates.map((u) => u.name)));
+  }, [updates]);
 
   useEffect(() => {
     return () => {
@@ -221,7 +262,7 @@ export const UpdatesView: React.FC = () => {
     setPreflightLoading(true);
     setError(null);
     try {
-      const preflight = await preflightUpgrade();
+      const preflight = await preflightUpgrade(ignoredPackages);
       setPreflightData(preflight);
       setPreflightLoading(false);
 
@@ -310,11 +351,16 @@ export const UpdatesView: React.FC = () => {
         setError(err);
         cancelRef.current = null;
       },
-    });
+    }, ignoredPackages);
     cancelRef.current = cancel;
   };
 
-  const handleCancel = () => {
+  const handleCancelClick = () => {
+    setCancelModalOpen(true);
+  };
+
+  const confirmCancel = () => {
+    setCancelModalOpen(false);
     if (cancelRef.current) {
       cancelRef.current();
       cancelRef.current = null;
@@ -339,10 +385,11 @@ export const UpdatesView: React.FC = () => {
     setSelectedPackage(null);
   };
 
-  const totalDownloadSize = updates.reduce((sum, u) => sum + u.download_size, 0);
-  const totalCurrentSize = updates.reduce((sum, u) => sum + u.current_size, 0);
-  const totalNewSize = updates.reduce((sum, u) => sum + u.new_size, 0);
-  const totalNetSize = totalNewSize - totalCurrentSize;
+  // Summary totals based on selected packages
+  const selectedDownloadSize = selectedUpdates.reduce((sum, u) => sum + u.download_size, 0);
+  const selectedCurrentSize = selectedUpdates.reduce((sum, u) => sum + u.current_size, 0);
+  const selectedNewSize = selectedUpdates.reduce((sum, u) => sum + u.new_size, 0);
+  const selectedNetSize = selectedNewSize - selectedCurrentSize;
 
   if (state === "loading" || state === "checking") {
     return (
@@ -406,7 +453,7 @@ export const UpdatesView: React.FC = () => {
               <CardTitle style={{ margin: 0 }}>Applying Updates</CardTitle>
             </FlexItem>
             <FlexItem>
-              <Button variant="danger" onClick={handleCancel}>
+              <Button variant="danger" onClick={handleCancelClick}>
                 Cancel
               </Button>
             </FlexItem>
@@ -441,6 +488,40 @@ export const UpdatesView: React.FC = () => {
             </div>
           </ExpandableSection>
         </CardBody>
+
+        <Modal
+          variant={ModalVariant.small}
+          title="Cancel upgrade?"
+          isOpen={cancelModalOpen}
+          onClose={() => setCancelModalOpen(false)}
+          actions={[
+            <Button key="cancel-confirm" variant="danger" onClick={confirmCancel}>
+              {upgradeProgress.phase === "downloading" || upgradeProgress.phase === "preparing"
+                ? "Cancel Upgrade"
+                : "Cancel Anyway"}
+            </Button>,
+            <Button key="cancel-dismiss" variant="link" onClick={() => setCancelModalOpen(false)}>
+              Continue Upgrade
+            </Button>,
+          ]}
+        >
+          {upgradeProgress.phase === "downloading" || upgradeProgress.phase === "preparing" ? (
+            <Content>
+              <Content component={ContentVariants.p}>
+                The upgrade has not started modifying your system yet. It is safe to cancel now.
+              </Content>
+            </Content>
+          ) : (
+            <Content>
+              <Content component={ContentVariants.p}>
+                <strong>Warning:</strong> The upgrade is currently {upgradeProgress.phase === "hooks" ? "running post-transaction hooks" : "installing packages"}.
+              </Content>
+              <Content component={ContentVariants.p}>
+                Cancelling now may leave your system in an inconsistent state. You may need to run <code>pacman -Syu</code> manually to complete the upgrade.
+              </Content>
+            </Content>
+          )}
+        </Modal>
       </Card>
     );
   }
@@ -513,31 +594,36 @@ export const UpdatesView: React.FC = () => {
             </ul>
           </Alert>
         )}
+        {ignoredPackages.length > 0 && (
+          <Alert variant="warning" title="Partial upgrade" isInline style={{ marginBottom: "1rem" }}>
+            Skipping {ignoredPackages.length} package{ignoredPackages.length !== 1 ? "s" : ""}. Partial upgrades are unsupported and may cause dependency issues.
+          </Alert>
+        )}
         <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
           <FlexItem>
             <CardTitle style={{ margin: 0, marginBottom: "1rem" }}>
-              {updates.length} update{updates.length !== 1 ? "s" : ""} available
+              {selectedPackages.size} of {updates.length} update{updates.length !== 1 ? "s" : ""} selected
               {filteredUpdates.length !== updates.length && ` (${filteredUpdates.length} shown)`}
             </CardTitle>
             <Flex spaceItems={{ default: "spaceItemsLg" }} style={{ marginBottom: "1rem" }}>
               <FlexItem>
                 <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--info--default)" }}>{formatSize(totalDownloadSize)}</div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Total Download Size</div>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--info--default)" }}>{formatSize(selectedDownloadSize)}</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Download Size</div>
                 </div>
               </FlexItem>
               <FlexItem>
                 <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600 }}>{formatSize(totalNewSize)}</div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Total Installed Size</div>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600 }}>{formatSize(selectedNewSize)}</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Installed Size</div>
                 </div>
               </FlexItem>
               <FlexItem>
                 <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: totalNetSize > 0 ? "var(--pf-t--global--color--status--danger--default)" : totalNetSize < 0 ? "var(--pf-t--global--color--status--success--default)" : undefined }}>
-                    {totalNetSize >= 0 ? "+" : ""}{formatSize(totalNetSize)}
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: selectedNetSize > 0 ? "var(--pf-t--global--color--status--danger--default)" : selectedNetSize < 0 ? "var(--pf-t--global--color--status--success--default)" : undefined }}>
+                    {selectedNetSize >= 0 ? "+" : ""}{formatSize(selectedNetSize)}
                   </div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Net Upgrade Size</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Net Size</div>
                 </div>
               </FlexItem>
             </Flex>
@@ -555,9 +641,9 @@ export const UpdatesView: React.FC = () => {
               variant="primary"
               onClick={handleApplyUpdates}
               isLoading={preflightLoading}
-              isDisabled={preflightLoading}
+              isDisabled={preflightLoading || selectedPackages.size === 0}
             >
-              {preflightLoading ? "Checking..." : "Apply Updates"}
+              {preflightLoading ? "Checking..." : `Apply ${selectedPackages.size} Update${selectedPackages.size !== 1 ? "s" : ""}`}
             </Button>
           </FlexItem>
         </Flex>
@@ -609,23 +695,41 @@ export const UpdatesView: React.FC = () => {
         <Table aria-label="Available updates" variant="compact">
           <Thead>
             <Tr>
-              <Th sort={getSortParams(0)}>Package</Th>
-              <Th sort={getSortParams(1)}>Repository</Th>
+              <Th screenReaderText="Select">
+                <Checkbox
+                  id="select-all-updates"
+                  isChecked={areAllSelected ? true : areSomeSelected ? null : false}
+                  onChange={(_event, checked) => checked ? selectAllPackages() : deselectAllPackages()}
+                  aria-label="Select all updates"
+                />
+              </Th>
+              <Th sort={getSortParams(1)}>Package</Th>
+              <Th sort={getSortParams(2)}>Repository</Th>
               <Th>Version</Th>
-              <Th sort={getSortParams(3)}>Download</Th>
-              <Th sort={getSortParams(4)}>Installed</Th>
-              <Th sort={getSortParams(5)}>Net</Th>
+              <Th sort={getSortParams(4)}>Download</Th>
+              <Th sort={getSortParams(5)}>Installed</Th>
+              <Th sort={getSortParams(6)}>Net</Th>
             </Tr>
           </Thead>
           <Tbody>
             {sortedUpdates.map((update) => {
               const netSize = update.new_size - update.current_size;
+              const isSelected = selectedPackages.has(update.name);
               return (
                 <Tr
                   key={update.name}
                   isClickable
                   onRowClick={() => handlePackageClick(update.name)}
+                  isRowSelected={isSelected}
                 >
+                  <Td
+                    select={{
+                      rowIndex: 0,
+                      onSelect: (_event, _isSelected) => togglePackageSelection(update.name),
+                      isSelected,
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
                   <Td dataLabel="Package">
                     <Button variant="link" isInline style={{ padding: 0 }}>
                       {update.name}
@@ -634,7 +738,7 @@ export const UpdatesView: React.FC = () => {
                   <Td dataLabel="Repository">
                     <Label color="blue">{update.repository}</Label>
                   </Td>
-                  <Td dataLabel="Version">{update.current_version} → {update.new_version}</Td>
+                  <Td dataLabel="Version">{update.current_version} {"->"} {update.new_version}</Td>
                   <Td dataLabel="Download">{formatSize(update.download_size)}</Td>
                   <Td dataLabel="Installed Size">{formatSize(update.new_size)}</Td>
                   <Td dataLabel="Net" style={{ color: netSize > 0 ? "var(--pf-t--global--color--status--danger--default)" : netSize < 0 ? "var(--pf-t--global--color--status--success--default)" : undefined }}>
