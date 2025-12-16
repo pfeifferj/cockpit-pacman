@@ -1,10 +1,11 @@
 VERSION = 0.1.0
 PREFIX = /usr
 DESTDIR =
+TARFILE = cockpit-pacman-$(VERSION).tar.xz
 
 BACKEND_BIN = backend/target/release/cockpit-pacman-backend
 
-.PHONY: all build build-backend build-frontend clean install devel-install lint lint-frontend lint-backend test test-frontend test-backend check
+.PHONY: all build build-backend build-frontend clean install devel-install lint lint-frontend lint-backend test test-frontend test-backend check dist
 
 all: build install
 	@if [ -n "$$SUDO_USER" ] && [ -d node_modules ]; then chown -R $$SUDO_USER node_modules; fi
@@ -23,6 +24,13 @@ build-frontend:
 clean:
 	cd backend && cargo clean
 	rm -rf node_modules dist
+	rm -f packaging/arch/PKGBUILD
+
+packaging/arch/PKGBUILD: packaging/arch/PKGBUILD.in
+	sed 's/VERSION/$(VERSION)/' $< > $@
+
+dist: packaging/arch/PKGBUILD
+	git archive --format=tar --prefix=cockpit-pacman-$(VERSION)/ HEAD | xz > $(TARFILE)
 
 install:
 	install -d $(DESTDIR)$(PREFIX)/share/cockpit/pacman
