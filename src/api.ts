@@ -401,10 +401,12 @@ export function syncDatabase(callbacks: UpgradeCallbacks): { cancel: () => void 
 }
 
 export function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
+  const sign = bytes < 0 ? "-" : "";
+  const abs = Math.abs(bytes);
+  if (abs < 1024) return `${sign}${abs} B`;
+  if (abs < 1024 * 1024) return `${sign}${(abs / 1024).toFixed(1)} KiB`;
+  if (abs < 1024 * 1024 * 1024) return `${sign}${(abs / (1024 * 1024)).toFixed(1)} MiB`;
+  return `${sign}${(abs / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
 }
 
 export function formatDate(timestamp: number | null): string {
