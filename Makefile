@@ -7,6 +7,7 @@ BACKEND_BIN = backend/target/release/cockpit-pacman-backend
 .PHONY: all build build-backend build-frontend clean install devel-install lint lint-frontend lint-backend test test-frontend test-backend check
 
 all: build install
+	@if [ -n "$$SUDO_USER" ] && [ -d node_modules ]; then chown -R $$SUDO_USER node_modules; fi
 
 build: build-backend build-frontend
 

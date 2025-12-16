@@ -37,6 +37,13 @@ describe("formatSize", () => {
     expect(formatSize(1024 * 1024 * 1024)).toBe("1.00 GiB");
     expect(formatSize(1024 * 1024 * 1024 * 2.5)).toBe("2.50 GiB");
   });
+
+  it("formats negative sizes correctly", () => {
+    expect(formatSize(-500)).toBe("-500 B");
+    expect(formatSize(-1536)).toBe("-1.5 KiB");
+    expect(formatSize(-1198151)).toBe("-1.1 MiB");
+    expect(formatSize(-1024 * 1024 * 1024 * 2.5)).toBe("-2.50 GiB");
+  });
 });
 
 describe("formatDate", () => {
