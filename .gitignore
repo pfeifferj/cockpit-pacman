@@ -7,3 +7,4 @@ backend/target/
 *.swp
 *.swo
 coverage/
+/packaging/arch/PKGBUILD
