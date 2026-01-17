@@ -8,3 +8,6 @@ backend/target/
 *.swo
 coverage/
 /packaging/arch/PKGBUILD
+.auth/
+playwright-report/
+test-results/

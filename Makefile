@@ -5,7 +5,7 @@ TARFILE = cockpit-pacman-$(VERSION).tar.xz
 
 BACKEND_BIN = backend/target/release/cockpit-pacman-backend
 
-.PHONY: all build build-backend build-frontend clean install devel-install lint lint-frontend lint-backend test test-frontend test-backend check dist
+.PHONY: all build build-backend build-frontend clean install devel-install lint lint-frontend lint-backend test test-frontend test-backend test-e2e test-e2e-ui check dist
 
 all: build install
 	@if [ -n "$$SUDO_USER" ] && [ -d node_modules ]; then chown -R $$SUDO_USER node_modules; fi
@@ -61,6 +61,12 @@ test-frontend:
 
 test-backend:
 	cd backend && cargo test
+
+test-e2e:
+	npm run test:e2e
+
+test-e2e-ui:
+	npm run test:e2e:ui
 
 check: lint
 	npm run typecheck
