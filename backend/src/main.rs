@@ -11,31 +11,32 @@ use pacman_key::{
 use pacmanconf::Config;
 use serde::Serialize;
 use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::io::{self, Write};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 
 /// Global flag for cancellation
 static CANCELLED: AtomicBool = AtomicBool::new(false);
 
 fn is_cancelled() -> bool {
-    CANCELLED.load(Ordering::SeqCst)
+    CANCELLED.load(AtomicOrdering::SeqCst)
 }
 
 fn setup_signal_handler() {
     static HANDLER_SET: AtomicBool = AtomicBool::new(false);
 
-    if HANDLER_SET.load(Ordering::SeqCst) {
+    if HANDLER_SET.load(AtomicOrdering::SeqCst) {
         return;
     }
 
     match ctrlc::set_handler(move || {
-        CANCELLED.store(true, Ordering::SeqCst);
+        CANCELLED.store(true, AtomicOrdering::SeqCst);
     }) {
         Ok(()) => {
-            HANDLER_SET.store(true, Ordering::SeqCst);
+            HANDLER_SET.store(true, AtomicOrdering::SeqCst);
         }
         Err(e) => {
             eprintln!("Warning: Failed to set signal handler: {}", e);
@@ -45,6 +46,20 @@ fn setup_signal_handler() {
 
 #[cfg(test)]
 mod tests;
+
+fn sort_with_direction<T, F>(items: &mut [T], ascending: bool, cmp_fn: F)
+where
+    F: Fn(&T, &T) -> Ordering,
+{
+    items.sort_by(|a, b| {
+        let cmp = cmp_fn(a, b);
+        if ascending {
+            cmp
+        } else {
+            cmp.reverse()
+        }
+    });
+}
 
 #[derive(Serialize)]
 struct Package {
@@ -219,7 +234,6 @@ fn emit_event(event: &StreamEvent) {
 
 struct TransactionGuard<'a> {
     handle: &'a mut Alpm,
-    released: bool,
 }
 
 impl<'a> TransactionGuard<'a> {
@@ -227,10 +241,7 @@ impl<'a> TransactionGuard<'a> {
         handle
             .trans_init(flags)
             .context("Failed to initialize transaction")?;
-        Ok(Self {
-            handle,
-            released: false,
-        })
+        Ok(Self { handle })
     }
 
     fn sync_sysupgrade(&mut self, enable_downgrade: bool) -> Result<(), alpm::Error> {
@@ -256,9 +267,7 @@ impl<'a> TransactionGuard<'a> {
 
 impl Drop for TransactionGuard<'_> {
     fn drop(&mut self) {
-        if !self.released {
-            let _ = self.handle.trans_release();
-        }
+        let _ = self.handle.trans_release();
     }
 }
 
@@ -451,45 +460,24 @@ fn list_installed(
     // Sort before pagination
     let ascending = sort_dir != Some("desc");
     match sort_by {
-        Some("name") => {
-            filtered.sort_by(|(a, _), (b, _)| {
-                let cmp = a.name().cmp(b.name());
-                if ascending {
-                    cmp
-                } else {
-                    cmp.reverse()
-                }
-            });
-        }
-        Some("size") => {
-            filtered.sort_by(|(a, _), (b, _)| {
-                let cmp = a.isize().cmp(&b.isize());
-                if ascending {
-                    cmp
-                } else {
-                    cmp.reverse()
-                }
-            });
-        }
-        Some("reason") => {
-            filtered.sort_by(|(a, _), (b, _)| {
-                let reason_a = match a.reason() {
-                    alpm::PackageReason::Explicit => "explicit",
-                    alpm::PackageReason::Depend => "dependency",
-                };
-                let reason_b = match b.reason() {
-                    alpm::PackageReason::Explicit => "explicit",
-                    alpm::PackageReason::Depend => "dependency",
-                };
-                let cmp = reason_a.cmp(reason_b);
-                if ascending {
-                    cmp
-                } else {
-                    cmp.reverse()
-                }
-            });
-        }
-        _ => {} // Keep default order
+        Some("name") => sort_with_direction(&mut filtered, ascending, |(a, _), (b, _)| {
+            a.name().cmp(b.name())
+        }),
+        Some("size") => sort_with_direction(&mut filtered, ascending, |(a, _), (b, _)| {
+            a.isize().cmp(&b.isize())
+        }),
+        Some("reason") => sort_with_direction(&mut filtered, ascending, |(a, _), (b, _)| {
+            let reason_a = match a.reason() {
+                alpm::PackageReason::Explicit => "explicit",
+                alpm::PackageReason::Depend => "dependency",
+            };
+            let reason_b = match b.reason() {
+                alpm::PackageReason::Explicit => "explicit",
+                alpm::PackageReason::Depend => "dependency",
+            };
+            reason_a.cmp(reason_b)
+        }),
+        _ => {}
     }
 
     let total = filtered.len();
@@ -1108,37 +1096,14 @@ fn search(
     // Sort before pagination
     let ascending = sort_dir != Some("desc");
     match sort_by {
-        Some("name") => {
-            filtered.sort_by(|a, b| {
-                let cmp = a.name.cmp(&b.name);
-                if ascending {
-                    cmp
-                } else {
-                    cmp.reverse()
-                }
-            });
-        }
-        Some("repository") => {
-            filtered.sort_by(|a, b| {
-                let cmp = a.repository.cmp(&b.repository);
-                if ascending {
-                    cmp
-                } else {
-                    cmp.reverse()
-                }
-            });
-        }
-        Some("status") => {
-            filtered.sort_by(|a, b| {
-                let cmp = a.installed.cmp(&b.installed);
-                if ascending {
-                    cmp
-                } else {
-                    cmp.reverse()
-                }
-            });
-        }
-        _ => {} // No sorting or unknown column
+        Some("name") => sort_with_direction(&mut filtered, ascending, |a, b| a.name.cmp(&b.name)),
+        Some("repository") => sort_with_direction(&mut filtered, ascending, |a, b| {
+            a.repository.cmp(&b.repository)
+        }),
+        Some("status") => sort_with_direction(&mut filtered, ascending, |a, b| {
+            a.installed.cmp(&b.installed)
+        }),
+        _ => {}
     }
 
     let total = filtered.len();
