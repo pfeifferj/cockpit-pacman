@@ -14,28 +14,16 @@ export function useDebouncedValue<T>(value: T, delay: number): T {
   return debouncedValue;
 }
 
-export function useDebouncedCallback<T extends (...args: unknown[]) => void>(
+export function useDebouncedCallback<T extends (...args: Parameters<T>) => void>(
   callback: T,
   delay: number
-): T {
+): (...args: Parameters<T>) => void {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const callbackRef = useRef(callback);
 
   useEffect(() => {
     callbackRef.current = callback;
   }, [callback]);
-
-  const debouncedCallback = useCallback(
-    (...args: Parameters<T>) => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-      timeoutRef.current = setTimeout(() => {
-        callbackRef.current(...args);
-      }, delay);
-    },
-    [delay]
-  ) as T;
 
   useEffect(() => {
     return () => {
@@ -45,5 +33,15 @@ export function useDebouncedCallback<T extends (...args: unknown[]) => void>(
     };
   }, []);
 
-  return debouncedCallback;
+  return useCallback(
+    (...args: Parameters<T>) => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      timeoutRef.current = setTimeout(() => {
+        callbackRef.current(...args);
+      }, delay);
+    },
+    [delay]
+  );
 }
