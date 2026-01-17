@@ -12,7 +12,6 @@ pub fn is_cancelled() -> bool {
 }
 
 pub const DEFAULT_MUTATION_TIMEOUT_SECS: u64 = 300;
-pub const DEFAULT_QUERY_TIMEOUT_SECS: u64 = 60;
 
 pub struct TimeoutGuard {
     start: Instant,
@@ -38,16 +37,6 @@ impl TimeoutGuard {
     pub fn timeout_secs(&self) -> u64 {
         self.timeout.as_secs()
     }
-}
-
-pub fn is_cancelled_or_timed_out(timeout_guard: Option<&TimeoutGuard>) -> bool {
-    if is_cancelled() {
-        return true;
-    }
-    if let Some(guard) = timeout_guard {
-        return guard.is_timed_out();
-    }
-    false
 }
 
 pub fn setup_signal_handler() {
