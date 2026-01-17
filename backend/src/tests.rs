@@ -1,4 +1,7 @@
-use super::*;
+use crate::models::{
+    Package, PackageDetails, PackageListResponse, SearchResult, UpdateInfo, UpdatesResponse,
+};
+use crate::validation::{validate_package_name, validate_pagination, validate_search_query};
 
 // --- Serialization tests ---
 
