@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use pacmanconf::Config;
 use serde::Serialize;
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::io::{self, Write};
 use std::rc::Rc;
@@ -349,6 +349,17 @@ fn find_package_repo(handle: &Alpm, pkg_name: &str) -> Option<String> {
         .map(|db| db.name().to_string())
 }
 
+fn build_repo_map(handle: &Alpm) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for db in handle.syncdbs() {
+        let repo_name = db.name().to_string();
+        for pkg in db.pkgs() {
+            map.insert(pkg.name().to_string(), repo_name.clone());
+        }
+    }
+    map
+}
+
 fn list_installed(
     offset: usize,
     limit: usize,
@@ -360,6 +371,7 @@ fn list_installed(
 ) -> Result<()> {
     let handle = get_handle()?;
     let localdb = handle.localdb();
+    let repo_map = build_repo_map(&handle);
 
     let search_lower = search.map(|s| s.to_lowercase());
     let filter_reason = filter.and_then(|f| match f {
@@ -372,7 +384,7 @@ fn list_installed(
     let (mut filtered, repo_set, total_explicit, total_dependency) = localdb.pkgs().iter().fold(
         (Vec::new(), HashSet::<String>::new(), 0usize, 0usize),
         |(mut filtered, mut repo_set, mut total_explicit, mut total_dependency), pkg| {
-            let repo = find_package_repo(&handle, pkg.name());
+            let repo = repo_map.get(pkg.name()).cloned();
             repo_set.insert(repo.as_deref().unwrap_or("user").to_string());
 
             // Apply search filter
