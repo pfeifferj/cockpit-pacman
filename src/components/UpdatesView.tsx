@@ -567,7 +567,7 @@ export const UpdatesView: React.FC = () => {
           {warnings.length > 0 && (
             <Alert variant="warning" title="Warnings" style={{ marginBottom: "1rem" }}>
               <ul style={{ margin: 0, paddingLeft: "1.5rem" }}>
-                {warnings.map((w) => <li key={w}>{w}</li>)}
+                {warnings.map((w, i) => <li key={`${w}-${i}`}>{w}</li>)}
               </ul>
             </Alert>
           )}
@@ -598,7 +598,7 @@ export const UpdatesView: React.FC = () => {
         {warnings.length > 0 && (
           <Alert variant="warning" title="Warnings" style={{ marginBottom: "1rem" }}>
             <ul style={{ margin: 0, paddingLeft: "1.5rem" }}>
-              {warnings.map((w) => <li key={w}>{w}</li>)}
+              {warnings.map((w, i) => <li key={`${w}-${i}`}>{w}</li>)}
             </ul>
           </Alert>
         )}
