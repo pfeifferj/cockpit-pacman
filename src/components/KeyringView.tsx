@@ -286,8 +286,8 @@ export const KeyringView: React.FC = () => {
     return (
       <Card>
         <CardBody>
-          {keyringData?.warnings.map((warning) => (
-            <Alert key={warning} variant="warning" title="Keyring Warning" style={{ marginBottom: "1rem" }}>
+          {keyringData?.warnings.map((warning, i) => (
+            <Alert key={`${warning}-${i}`} variant="warning" title="Keyring Warning" style={{ marginBottom: "1rem" }}>
               {warning}
             </Alert>
           ))}
@@ -311,8 +311,8 @@ export const KeyringView: React.FC = () => {
   return (
     <Card>
       <CardBody>
-        {keyringData?.warnings.map((warning) => (
-          <Alert key={warning} variant="warning" title="Warning" style={{ marginBottom: "1rem" }}>
+        {keyringData?.warnings.map((warning, i) => (
+          <Alert key={`${warning}-${i}`} variant="warning" title="Warning" style={{ marginBottom: "1rem" }}>
             {warning}
           </Alert>
         ))}
