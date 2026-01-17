@@ -203,3 +203,19 @@ pub struct KeyringStatusResponse {
     pub master_key_initialized: bool,
     pub warnings: Vec<String>,
 }
+
+#[derive(Serialize)]
+pub struct OrphanPackage {
+    pub name: String,
+    pub version: String,
+    pub description: Option<String>,
+    pub installed_size: i64,
+    pub install_date: Option<i64>,
+    pub repository: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct OrphanResponse {
+    pub orphans: Vec<OrphanPackage>,
+    pub total_size: i64,
+}

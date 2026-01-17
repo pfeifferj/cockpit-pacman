@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { MAX_LOG_SIZE_BYTES, LOG_CONTAINER_HEIGHT, PER_PAGE_OPTIONS } from "../constants";
 import {
   Card,
   CardBody,
@@ -25,6 +26,8 @@ import {
   Select,
   SelectOption,
   SelectList,
+  Pagination,
+  Tooltip,
 } from "@patternfly/react-core";
 import { SyncAltIcon, KeyIcon } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
@@ -38,8 +41,6 @@ import {
 
 type ViewState = "loading" | "ready" | "refreshing" | "initializing" | "error";
 
-const MAX_LOG_SIZE = 100000; // 100KB limit for log buffer
-
 export const KeyringView: React.FC = () => {
   const [state, setState] = useState<ViewState>("loading");
   const [keyringData, setKeyringData] = useState<KeyringStatusResponse | null>(null);
@@ -51,6 +52,8 @@ export const KeyringView: React.FC = () => {
   const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
   const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(50);
   const cancelRef = useRef<(() => void) | null>(null);
   const logContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -92,7 +95,7 @@ export const KeyringView: React.FC = () => {
     const { cancel } = refreshKeyring({
       onData: (data) => setLog((prev) => {
         const newLog = prev + data;
-        return newLog.length > MAX_LOG_SIZE ? newLog.slice(-MAX_LOG_SIZE) : newLog;
+        return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
       }),
       onComplete: () => {
         cancelRef.current = null;
@@ -114,7 +117,7 @@ export const KeyringView: React.FC = () => {
     const { cancel } = initKeyring({
       onData: (data) => setLog((prev) => {
         const newLog = prev + data;
-        return newLog.length > MAX_LOG_SIZE ? newLog.slice(-MAX_LOG_SIZE) : newLog;
+        return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
       }),
       onComplete: () => {
         cancelRef.current = null;
@@ -178,24 +181,57 @@ export const KeyringView: React.FC = () => {
     };
   };
 
-  const sortedKeys = [...filteredKeys].sort((a, b) => {
-    if (activeSortIndex === null) return 0;
-    let comparison = 0;
-    switch (activeSortIndex) {
-      case 0:
-        comparison = a.fingerprint.localeCompare(b.fingerprint);
-        break;
-      case 1:
-        comparison = a.uid.localeCompare(b.uid);
-        break;
-      case 2:
-        comparison = a.trust.localeCompare(b.trust);
-        break;
+  const sortedKeys = useMemo(() => {
+    return [...filteredKeys].sort((a, b) => {
+      if (activeSortIndex === null) return 0;
+      let comparison = 0;
+      switch (activeSortIndex) {
+        case 0:
+          comparison = a.fingerprint.localeCompare(b.fingerprint);
+          break;
+        case 1:
+          comparison = a.uid.localeCompare(b.uid);
+          break;
+        case 2:
+          comparison = a.trust.localeCompare(b.trust);
+          break;
+        default:
+          return 0;
+      }
+      return activeSortDirection === "asc" ? comparison : -comparison;
+    });
+  }, [filteredKeys, activeSortIndex, activeSortDirection]);
+
+  const paginatedKeys = useMemo(() => {
+    const start = (page - 1) * perPage;
+    return sortedKeys.slice(start, start + perPage);
+  }, [sortedKeys, page, perPage]);
+
+  const handleSetPage = (_event: React.MouseEvent | React.KeyboardEvent | MouseEvent, newPage: number) => {
+    setPage(newPage);
+  };
+
+  const handlePerPageSelect = (_event: React.MouseEvent | React.KeyboardEvent | MouseEvent, newPerPage: number) => {
+    setPerPage(newPerPage);
+    setPage(1);
+  };
+
+  const getTrustDescription = (trust: string): string => {
+    switch (trust.toLowerCase()) {
+      case "ultimate":
+        return "Ultimate trust: This key belongs to you or is fully trusted.";
+      case "full":
+        return "Full trust: Signatures from this key are fully trusted.";
+      case "marginal":
+        return "Marginal trust: Signatures from this key are partially trusted.";
+      case "unknown":
+        return "Unknown trust: Trust level has not been assigned to this key.";
+      case "never":
+        return "Never trust: Signatures from this key should never be trusted.";
       default:
-        return 0;
+        return "Trust level not recognized.";
     }
-    return activeSortDirection === "asc" ? comparison : -comparison;
-  });
+  };
 
   const getTrustColor = (trust: string): "blue" | "green" | "orange" | "red" | "grey" => {
     switch (trust.toLowerCase()) {
@@ -232,7 +268,7 @@ export const KeyringView: React.FC = () => {
           <Alert variant="danger" title="Error loading keyring status">
             {error}
           </Alert>
-          <div style={{ marginTop: "1rem" }}>
+          <div className="pf-v6-u-mt-md">
             <Button variant="primary" onClick={loadKeyringStatus}>
               Retry
             </Button>
@@ -253,7 +289,7 @@ export const KeyringView: React.FC = () => {
         <CardBody>
           <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsCenter" }}>
             <FlexItem>
-              <CardTitle style={{ margin: 0 }}>{title}</CardTitle>
+              <CardTitle className="pf-v6-u-m-0">{title}</CardTitle>
             </FlexItem>
             <FlexItem>
               <Button variant="danger" onClick={handleCancel}>
@@ -262,7 +298,7 @@ export const KeyringView: React.FC = () => {
             </FlexItem>
           </Flex>
 
-          <div style={{ marginTop: "1rem", marginBottom: "1rem" }}>
+          <div className="pf-v6-u-mt-md pf-v6-u-mb-md">
             <Spinner size="md" /> {subtitle}
           </div>
 
@@ -271,7 +307,7 @@ export const KeyringView: React.FC = () => {
             onToggle={(_event, expanded) => setIsDetailsExpanded(expanded)}
             isExpanded={isDetailsExpanded}
           >
-            <div ref={logContainerRef} style={{ maxHeight: "300px", overflow: "auto" }}>
+            <div ref={logContainerRef} style={{ maxHeight: LOG_CONTAINER_HEIGHT, overflow: "auto" }}>
               <CodeBlock>
                 <CodeBlockCode>{log || "Starting..."}</CodeBlockCode>
               </CodeBlock>
@@ -287,7 +323,7 @@ export const KeyringView: React.FC = () => {
       <Card>
         <CardBody>
           {keyringData?.warnings.map((warning, i) => (
-            <Alert key={`${warning}-${i}`} variant="warning" title="Keyring Warning" style={{ marginBottom: "1rem" }}>
+            <Alert key={`${warning}-${i}`} variant="warning" title="Keyring Warning" className="pf-v6-u-mb-md">
               {warning}
             </Alert>
           ))}
@@ -312,14 +348,14 @@ export const KeyringView: React.FC = () => {
     <Card>
       <CardBody>
         {keyringData?.warnings.map((warning, i) => (
-          <Alert key={`${warning}-${i}`} variant="warning" title="Warning" style={{ marginBottom: "1rem" }}>
+          <Alert key={`${warning}-${i}`} variant="warning" title="Warning" className="pf-v6-u-mb-md">
             {warning}
           </Alert>
         ))}
 
         <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsCenter" }}>
           <FlexItem>
-            <CardTitle style={{ margin: 0 }}>
+            <CardTitle className="pf-v6-u-m-0">
               {keyringData?.total ?? 0} key{(keyringData?.total ?? 0) !== 1 ? "s" : ""} in keyring
               {filteredKeys.length !== (keyringData?.total ?? 0) && ` (${filteredKeys.length} shown)`}
             </CardTitle>
@@ -331,7 +367,7 @@ export const KeyringView: React.FC = () => {
           </FlexItem>
         </Flex>
 
-        <Toolbar style={{ paddingLeft: 0, paddingRight: 0, marginTop: "1rem" }}>
+        <Toolbar className="pf-v6-u-px-0 pf-v6-u-mt-md">
           <ToolbarContent>
             <ToolbarItem>
               <SearchInput
@@ -386,14 +422,16 @@ export const KeyringView: React.FC = () => {
             </Tr>
           </Thead>
           <Tbody>
-            {sortedKeys.map((key: KeyringKey) => (
+            {paginatedKeys.map((key: KeyringKey) => (
               <Tr key={key.fingerprint}>
                 <Td dataLabel="Fingerprint">
                   <code style={{ fontSize: "0.85em" }}>{key.fingerprint}</code>
                 </Td>
                 <Td dataLabel="User ID">{key.uid || "-"}</Td>
                 <Td dataLabel="Trust">
-                  <Label color={getTrustColor(key.trust)}>{key.trust}</Label>
+                  <Tooltip content={getTrustDescription(key.trust)}>
+                    <Label color={getTrustColor(key.trust)}>{key.trust}</Label>
+                  </Tooltip>
                 </Td>
                 <Td dataLabel="Created">{key.created || "-"}</Td>
                 <Td dataLabel="Expires">{key.expires || "-"}</Td>
@@ -401,6 +439,24 @@ export const KeyringView: React.FC = () => {
             ))}
           </Tbody>
         </Table>
+
+        {sortedKeys.length > 0 && (
+          <Toolbar>
+            <ToolbarContent>
+              <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
+                <Pagination
+                  itemCount={sortedKeys.length}
+                  page={page}
+                  perPage={perPage}
+                  onSetPage={handleSetPage}
+                  onPerPageSelect={handlePerPageSelect}
+                  perPageOptions={PER_PAGE_OPTIONS}
+                  isCompact
+                />
+              </ToolbarItem>
+            </ToolbarContent>
+          </Toolbar>
+        )}
 
         {sortedKeys.length === 0 && (
           <EmptyState headingLevel="h3" titleText="No keys found">

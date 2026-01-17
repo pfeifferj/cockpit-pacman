@@ -4,13 +4,15 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::alpm::{get_handle, progress_to_string, setup_dl_cb, setup_log_cb, TransactionGuard};
+use crate::check_cancel_early;
 use crate::db::invalidate_repo_map_cache;
 use crate::models::{
     ConflictInfo, KeyInfo, PreflightResponse, PreflightState, ProviderChoice, ReplacementInfo,
     StreamEvent,
 };
 use crate::util::{
-    emit_event, is_cancelled, setup_signal_handler, TimeoutGuard, DEFAULT_MUTATION_TIMEOUT_SECS,
+    check_cancel, emit_cancellation_complete, emit_event, is_cancelled, setup_signal_handler,
+    CheckResult, TimeoutGuard, DEFAULT_MUTATION_TIMEOUT_SECS,
 };
 
 pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
@@ -140,13 +142,7 @@ pub fn sync_database(force: bool, timeout_secs: Option<u64>) -> Result<()> {
     setup_signal_handler();
     let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
 
-    if is_cancelled() {
-        emit_event(&StreamEvent::Complete {
-            success: false,
-            message: Some("Operation cancelled".to_string()),
-        });
-        return Ok(());
-    }
+    check_cancel_early!(&timeout);
 
     let mut handle = get_handle()?;
     setup_log_cb(&mut handle);
@@ -155,19 +151,9 @@ pub fn sync_database(force: bool, timeout_secs: Option<u64>) -> Result<()> {
     match handle.syncdbs_mut().update(force) {
         Ok(_) => {
             invalidate_repo_map_cache();
-            if is_cancelled() {
-                emit_event(&StreamEvent::Complete {
-                    success: false,
-                    message: Some("Operation cancelled by user".to_string()),
-                });
-            } else if timeout.is_timed_out() {
-                emit_event(&StreamEvent::Complete {
-                    success: false,
-                    message: Some(format!(
-                        "Operation timed out after {} seconds",
-                        timeout.timeout_secs()
-                    )),
-                });
+            let check_result = check_cancel(&timeout);
+            if !matches!(check_result, CheckResult::Continue) {
+                emit_cancellation_complete(&check_result);
             } else {
                 emit_event(&StreamEvent::Complete {
                     success: true,
@@ -177,20 +163,9 @@ pub fn sync_database(force: bool, timeout_secs: Option<u64>) -> Result<()> {
             Ok(())
         }
         Err(e) => {
-            if is_cancelled() {
-                emit_event(&StreamEvent::Complete {
-                    success: false,
-                    message: Some("Operation cancelled by user".to_string()),
-                });
-                Ok(())
-            } else if timeout.is_timed_out() {
-                emit_event(&StreamEvent::Complete {
-                    success: false,
-                    message: Some(format!(
-                        "Operation timed out after {} seconds",
-                        timeout.timeout_secs()
-                    )),
-                });
+            let check_result = check_cancel(&timeout);
+            if !matches!(check_result, CheckResult::Continue) {
+                emit_cancellation_complete(&check_result);
                 Ok(())
             } else {
                 emit_event(&StreamEvent::Complete {
@@ -338,45 +313,11 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
         }
     });
 
-    if is_cancelled() {
-        emit_event(&StreamEvent::Complete {
-            success: false,
-            message: Some("Operation cancelled".to_string()),
-        });
-        return Ok(());
-    }
-
-    if timeout.is_timed_out() {
-        emit_event(&StreamEvent::Complete {
-            success: false,
-            message: Some(format!(
-                "Operation timed out after {} seconds",
-                timeout.timeout_secs()
-            )),
-        });
-        return Ok(());
-    }
+    check_cancel_early!(&timeout);
 
     let mut tx = TransactionGuard::new(&mut handle, TransFlag::NONE)?;
 
-    if is_cancelled() {
-        emit_event(&StreamEvent::Complete {
-            success: false,
-            message: Some("Operation cancelled by user".to_string()),
-        });
-        return Ok(());
-    }
-
-    if timeout.is_timed_out() {
-        emit_event(&StreamEvent::Complete {
-            success: false,
-            message: Some(format!(
-                "Operation timed out after {} seconds",
-                timeout.timeout_secs()
-            )),
-        });
-        return Ok(());
-    }
+    check_cancel_early!(&timeout);
 
     if let Err(e) = tx.sync_sysupgrade(false) {
         emit_event(&StreamEvent::Complete {
@@ -386,24 +327,7 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
         return Err(e.into());
     }
 
-    if is_cancelled() {
-        emit_event(&StreamEvent::Complete {
-            success: false,
-            message: Some("Operation cancelled by user".to_string()),
-        });
-        return Ok(());
-    }
-
-    if timeout.is_timed_out() {
-        emit_event(&StreamEvent::Complete {
-            success: false,
-            message: Some(format!(
-                "Operation timed out after {} seconds",
-                timeout.timeout_secs()
-            )),
-        });
-        return Ok(());
-    }
+    check_cancel_early!(&timeout);
 
     let prepare_err: Option<String> = tx.prepare().err().map(|e| e.to_string());
     if let Some(err_msg) = prepare_err {
@@ -464,6 +388,165 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
     emit_event(&StreamEvent::Complete {
         success: true,
         message: None,
+    });
+
+    Ok(())
+}
+
+pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
+    setup_signal_handler();
+    let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
+
+    let mut handle = get_handle()?;
+
+    let orphan_names: Vec<String> = {
+        let localdb = handle.localdb();
+        localdb
+            .pkgs()
+            .iter()
+            .filter(|pkg| {
+                pkg.reason() == alpm::PackageReason::Depend
+                    && pkg.required_by().is_empty()
+                    && pkg.optional_for().is_empty()
+            })
+            .map(|pkg| pkg.name().to_string())
+            .collect()
+    };
+
+    if orphan_names.is_empty() {
+        emit_event(&StreamEvent::Complete {
+            success: true,
+            message: Some("No orphan packages to remove".to_string()),
+        });
+        return Ok(());
+    }
+
+    setup_log_cb(&mut handle);
+
+    handle.set_progress_cb(
+        (),
+        |progress: Progress,
+         pkgname: &str,
+         percent: i32,
+         howmany: usize,
+         current: usize,
+         _: &mut ()| {
+            if is_cancelled() {
+                return;
+            }
+            emit_event(&StreamEvent::Progress {
+                operation: progress_to_string(progress).to_string(),
+                package: pkgname.to_string(),
+                percent,
+                current,
+                total: howmany,
+            });
+        },
+    );
+
+    handle.set_event_cb((), |event: AnyEvent, _: &mut ()| {
+        let (event_str, pkg_name) = match event.event() {
+            Event::PackageOperationStart(op) | Event::PackageOperationDone(op) => {
+                let (op_name, pkg_name) = match op.operation() {
+                    PackageOperation::Remove(pkg) => ("remove", pkg.name().to_string()),
+                    _ => return,
+                };
+                (op_name.to_string(), Some(pkg_name))
+            }
+            Event::TransactionStart => ("transaction_start".to_string(), None),
+            Event::TransactionDone => ("transaction_done".to_string(), None),
+            Event::HookStart(_) => ("hook_start".to_string(), None),
+            Event::HookDone(_) => ("hook_done".to_string(), None),
+            Event::HookRunStart(h) => ("hook_run_start".to_string(), Some(h.name().to_string())),
+            Event::HookRunDone(h) => ("hook_run_done".to_string(), Some(h.name().to_string())),
+            _ => return,
+        };
+        emit_event(&StreamEvent::Event {
+            event: event_str,
+            package: pkg_name,
+        });
+    });
+
+    check_cancel_early!(&timeout);
+
+    handle
+        .trans_init(TransFlag::RECURSE)
+        .map_err(|e| anyhow::anyhow!("Failed to initialize transaction: {}", e))?;
+
+    for name in &orphan_names {
+        if let Ok(pkg) = handle.localdb().pkg(name.as_str()) {
+            if let Err(e) = handle.trans_remove_pkg(pkg) {
+                emit_event(&StreamEvent::Log {
+                    level: "warning".to_string(),
+                    message: format!("Failed to mark {} for removal: {}", name, e),
+                });
+            }
+        }
+    }
+
+    check_cancel_early!(&timeout);
+
+    let prepare_err: Option<String> = handle.trans_prepare().err().map(|e| e.to_string());
+    if let Some(err_msg) = prepare_err {
+        let _ = handle.trans_release();
+        emit_event(&StreamEvent::Complete {
+            success: false,
+            message: Some(format!("Failed to prepare transaction: {}", err_msg)),
+        });
+        return Err(anyhow::anyhow!(
+            "Failed to prepare transaction: {}",
+            err_msg
+        ));
+    }
+
+    if handle.trans_remove().is_empty() {
+        let _ = handle.trans_release();
+        emit_event(&StreamEvent::Complete {
+            success: true,
+            message: Some("No packages to remove".to_string()),
+        });
+        return Ok(());
+    }
+
+    let was_cancelled_before = is_cancelled();
+    let was_timed_out_before = timeout.is_timed_out();
+    let commit_err: Option<String> = handle.trans_commit().err().map(|e| e.to_string());
+    if let Some(err_msg) = commit_err {
+        let cancelled_during = !was_cancelled_before && is_cancelled();
+        let timed_out_during = !was_timed_out_before && timeout.is_timed_out();
+        let err_lower = err_msg.to_lowercase();
+        let error_indicates_interrupt = err_lower.contains("interrupt")
+            || err_lower.contains("cancel")
+            || err_lower.contains("signal")
+            || err_lower.contains("timeout");
+
+        if cancelled_during || error_indicates_interrupt {
+            emit_event(&StreamEvent::Complete {
+                success: false,
+                message: Some("Operation interrupted".to_string()),
+            });
+        } else if timed_out_during {
+            emit_event(&StreamEvent::Complete {
+                success: false,
+                message: Some(format!(
+                    "Operation timed out after {} seconds",
+                    timeout.timeout_secs()
+                )),
+            });
+        } else {
+            emit_event(&StreamEvent::Complete {
+                success: false,
+                message: Some(format!("Failed to commit transaction: {}", err_msg)),
+            });
+        }
+        let _ = handle.trans_release();
+        return Err(anyhow::anyhow!("Failed to commit transaction: {}", err_msg));
+    }
+
+    let _ = handle.trans_release();
+    emit_event(&StreamEvent::Complete {
+        success: true,
+        message: Some(format!("Removed {} orphan package(s)", orphan_names.len())),
     });
 
     Ok(())

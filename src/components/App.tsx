@@ -10,6 +10,7 @@ import { UpdatesView } from "./UpdatesView";
 import { PackageList } from "./PackageList";
 import { SearchView } from "./SearchView";
 import { KeyringView } from "./KeyringView";
+import { OrphansView } from "./OrphansView";
 import { ErrorBoundary } from "./ErrorBoundary";
 
 export const App: React.FC = () => {
@@ -40,6 +41,11 @@ export const App: React.FC = () => {
           <Tab eventKey={3} title={<TabTitleText>Keyring</TabTitleText>}>
             <ErrorBoundary fallbackTitle="Error loading keyring">
               <KeyringView />
+            </ErrorBoundary>
+          </Tab>
+          <Tab eventKey={4} title={<TabTitleText>Orphans</TabTitleText>}>
+            <ErrorBoundary fallbackTitle="Error loading orphans">
+              <OrphansView />
             </ErrorBoundary>
           </Tab>
         </Tabs>

@@ -32,6 +32,14 @@ impl<'a> TransactionGuard<'a> {
     pub fn remove(&self) -> alpm::AlpmList<'_, &alpm::Package> {
         self.handle.trans_remove()
     }
+
+    pub fn localdb(&self) -> &alpm::Db {
+        self.handle.localdb()
+    }
+
+    pub fn remove_pkg(&mut self, pkg: &alpm::Package) -> Result<(), alpm::Error> {
+        self.handle.trans_remove_pkg(pkg)
+    }
 }
 
 impl Drop for TransactionGuard<'_> {

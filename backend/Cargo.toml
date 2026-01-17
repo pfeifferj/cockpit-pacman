@@ -3,6 +3,9 @@ name = "cockpit-pacman-backend"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+integration-tests = []
+
 [dependencies]
 alpm = "5"
 alpm-utils = "5"

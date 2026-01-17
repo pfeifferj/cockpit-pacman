@@ -173,3 +173,64 @@ fn test_validate_pagination_invalid() {
     assert!(validate_pagination(0, 1001).is_err()); // limit too high
     assert!(validate_pagination(2_000_000, 50).is_err()); // offset too high
 }
+
+// --- Integration tests (require live pacman system) ---
+
+#[cfg(feature = "integration-tests")]
+mod integration {
+    use crate::alpm::get_handle;
+
+    #[test]
+    fn test_get_handle_succeeds() {
+        let handle = get_handle();
+        assert!(
+            handle.is_ok(),
+            "Failed to get ALPM handle: {:?}",
+            handle.err()
+        );
+    }
+
+    #[test]
+    fn test_localdb_has_packages() {
+        let handle = get_handle().expect("Failed to get handle");
+        let localdb = handle.localdb();
+        let pkg_count = localdb.pkgs().len();
+        assert!(pkg_count > 0, "Expected installed packages, found none");
+    }
+
+    #[test]
+    fn test_syncdbs_exist() {
+        let handle = get_handle().expect("Failed to get handle");
+        let syncdb_count = handle.syncdbs().len();
+        assert!(syncdb_count > 0, "Expected sync databases, found none");
+    }
+
+    #[test]
+    fn test_search_finds_common_package() {
+        let handle = get_handle().expect("Failed to get handle");
+        let mut found = false;
+
+        for syncdb in handle.syncdbs() {
+            if syncdb.pkg("pacman").is_ok() {
+                found = true;
+                break;
+            }
+        }
+
+        assert!(found, "Expected to find 'pacman' package in sync databases");
+    }
+
+    #[test]
+    fn test_package_has_expected_fields() {
+        let handle = get_handle().expect("Failed to get handle");
+        let localdb = handle.localdb();
+
+        let pkg = localdb.pkgs().first().expect("No packages installed");
+        assert!(!pkg.name().is_empty(), "Package name should not be empty");
+        assert!(
+            !pkg.version().to_string().is_empty(),
+            "Package version should not be empty"
+        );
+        assert!(pkg.isize() >= 0, "Package size should be non-negative");
+    }
+}

@@ -4,8 +4,8 @@ use std::collections::HashSet;
 use crate::alpm::{get_handle, reason_to_string};
 use crate::db::{find_package_repo, get_repo_map};
 use crate::models::{
-    Package, PackageDetails, PackageListResponse, SearchResponse, SearchResult, SyncPackageDetails,
-    UpdateInfo, UpdatesResponse,
+    OrphanPackage, OrphanResponse, Package, PackageDetails, PackageListResponse, SearchResponse,
+    SearchResult, SyncPackageDetails, UpdateInfo, UpdatesResponse,
 };
 use crate::util::sort_with_direction;
 
@@ -21,6 +21,23 @@ pub fn list_installed(
     let handle = get_handle()?;
     let localdb = handle.localdb();
     let repo_map = get_repo_map(&handle);
+
+    if let Some(repo_f) = repo_filter {
+        let valid_repos: HashSet<&str> = handle
+            .syncdbs()
+            .iter()
+            .map(|db| db.name())
+            .chain(std::iter::once("user"))
+            .collect();
+
+        if !valid_repos.contains(repo_f) {
+            anyhow::bail!(
+                "Invalid repository '{}'. Valid repositories: {}",
+                repo_f,
+                valid_repos.into_iter().collect::<Vec<_>>().join(", ")
+            );
+        }
+    }
 
     let search_lower = search.map(|s| s.to_lowercase());
     let filter_reason = filter.and_then(|f| match f {
@@ -223,7 +240,7 @@ pub fn search(
 
     let mut total_installed = 0usize;
     let mut total_not_installed = 0usize;
-    let mut all_matches: Vec<SearchResult> = Vec::new();
+    let mut filtered: Vec<SearchResult> = Vec::new();
 
     for syncdb in handle.syncdbs() {
         for pkg in syncdb.pkgs() {
@@ -245,26 +262,24 @@ pub fn search(
                     total_not_installed += 1;
                 }
 
-                all_matches.push(SearchResult {
-                    name: pkg.name().to_string(),
-                    version: pkg.version().to_string(),
-                    description: pkg.desc().map(|s| s.to_string()),
-                    repository: repo_name,
-                    installed: is_installed,
-                    installed_version: local_pkg.map(|p| p.version().to_string()),
-                });
+                let should_include = match installed_filter {
+                    Some(filter) => is_installed == filter,
+                    None => true,
+                };
+
+                if should_include {
+                    filtered.push(SearchResult {
+                        name: pkg.name().to_string(),
+                        version: pkg.version().to_string(),
+                        description: pkg.desc().map(|s| s.to_string()),
+                        repository: repo_name,
+                        installed: is_installed,
+                        installed_version: local_pkg.map(|p| p.version().to_string()),
+                    });
+                }
             }
         }
     }
-
-    let mut filtered: Vec<SearchResult> = if let Some(filter) = installed_filter {
-        all_matches
-            .into_iter()
-            .filter(|r| r.installed == filter)
-            .collect()
-    } else {
-        all_matches
-    };
 
     let ascending = sort_dir != Some("desc");
     match sort_by {
@@ -351,5 +366,39 @@ pub fn sync_package_info(name: &str, repo: Option<&str>) -> Result<()> {
     };
 
     println!("{}", serde_json::to_string(&details)?);
+    Ok(())
+}
+
+pub fn list_orphans() -> Result<()> {
+    let handle = get_handle()?;
+    let localdb = handle.localdb();
+    let repo_map = get_repo_map(&handle);
+
+    let orphans: Vec<OrphanPackage> = localdb
+        .pkgs()
+        .iter()
+        .filter(|pkg| {
+            pkg.reason() == alpm::PackageReason::Depend
+                && pkg.required_by().is_empty()
+                && pkg.optional_for().is_empty()
+        })
+        .map(|pkg| OrphanPackage {
+            name: pkg.name().to_string(),
+            version: pkg.version().to_string(),
+            description: pkg.desc().map(|s| s.to_string()),
+            installed_size: pkg.isize(),
+            install_date: pkg.install_date(),
+            repository: repo_map.get(pkg.name()).cloned(),
+        })
+        .collect();
+
+    let total_size: i64 = orphans.iter().map(|p| p.installed_size).sum();
+
+    let response = OrphanResponse {
+        orphans,
+        total_size,
+    };
+
+    println!("{}", serde_json::to_string(&response)?);
     Ok(())
 }

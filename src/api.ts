@@ -1,3 +1,5 @@
+import { BACKEND_TIMEOUT_MS } from "./constants";
+
 declare const cockpit: {
   spawn(args: string[], options?: {
     superuser?: "try" | "require";
@@ -161,13 +163,88 @@ export interface PreflightResponse {
   total_download_size: number;
 }
 
-const BACKEND_TIMEOUT_MS = 30000;
+export type ErrorCode =
+  | "timeout"
+  | "database_locked"
+  | "network_error"
+  | "transaction_failed"
+  | "validation_error"
+  | "cancelled"
+  | "not_found"
+  | "permission_denied"
+  | "internal_error";
 
-class BackendError extends Error {
-  constructor(message: string) {
+export interface StructuredError {
+  code: ErrorCode;
+  message: string;
+  details?: string;
+}
+
+export class BackendError extends Error {
+  code: ErrorCode;
+  details?: string;
+
+  constructor(message: string, code: ErrorCode = "internal_error", details?: string) {
     super(message);
     this.name = "BackendError";
+    this.code = code;
+    this.details = details;
   }
+
+  static fromStructured(err: StructuredError): BackendError {
+    return new BackendError(err.message, err.code, err.details);
+  }
+
+  static isTimeout(err: unknown): boolean {
+    return err instanceof BackendError && err.code === "timeout";
+  }
+
+  static isDatabaseLocked(err: unknown): boolean {
+    if (err instanceof BackendError) {
+      return err.code === "database_locked";
+    }
+    if (err instanceof Error) {
+      return err.message.toLowerCase().includes("unable to lock database");
+    }
+    return false;
+  }
+
+  static isNetworkError(err: unknown): boolean {
+    return err instanceof BackendError && err.code === "network_error";
+  }
+
+  static isCancelled(err: unknown): boolean {
+    return err instanceof BackendError && err.code === "cancelled";
+  }
+}
+
+function parseErrorCode(message: string): ErrorCode {
+  const lower = message.toLowerCase();
+  if (lower.includes("timed out") || lower.includes("timeout")) {
+    return "timeout";
+  }
+  if (lower.includes("unable to lock database") || lower.includes("database is locked")) {
+    return "database_locked";
+  }
+  if (lower.includes("connection") || lower.includes("network") || lower.includes("resolve host")) {
+    return "network_error";
+  }
+  if (lower.includes("transaction") || lower.includes("commit")) {
+    return "transaction_failed";
+  }
+  if (lower.includes("cancelled") || lower.includes("canceled")) {
+    return "cancelled";
+  }
+  if (lower.includes("not found")) {
+    return "not_found";
+  }
+  if (lower.includes("permission denied")) {
+    return "permission_denied";
+  }
+  if (lower.includes("invalid") || lower.includes("validation")) {
+    return "validation_error";
+  }
+  return "internal_error";
 }
 
 async function runBackend<T>(command: string, args: string[] = []): Promise<T> {
@@ -184,7 +261,10 @@ async function runBackend<T>(command: string, args: string[] = []): Promise<T> {
       if (settled) return;
       settled = true;
       spawnPromise.close("timeout");
-      reject(new BackendError(`Backend operation timed out after ${BACKEND_TIMEOUT_MS / 1000}s`));
+      reject(new BackendError(
+        `Backend operation timed out after ${BACKEND_TIMEOUT_MS / 1000}s`,
+        "timeout"
+      ));
     }, BACKEND_TIMEOUT_MS);
   });
 
@@ -198,7 +278,8 @@ async function runBackend<T>(command: string, args: string[] = []): Promise<T> {
       throw ex;
     }
     const message = ex instanceof Error ? ex.message : String(ex);
-    throw new BackendError(`Backend command '${command}' failed: ${message}`);
+    const code = parseErrorCode(message);
+    throw new BackendError(`Backend command '${command}' failed: ${message}`, code);
   } finally {
     if (timeoutId !== null) {
       clearTimeout(timeoutId);
@@ -206,14 +287,25 @@ async function runBackend<T>(command: string, args: string[] = []): Promise<T> {
   }
 
   if (!output || output.trim() === "") {
-    throw new BackendError(`Backend returned empty response for command: ${command}`);
+    throw new BackendError(
+      `Backend returned empty response for command: ${command}`,
+      "internal_error"
+    );
   }
 
   try {
-    return JSON.parse(output) as T;
+    const parsed = JSON.parse(output);
+    if (parsed && typeof parsed === "object" && "code" in parsed && "message" in parsed) {
+      throw BackendError.fromStructured(parsed as StructuredError);
+    }
+    return parsed as T;
   } catch (ex) {
+    if (ex instanceof BackendError) {
+      throw ex;
+    }
     throw new BackendError(
-      `Backend returned invalid JSON for ${command}: ${ex instanceof Error ? ex.message : String(ex)}`
+      `Backend returned invalid JSON for ${command}: ${ex instanceof Error ? ex.message : String(ex)}`,
+      "internal_error"
     );
   }
 }
@@ -304,6 +396,7 @@ export interface UpgradeCallbacks {
   onData?: (data: string) => void;
   onComplete: () => void;
   onError: (error: string) => void;
+  timeout?: number;
 }
 
 function runStreamingBackend(
@@ -397,12 +490,20 @@ function runStreamingBackend(
 }
 
 export function runUpgrade(callbacks: UpgradeCallbacks, ignore?: string[]): { cancel: () => void } {
-  const args = ignore && ignore.length > 0 ? [ignore.join(",")] : [];
+  const args: string[] = [];
+  args.push(ignore && ignore.length > 0 ? ignore.join(",") : "");
+  if (callbacks.timeout !== undefined) {
+    args.push(String(callbacks.timeout));
+  }
   return runStreamingBackend("upgrade", args, callbacks);
 }
 
 export function syncDatabase(callbacks: UpgradeCallbacks): { cancel: () => void } {
-  return runStreamingBackend("sync-database", ["true"], callbacks);
+  const args = ["true"];
+  if (callbacks.timeout !== undefined) {
+    args.push(String(callbacks.timeout));
+  }
+  return runStreamingBackend("sync-database", args, callbacks);
 }
 
 export function formatSize(bytes: number): string {
@@ -445,4 +546,31 @@ export function refreshKeyring(callbacks: UpgradeCallbacks): { cancel: () => voi
 
 export function initKeyring(callbacks: UpgradeCallbacks): { cancel: () => void } {
   return runStreamingBackend("init-keyring", [], callbacks);
+}
+
+// Orphan package types
+export interface OrphanPackage {
+  name: string;
+  version: string;
+  description: string | null;
+  installed_size: number;
+  install_date: number | null;
+  repository: string | null;
+}
+
+export interface OrphanResponse {
+  orphans: OrphanPackage[];
+  total_size: number;
+}
+
+export async function listOrphans(): Promise<OrphanResponse> {
+  return runBackend<OrphanResponse>("list-orphans");
+}
+
+export function removeOrphans(callbacks: UpgradeCallbacks): { cancel: () => void } {
+  const args: string[] = [];
+  if (callbacks.timeout !== undefined) {
+    args.push(String(callbacks.timeout));
+  }
+  return runStreamingBackend("remove-orphans", args, callbacks);
 }

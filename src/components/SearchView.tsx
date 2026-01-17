@@ -338,7 +338,7 @@ export const SearchView: React.FC = () => {
               variant={isLockError ? "warning" : "danger"}
               title={isLockError ? "Database is locked" : "Search failed"}
               isInline
-              style={{ marginBottom: "1rem" }}
+              className="pf-v6-u-mb-md"
             >
               {isLockError
                 ? "Another package manager operation is in progress. Please wait for it to complete before searching."
@@ -348,7 +348,7 @@ export const SearchView: React.FC = () => {
         })()}
 
         {loading ? (
-          <div style={{ padding: "2rem", textAlign: "center" }}>
+          <div className="pf-v6-u-p-xl pf-v6-u-text-align-center">
             <Spinner /> Searching repositories...
           </div>
         ) : !hasSearched ? (
@@ -408,7 +408,7 @@ export const SearchView: React.FC = () => {
                     onRowClick={() => handleRowClick(pkg.name, pkg.repository)}
                   >
                     <Td dataLabel="Name">
-                      <Button variant="link" isInline style={{ padding: 0 }}>
+                      <Button variant="link" isInline className="pf-v6-u-p-0">
                         {pkg.name}
                       </Button>
                     </Td>

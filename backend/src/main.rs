@@ -1,8 +1,9 @@
 use std::env;
 
 use cockpit_pacman_backend::handlers::{
-    check_updates, init_keyring, keyring_status, list_installed, local_package_info,
-    preflight_upgrade, refresh_keyring, run_upgrade, search, sync_database, sync_package_info,
+    check_updates, init_keyring, keyring_status, list_installed, list_orphans, local_package_info,
+    preflight_upgrade, refresh_keyring, remove_orphans, run_upgrade, search, sync_database,
+    sync_package_info,
 };
 use cockpit_pacman_backend::validation::{
     validate_package_name, validate_pagination, validate_search_query,
@@ -43,6 +44,10 @@ fn print_usage() {
     eprintln!("  keyring-status         Get pacman keyring status and list keys");
     eprintln!("  refresh-keyring        Refresh keys from keyserver (requires root)");
     eprintln!("  init-keyring           Initialize and populate keyring (requires root)");
+    eprintln!("  list-orphans           List orphan packages (dependencies no longer required)");
+    eprintln!("  remove-orphans [timeout]");
+    eprintln!("                         Remove all orphan packages (requires root)");
+    eprintln!("                         timeout: seconds (default: 300)");
 }
 
 fn main() {
@@ -149,6 +154,11 @@ fn main() {
         "keyring-status" => keyring_status(),
         "refresh-keyring" => refresh_keyring(),
         "init-keyring" => init_keyring(),
+        "list-orphans" => list_orphans(),
+        "remove-orphans" => {
+            let timeout = args.get(2).and_then(|s| s.parse().ok());
+            remove_orphans(timeout)
+        }
         "help" | "--help" | "-h" => {
             print_usage();
             Ok(())

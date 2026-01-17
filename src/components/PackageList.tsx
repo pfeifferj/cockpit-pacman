@@ -268,45 +268,58 @@ export const PackageList: React.FC = () => {
           </ToolbarContent>
         </Toolbar>
 
-        {loading ? (
-          <div style={{ padding: "2rem", textAlign: "center" }}>
+        {loading && packages.length === 0 ? (
+          <div className="pf-v6-u-p-xl pf-v6-u-text-align-center">
             <Spinner /> Loading packages...
           </div>
         ) : (
-          <Table aria-label="Installed packages" variant="compact">
-            <Thead>
-              <Tr>
-                <Th sort={getSortParams(0)}>Name</Th>
-                <Th>Version</Th>
-                <Th>Description</Th>
-                <Th sort={getSortParams(3)}>Size</Th>
-                <Th sort={getSortParams(4)}>Reason</Th>
-              </Tr>
-            </Thead>
-            <Tbody>
-              {packages.map((pkg) => (
-                <Tr
-                  key={pkg.name}
-                  isClickable
-                  onRowClick={() => handleRowClick(pkg.name)}
-                >
-                  <Td dataLabel="Name">
-                    <Button variant="link" isInline style={{ padding: 0 }}>
-                      {pkg.name}
-                    </Button>
-                  </Td>
-                  <Td dataLabel="Version">{pkg.version}</Td>
-                  <Td dataLabel="Description">{pkg.description || "-"}</Td>
-                  <Td dataLabel="Size">{formatSize(pkg.installed_size)}</Td>
-                  <Td dataLabel="Reason">
-                    <Label color={pkg.reason === "explicit" ? "blue" : "grey"}>
-                      {pkg.reason}
-                    </Label>
-                  </Td>
+          <div style={{ position: "relative" }}>
+            {loading && (
+              <div style={{
+                position: "absolute",
+                top: 0,
+                right: 0,
+                padding: "0.5rem",
+                zIndex: 1,
+              }}>
+                <Spinner size="md" />
+              </div>
+            )}
+            <Table aria-label="Installed packages" variant="compact" style={{ opacity: loading ? 0.6 : 1, transition: "opacity 0.2s" }}>
+              <Thead>
+                <Tr>
+                  <Th sort={getSortParams(0)}>Name</Th>
+                  <Th>Version</Th>
+                  <Th>Description</Th>
+                  <Th sort={getSortParams(3)}>Size</Th>
+                  <Th sort={getSortParams(4)}>Reason</Th>
                 </Tr>
-              ))}
-            </Tbody>
-          </Table>
+              </Thead>
+              <Tbody>
+                {packages.map((pkg) => (
+                  <Tr
+                    key={pkg.name}
+                    isClickable
+                    onRowClick={() => handleRowClick(pkg.name)}
+                  >
+                    <Td dataLabel="Name">
+                      <Button variant="link" isInline className="pf-v6-u-p-0">
+                        {pkg.name}
+                      </Button>
+                    </Td>
+                    <Td dataLabel="Version">{pkg.version}</Td>
+                    <Td dataLabel="Description">{pkg.description || "-"}</Td>
+                    <Td dataLabel="Size">{formatSize(pkg.installed_size)}</Td>
+                    <Td dataLabel="Reason">
+                      <Label color={pkg.reason === "explicit" ? "blue" : "grey"}>
+                        {pkg.reason}
+                      </Label>
+                    </Td>
+                  </Tr>
+                ))}
+              </Tbody>
+            </Table>
+          </div>
         )}
 
         <Toolbar>

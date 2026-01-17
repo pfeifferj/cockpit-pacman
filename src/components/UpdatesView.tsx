@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { LOG_CONTAINER_HEIGHT } from "../constants";
 import {
 	Card,
 	CardBody,
@@ -37,7 +38,7 @@ import {
 	ModalVariant,
 	ModalHeader,
 	ModalBody,
-	ModalFooter
+	ModalFooter,
 } from '@patternfly/react-core';
 import {
   CheckCircleIcon,
@@ -425,7 +426,7 @@ export const UpdatesView: React.FC = () => {
               ? "Another package manager operation is in progress. This could be a system upgrade, package installation, or database sync. Please wait for it to complete before checking for updates."
               : error}
           </Alert>
-          <div style={{ marginTop: "1rem" }}>
+          <div className="pf-v6-u-mt-md">
             <Button variant="primary" onClick={loadUpdates}>
               Retry
             </Button>
@@ -456,7 +457,7 @@ export const UpdatesView: React.FC = () => {
         <CardBody>
           <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsCenter" }}>
             <FlexItem>
-              <CardTitle style={{ margin: 0 }}>Applying Updates</CardTitle>
+              <CardTitle className="pf-v6-u-m-0">Applying Updates</CardTitle>
             </FlexItem>
             <FlexItem>
               <Button variant="danger" onClick={handleCancelClick}>
@@ -465,7 +466,7 @@ export const UpdatesView: React.FC = () => {
             </FlexItem>
           </Flex>
 
-          <Content style={{ marginTop: "1rem", marginBottom: "0.5rem" }}>
+          <Content className="pf-v6-u-mt-md pf-v6-u-mb-sm">
             <strong>{phaseLabels[upgradeProgress.phase]}</strong>
             {upgradeProgress.currentPackage && (
               <span style={{ color: "var(--pf-t--global--text--color--subtle)" }}>
@@ -485,9 +486,9 @@ export const UpdatesView: React.FC = () => {
             toggleText={isDetailsExpanded ? "Hide details" : "Show details"}
             onToggle={(_event, expanded) => setIsDetailsExpanded(expanded)}
             isExpanded={isDetailsExpanded}
-            style={{ marginTop: "1rem" }}
+            className="pf-v6-u-mt-md"
           >
-            <div ref={logContainerRef} style={{ maxHeight: "300px", overflow: "auto" }}>
+            <div ref={logContainerRef} style={{ maxHeight: LOG_CONTAINER_HEIGHT, overflow: "auto" }}>
               <CodeBlock>
                 <CodeBlockCode>{log || "Starting upgrade..."}</CodeBlockCode>
               </CodeBlock>
@@ -551,9 +552,11 @@ export const UpdatesView: React.FC = () => {
             </EmptyStateFooter>
           </EmptyState>
           {log && (
-            <CodeBlock style={{ marginTop: "1rem", maxHeight: "300px", overflow: "auto" }}>
-              <CodeBlockCode>{log}</CodeBlockCode>
-            </CodeBlock>
+            <div className="pf-v6-u-mt-md" style={{ maxHeight: LOG_CONTAINER_HEIGHT, overflow: "auto" }}>
+              <CodeBlock>
+                <CodeBlockCode>{log}</CodeBlockCode>
+              </CodeBlock>
+            </div>
           )}
         </CardBody>
       </Card>
@@ -565,8 +568,8 @@ export const UpdatesView: React.FC = () => {
       <Card>
         <CardBody>
           {warnings.length > 0 && (
-            <Alert variant="warning" title="Warnings" style={{ marginBottom: "1rem" }}>
-              <ul style={{ margin: 0, paddingLeft: "1.5rem" }}>
+            <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
+              <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">
                 {warnings.map((w, i) => <li key={`${w}-${i}`}>{w}</li>)}
               </ul>
             </Alert>
@@ -596,24 +599,24 @@ export const UpdatesView: React.FC = () => {
     <Card>
       <CardBody>
         {warnings.length > 0 && (
-          <Alert variant="warning" title="Warnings" style={{ marginBottom: "1rem" }}>
-            <ul style={{ margin: 0, paddingLeft: "1.5rem" }}>
+          <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
+            <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">
               {warnings.map((w, i) => <li key={`${w}-${i}`}>{w}</li>)}
             </ul>
           </Alert>
         )}
         {ignoredPackages.length > 0 && (
-          <Alert variant="warning" title="Partial upgrade" isInline style={{ marginBottom: "1rem" }}>
+          <Alert variant="warning" title="Partial upgrade" isInline className="pf-v6-u-mb-md">
             Skipping {ignoredPackages.length} package{ignoredPackages.length !== 1 ? "s" : ""}. Partial upgrades are unsupported and may cause dependency issues.
           </Alert>
         )}
         <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
           <FlexItem>
-            <CardTitle style={{ margin: 0, marginBottom: "1rem" }}>
+            <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">
               {selectedPackages.size} of {updates.length} update{updates.length !== 1 ? "s" : ""} selected
               {filteredUpdates.length !== updates.length && ` (${filteredUpdates.length} shown)`}
             </CardTitle>
-            <Flex spaceItems={{ default: "spaceItemsLg" }} style={{ marginBottom: "1rem" }}>
+            <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
               <FlexItem>
                 <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
                   <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--info--default)" }}>{formatSize(selectedDownloadSize)}</div>
@@ -641,7 +644,7 @@ export const UpdatesView: React.FC = () => {
               variant="secondary"
               icon={<SyncAltIcon />}
               onClick={handleRefresh}
-              style={{ marginRight: "0.5rem" }}
+              className="pf-v6-u-mr-sm"
             >
               Refresh
             </Button>
@@ -656,7 +659,7 @@ export const UpdatesView: React.FC = () => {
           </FlexItem>
         </Flex>
 
-        <Toolbar style={{ paddingLeft: 0, paddingRight: 0 }}>
+        <Toolbar className="pf-v6-u-px-0">
           <ToolbarContent>
             <ToolbarItem >
               <SearchInput
@@ -739,7 +742,7 @@ export const UpdatesView: React.FC = () => {
                     onClick={(e) => e.stopPropagation()}
                   />
                   <Td dataLabel="Package">
-                    <Button variant="link" isInline style={{ padding: 0 }}>
+                    <Button variant="link" isInline className="pf-v6-u-p-0">
                       {update.name}
                     </Button>
                   </Td>
@@ -841,7 +844,7 @@ export const UpdatesView: React.FC = () => {
                 </>
               )}
 
-              <Content component={ContentVariants.p} style={{ marginTop: "1rem" }}>
+              <Content component={ContentVariants.p} className="pf-v6-u-mt-md">
                 <strong>{preflightData.packages_to_upgrade}</strong> packages will be upgraded
                 (download: {formatSize(preflightData.total_download_size)})
               </Content>
