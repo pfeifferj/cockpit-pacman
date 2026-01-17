@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { ErrorBoundary } from "./ErrorBoundary";
 
 const ThrowingComponent = ({ shouldThrow }: { shouldThrow: boolean }) => {
@@ -12,6 +12,10 @@ const ThrowingComponent = ({ shouldThrow }: { shouldThrow: boolean }) => {
 describe("ErrorBoundary", () => {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("renders children when no error occurs", () => {
