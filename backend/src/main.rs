@@ -197,6 +197,15 @@ struct ProviderChoice {
     providers: Vec<String>,
 }
 
+#[derive(Default)]
+struct PreflightState {
+    conflicts: Vec<ConflictInfo>,
+    replacements: Vec<ReplacementInfo>,
+    removals: Vec<String>,
+    providers: Vec<ProviderChoice>,
+    import_keys: Vec<KeyInfo>,
+}
+
 fn emit_event(event: &StreamEvent) {
     if let Ok(json) = serde_json::to_string(event) {
         println!("{}", json);
@@ -540,42 +549,29 @@ fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
     }
 
     // Collected issues that need user confirmation
-    let conflicts = Rc::new(RefCell::new(Vec::<ConflictInfo>::new()));
-    let replacements = Rc::new(RefCell::new(Vec::<ReplacementInfo>::new()));
-    let removals = Rc::new(RefCell::new(Vec::<String>::new()));
-    let providers = Rc::new(RefCell::new(Vec::<ProviderChoice>::new()));
-    let import_keys = Rc::new(RefCell::new(Vec::<KeyInfo>::new()));
+    let state = Rc::new(RefCell::new(PreflightState::default()));
+    let state_cb = Rc::clone(&state);
 
-    // Clones for callback closure
-    let (conflicts_cb, replacements_cb, removals_cb, providers_cb, import_keys_cb) = (
-        Rc::clone(&conflicts),
-        Rc::clone(&replacements),
-        Rc::clone(&removals),
-        Rc::clone(&providers),
-        Rc::clone(&import_keys),
-    );
-
-    handle.set_question_cb((), move |mut question: AnyQuestion, _: &mut ()| {
-        match question.question() {
+    handle.set_question_cb(
+        (),
+        move |mut question: AnyQuestion, _: &mut ()| match question.question() {
             Question::Conflict(q) => {
-                conflicts_cb.borrow_mut().push(ConflictInfo {
+                state_cb.borrow_mut().conflicts.push(ConflictInfo {
                     package1: q.conflict().package1().name().to_string(),
                     package2: q.conflict().package2().name().to_string(),
                 });
-                // Answer true to continue collecting more issues
                 question.set_answer(true);
             }
             Question::Corrupted(_) => {
-                // Never allow corrupted packages
                 question.set_answer(false);
             }
             Question::RemovePkgs(q) => {
                 let pkgs: Vec<String> = q.packages().iter().map(|p| p.name().to_string()).collect();
-                removals_cb.borrow_mut().extend(pkgs);
+                state_cb.borrow_mut().removals.extend(pkgs);
                 question.set_answer(true);
             }
             Question::Replace(q) => {
-                replacements_cb.borrow_mut().push(ReplacementInfo {
+                state_cb.borrow_mut().replacements.push(ReplacementInfo {
                     old_package: q.oldpkg().name().to_string(),
                     new_package: q.newpkg().name().to_string(),
                 });
@@ -587,23 +583,21 @@ fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
             Question::SelectProvider(mut q) => {
                 let provider_list: Vec<String> =
                     q.providers().iter().map(|p| p.name().to_string()).collect();
-                providers_cb.borrow_mut().push(ProviderChoice {
+                state_cb.borrow_mut().providers.push(ProviderChoice {
                     dependency: q.depend().name().to_string(),
                     providers: provider_list,
                 });
-                // Select first provider to continue (this is just for preflight)
                 q.set_index(0);
             }
             Question::ImportKey(q) => {
-                import_keys_cb.borrow_mut().push(KeyInfo {
+                state_cb.borrow_mut().import_keys.push(KeyInfo {
                     fingerprint: q.fingerprint().to_string(),
                     uid: q.uid().to_string(),
                 });
-                // Answer true to continue collecting
                 question.set_answer(true);
             }
-        }
-    });
+        },
+    );
 
     // Initialize transaction (guard releases on drop)
     let mut tx = match TransactionGuard::new(&mut handle, TransFlag::NONE) {
@@ -639,13 +633,14 @@ fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
 
     // Check if prepare failed
     if !prepare_success {
+        let s = state.borrow();
         let response = PreflightResponse {
             error: Some("Failed to prepare transaction".to_string()),
-            conflicts: conflicts.borrow().clone(),
-            replacements: replacements.borrow().clone(),
-            removals: removals.borrow().clone(),
-            providers: providers.borrow().clone(),
-            import_keys: import_keys.borrow().clone(),
+            conflicts: s.conflicts.clone(),
+            replacements: s.replacements.clone(),
+            removals: s.removals.clone(),
+            providers: s.providers.clone(),
+            import_keys: s.import_keys.clone(),
             ..Default::default()
         };
         println!("{}", serde_json::to_string(&response)?);
@@ -663,14 +658,15 @@ fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
     }
 
     // Return collected issues
+    let s = state.borrow();
     let response = PreflightResponse {
         success: true,
         error: None,
-        conflicts: conflicts.borrow().clone(),
-        replacements: replacements.borrow().clone(),
-        removals: removals.borrow().clone(),
-        providers: providers.borrow().clone(),
-        import_keys: import_keys.borrow().clone(),
+        conflicts: s.conflicts.clone(),
+        replacements: s.replacements.clone(),
+        removals: s.removals.clone(),
+        providers: s.providers.clone(),
+        import_keys: s.import_keys.clone(),
         packages_to_upgrade,
         total_download_size,
     };
