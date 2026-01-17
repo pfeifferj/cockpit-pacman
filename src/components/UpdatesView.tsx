@@ -567,7 +567,7 @@ export const UpdatesView: React.FC = () => {
           {warnings.length > 0 && (
             <Alert variant="warning" title="Warnings" style={{ marginBottom: "1rem" }}>
               <ul style={{ margin: 0, paddingLeft: "1.5rem" }}>
-                {warnings.map((w, i) => <li key={i}>{w}</li>)}
+                {warnings.map((w) => <li key={w}>{w}</li>)}
               </ul>
             </Alert>
           )}
@@ -598,7 +598,7 @@ export const UpdatesView: React.FC = () => {
         {warnings.length > 0 && (
           <Alert variant="warning" title="Warnings" style={{ marginBottom: "1rem" }}>
             <ul style={{ margin: 0, paddingLeft: "1.5rem" }}>
-              {warnings.map((w, i) => <li key={i}>{w}</li>)}
+              {warnings.map((w) => <li key={w}>{w}</li>)}
             </ul>
           </Alert>
         )}
@@ -746,7 +746,7 @@ export const UpdatesView: React.FC = () => {
                   <Td dataLabel="Repository">
                     <Label color="blue">{update.repository}</Label>
                   </Td>
-                  <Td dataLabel="Version">{update.current_version} {"->"} {update.new_version}</Td>
+                  <Td dataLabel="Version">{update.current_version} {"\u2192"} {update.new_version}</Td>
                   <Td dataLabel="Download">{formatSize(update.download_size)}</Td>
                   <Td dataLabel="Installed Size">{formatSize(update.new_size)}</Td>
                   <Td dataLabel="Net" style={{ color: netSize > 0 ? "var(--pf-t--global--color--status--danger--default)" : netSize < 0 ? "var(--pf-t--global--color--status--success--default)" : undefined }}>
