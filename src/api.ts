@@ -177,9 +177,12 @@ async function runBackend<T>(command: string, args: string[] = []): Promise<T> {
   );
 
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  let settled = false;
 
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
+      if (settled) return;
+      settled = true;
       spawnPromise.close("timeout");
       reject(new BackendError(`Backend operation timed out after ${BACKEND_TIMEOUT_MS / 1000}s`));
     }, BACKEND_TIMEOUT_MS);
@@ -188,7 +191,9 @@ async function runBackend<T>(command: string, args: string[] = []): Promise<T> {
   let output: string;
   try {
     output = await Promise.race([spawnPromise, timeoutPromise]);
+    settled = true;
   } catch (ex) {
+    settled = true;
     if (ex instanceof BackendError) {
       throw ex;
     }

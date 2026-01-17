@@ -22,14 +22,20 @@ fn is_cancelled() -> bool {
 
 fn setup_signal_handler() {
     static HANDLER_SET: AtomicBool = AtomicBool::new(false);
-    if HANDLER_SET.swap(true, Ordering::SeqCst) {
+
+    if HANDLER_SET.load(Ordering::SeqCst) {
         return;
     }
 
-    if let Err(e) = ctrlc::set_handler(move || {
+    match ctrlc::set_handler(move || {
         CANCELLED.store(true, Ordering::SeqCst);
     }) {
-        eprintln!("Warning: Failed to set signal handler: {}", e);
+        Ok(()) => {
+            HANDLER_SET.store(true, Ordering::SeqCst);
+        }
+        Err(e) => {
+            eprintln!("Warning: Failed to set signal handler: {}", e);
+        }
     }
 }
 
@@ -420,7 +426,7 @@ fn list_installed(
                 }
             });
         }
-        _ => {} // No sorting or unknown column - keep default order
+        _ => {} // Keep default order
     }
 
     let total = filtered.len();
@@ -689,7 +695,7 @@ fn run_upgrade(ignore_pkgs: &[String]) -> Result<()> {
 
     let mut handle = get_handle()?;
 
-    // Set ignored packages - fail fast if any are invalid
+    // Set ignored packages
     for pkg_name in ignore_pkgs {
         handle.add_ignorepkg(pkg_name.as_str()).inspect_err(|e| {
             emit_event(&StreamEvent::Complete {
@@ -769,7 +775,6 @@ fn run_upgrade(ignore_pkgs: &[String]) -> Result<()> {
                 question.set_answer(true);
             }
             Question::Corrupted(q) => {
-                // NEVER install corrupted packages - this is not user-confirmable
                 let pkg_name = q.filepath().to_string();
                 emit_event(&StreamEvent::Log {
                     level: "error".to_string(),
@@ -898,11 +903,17 @@ fn run_upgrade(ignore_pkgs: &[String]) -> Result<()> {
     }
 
     // Commit
+    let was_cancelled_before = is_cancelled();
     let commit_err: Option<String> = handle.trans_commit().err().map(|e| e.to_string());
     if let Some(err_msg) = commit_err {
         let _ = handle.trans_release();
-        // Check if this was due to cancellation
-        if is_cancelled() {
+        let cancelled_during = !was_cancelled_before && is_cancelled();
+        let err_lower = err_msg.to_lowercase();
+        let error_indicates_interrupt = err_lower.contains("interrupt")
+            || err_lower.contains("cancel")
+            || err_lower.contains("signal");
+
+        if cancelled_during || error_indicates_interrupt {
             emit_event(&StreamEvent::Complete {
                 success: false,
                 message: Some(
