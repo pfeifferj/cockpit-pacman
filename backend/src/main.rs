@@ -204,6 +204,51 @@ fn emit_event(event: &StreamEvent) {
     }
 }
 
+struct TransactionGuard<'a> {
+    handle: &'a mut Alpm,
+    released: bool,
+}
+
+impl<'a> TransactionGuard<'a> {
+    fn new(handle: &'a mut Alpm, flags: TransFlag) -> Result<Self> {
+        handle
+            .trans_init(flags)
+            .context("Failed to initialize transaction")?;
+        Ok(Self {
+            handle,
+            released: false,
+        })
+    }
+
+    fn sync_sysupgrade(&mut self, enable_downgrade: bool) -> Result<(), alpm::Error> {
+        self.handle.sync_sysupgrade(enable_downgrade)
+    }
+
+    fn prepare(&mut self) -> Result<(), alpm::PrepareError<'_>> {
+        self.handle.trans_prepare()
+    }
+
+    fn commit(&mut self) -> Result<(), alpm::CommitError> {
+        self.handle.trans_commit()
+    }
+
+    fn add(&self) -> alpm::AlpmList<'_, &alpm::Package> {
+        self.handle.trans_add()
+    }
+
+    fn remove(&self) -> alpm::AlpmList<'_, &alpm::Package> {
+        self.handle.trans_remove()
+    }
+}
+
+impl Drop for TransactionGuard<'_> {
+    fn drop(&mut self) {
+        if !self.released {
+            let _ = self.handle.trans_release();
+        }
+    }
+}
+
 fn progress_to_string(progress: Progress) -> &'static str {
     match progress {
         Progress::AddStart => "add_start",
@@ -569,19 +614,21 @@ fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
         }
     });
 
-    // Initialize transaction
-    if let Err(e) = handle.trans_init(TransFlag::NONE) {
-        let response = PreflightResponse {
-            error: Some(format!("Failed to initialize transaction: {}", e)),
-            ..Default::default()
-        };
-        println!("{}", serde_json::to_string(&response)?);
-        return Ok(());
-    }
+    // Initialize transaction (guard releases on drop)
+    let mut tx = match TransactionGuard::new(&mut handle, TransFlag::NONE) {
+        Ok(tx) => tx,
+        Err(e) => {
+            let response = PreflightResponse {
+                error: Some(format!("{}", e)),
+                ..Default::default()
+            };
+            println!("{}", serde_json::to_string(&response)?);
+            return Ok(());
+        }
+    };
 
     // Mark packages for system upgrade
-    if let Err(e) = handle.sync_sysupgrade(false) {
-        let _ = handle.trans_release();
+    if let Err(e) = tx.sync_sysupgrade(false) {
         let response = PreflightResponse {
             error: Some(format!("Failed to prepare system upgrade: {}", e)),
             ..Default::default()
@@ -591,14 +638,13 @@ fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
     }
 
     // Prepare the transaction (this triggers question callbacks)
-    let prepare_success = handle.trans_prepare().is_ok();
+    let prepare_success = tx.prepare().is_ok();
 
-    // Get package counts before releasing
-    let packages_to_upgrade = handle.trans_add().len();
-    let total_download_size: i64 = handle.trans_add().iter().map(|p| p.download_size()).sum();
+    // Get package counts before guard is dropped
+    let packages_to_upgrade = tx.add().len();
+    let total_download_size: i64 = tx.add().iter().map(|p| p.download_size()).sum();
 
-    // Release the transaction (we're just doing preflight)
-    let _ = handle.trans_release();
+    // Guard releases transaction on drop
 
     // Check if prepare failed
     if !prepare_success {
@@ -842,29 +888,20 @@ fn run_upgrade(ignore_pkgs: &[String]) -> Result<()> {
         return Ok(());
     }
 
-    // Initialize transaction
-    handle
-        .trans_init(TransFlag::NONE)
-        .context("Failed to initialize transaction")?;
+    // Initialize transaction (guard releases on drop)
+    let mut tx = TransactionGuard::new(&mut handle, TransFlag::NONE)?;
 
-    // Helper to release transaction and emit cancellation
-    let release_on_cancel = |handle: &mut Alpm| {
-        let _ = handle.trans_release();
+    // Check for cancellation after init
+    if is_cancelled() {
         emit_event(&StreamEvent::Complete {
             success: false,
             message: Some("Operation cancelled by user".to_string()),
         });
-    };
-
-    // Check for cancellation after init
-    if is_cancelled() {
-        release_on_cancel(&mut handle);
         return Ok(());
     }
 
     // Mark packages for system upgrade
-    if let Err(e) = handle.sync_sysupgrade(false) {
-        let _ = handle.trans_release();
+    if let Err(e) = tx.sync_sysupgrade(false) {
         emit_event(&StreamEvent::Complete {
             success: false,
             message: Some(format!("Failed to prepare system upgrade: {}", e)),
@@ -874,14 +911,16 @@ fn run_upgrade(ignore_pkgs: &[String]) -> Result<()> {
 
     // Check for cancellation before prepare
     if is_cancelled() {
-        release_on_cancel(&mut handle);
+        emit_event(&StreamEvent::Complete {
+            success: false,
+            message: Some("Operation cancelled by user".to_string()),
+        });
         return Ok(());
     }
 
     // Prepare transaction (resolve dependencies)
-    let prepare_err: Option<String> = handle.trans_prepare().err().map(|e| e.to_string());
+    let prepare_err: Option<String> = tx.prepare().err().map(|e| e.to_string());
     if let Some(err_msg) = prepare_err {
-        let _ = handle.trans_release();
         emit_event(&StreamEvent::Complete {
             success: false,
             message: Some(format!("Failed to prepare transaction: {}", err_msg)),
@@ -893,8 +932,7 @@ fn run_upgrade(ignore_pkgs: &[String]) -> Result<()> {
     }
 
     // Check if there's anything to do
-    if handle.trans_add().is_empty() && handle.trans_remove().is_empty() {
-        let _ = handle.trans_release();
+    if tx.add().is_empty() && tx.remove().is_empty() {
         emit_event(&StreamEvent::Complete {
             success: true,
             message: Some("System is up to date".to_string()),
@@ -904,9 +942,8 @@ fn run_upgrade(ignore_pkgs: &[String]) -> Result<()> {
 
     // Commit
     let was_cancelled_before = is_cancelled();
-    let commit_err: Option<String> = handle.trans_commit().err().map(|e| e.to_string());
+    let commit_err: Option<String> = tx.commit().err().map(|e| e.to_string());
     if let Some(err_msg) = commit_err {
-        let _ = handle.trans_release();
         let cancelled_during = !was_cancelled_before && is_cancelled();
         let err_lower = err_msg.to_lowercase();
         let error_indicates_interrupt = err_lower.contains("interrupt")
@@ -929,9 +966,7 @@ fn run_upgrade(ignore_pkgs: &[String]) -> Result<()> {
         return Err(anyhow::anyhow!("Failed to commit transaction: {}", err_msg));
     }
 
-    // Release the transaction
-    let _ = handle.trans_release();
-
+    // Guard releases transaction on drop
     emit_event(&StreamEvent::Complete {
         success: true,
         message: None,
