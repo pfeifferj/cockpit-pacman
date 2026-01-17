@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, waitFor, fireEvent, act, cleanup } from "@testing-library/react";
 import { PackageList } from "./PackageList";
 import * as api from "../api";
 
@@ -47,6 +47,10 @@ describe("PackageList", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockListInstalled.mockResolvedValue(mockPackageListResponse);
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("renders loading spinner initially", async () => {
