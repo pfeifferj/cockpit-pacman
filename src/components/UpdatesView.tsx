@@ -32,12 +32,13 @@ import {
 	Content,
 	ContentVariants,
 	ExpandableSection,
-	Checkbox
-} from '@patternfly/react-core';
-import {
+	Checkbox,
 	Modal,
-	ModalVariant
-} from '@patternfly/react-core/deprecated';
+	ModalVariant,
+	ModalHeader,
+	ModalBody,
+	ModalFooter
+} from '@patternfly/react-core';
 import {
   CheckCircleIcon,
   SyncAltIcon,
@@ -496,36 +497,38 @@ export const UpdatesView: React.FC = () => {
 
         <Modal
           variant={ModalVariant.small}
-          title="Cancel upgrade?"
           isOpen={cancelModalOpen}
           onClose={() => setCancelModalOpen(false)}
-          actions={[
+        >
+          <ModalHeader title="Cancel upgrade?" />
+          <ModalBody>
+            {upgradeProgress.phase === "downloading" || upgradeProgress.phase === "preparing" ? (
+              <Content>
+                <Content component={ContentVariants.p}>
+                  The upgrade has not started modifying your system yet. It is safe to cancel now.
+                </Content>
+              </Content>
+            ) : (
+              <Content>
+                <Content component={ContentVariants.p}>
+                  <strong>Warning:</strong> The upgrade is currently {upgradeProgress.phase === "hooks" ? "running post-transaction hooks" : "installing packages"}.
+                </Content>
+                <Content component={ContentVariants.p}>
+                  Cancelling now may leave your system in an inconsistent state. You may need to run <code>pacman -Syu</code> manually to complete the upgrade.
+                </Content>
+              </Content>
+            )}
+          </ModalBody>
+          <ModalFooter>
             <Button key="cancel-confirm" variant="danger" onClick={confirmCancel} isDisabled={isCancelling} isLoading={isCancelling}>
               {upgradeProgress.phase === "downloading" || upgradeProgress.phase === "preparing"
                 ? "Cancel Upgrade"
                 : "Cancel Anyway"}
-            </Button>,
+            </Button>
             <Button key="cancel-dismiss" variant="link" onClick={() => setCancelModalOpen(false)} isDisabled={isCancelling}>
               Continue Upgrade
-            </Button>,
-          ]}
-        >
-          {upgradeProgress.phase === "downloading" || upgradeProgress.phase === "preparing" ? (
-            <Content>
-              <Content component={ContentVariants.p}>
-                The upgrade has not started modifying your system yet. It is safe to cancel now.
-              </Content>
-            </Content>
-          ) : (
-            <Content>
-              <Content component={ContentVariants.p}>
-                <strong>Warning:</strong> The upgrade is currently {upgradeProgress.phase === "hooks" ? "running post-transaction hooks" : "installing packages"}.
-              </Content>
-              <Content component={ContentVariants.p}>
-                Cancelling now may leave your system in an inconsistent state. You may need to run <code>pacman -Syu</code> manually to complete the upgrade.
-              </Content>
-            </Content>
-          )}
+            </Button>
+          </ModalFooter>
         </Modal>
       </Card>
     );
@@ -764,93 +767,95 @@ export const UpdatesView: React.FC = () => {
 
       <Modal
         variant={ModalVariant.medium}
-        title="Confirm Upgrade"
         isOpen={confirmModalOpen}
         onClose={() => setConfirmModalOpen(false)}
-        actions={[
+      >
+        <ModalHeader title="Confirm Upgrade" />
+        <ModalBody>
+          {preflightData && (
+            <Content>
+              <Content component={ContentVariants.p}>
+                The following actions will be performed during this upgrade:
+              </Content>
+
+              {(preflightData.conflicts?.length ?? 0) > 0 && (
+                <>
+                  <Content component={ContentVariants.h4}>Package Conflicts</Content>
+                  <List>
+                    {preflightData.conflicts!.map((c, i) => (
+                      <ListItem key={i}>
+                        {c.package1} conflicts with {c.package2}
+                      </ListItem>
+                    ))}
+                  </List>
+                </>
+              )}
+
+              {(preflightData.replacements?.length ?? 0) > 0 && (
+                <>
+                  <Content component={ContentVariants.h4}>Package Replacements</Content>
+                  <List>
+                    {preflightData.replacements!.map((r, i) => (
+                      <ListItem key={i}>
+                        {r.old_package} will be replaced by {r.new_package}
+                      </ListItem>
+                    ))}
+                  </List>
+                </>
+              )}
+
+              {(preflightData.removals?.length ?? 0) > 0 && (
+                <>
+                  <Content component={ContentVariants.h4}>Packages to Remove</Content>
+                  <List>
+                    {preflightData.removals!.map((pkg, i) => (
+                      <ListItem key={i}>{pkg}</ListItem>
+                    ))}
+                  </List>
+                </>
+              )}
+
+              {(preflightData.providers?.length ?? 0) > 0 && (
+                <>
+                  <Content component={ContentVariants.h4}>Provider Selections</Content>
+                  <List>
+                    {preflightData.providers!.map((p, i) => (
+                      <ListItem key={i}>
+                        {p.dependency}: {p.providers[0]} will be selected (from: {p.providers.join(", ")})
+                      </ListItem>
+                    ))}
+                  </List>
+                </>
+              )}
+
+              {(preflightData.import_keys?.length ?? 0) > 0 && (
+                <>
+                  <Content component={ContentVariants.h4}>PGP Keys to Import</Content>
+                  <List>
+                    {preflightData.import_keys!.map((k, i) => (
+                      <ListItem key={i}>
+                        {k.fingerprint} ({k.uid})
+                      </ListItem>
+                    ))}
+                  </List>
+                </>
+              )}
+
+              <Content component={ContentVariants.p} style={{ marginTop: "1rem" }}>
+                <strong>{preflightData.packages_to_upgrade}</strong> packages will be upgraded
+                (download: {formatSize(preflightData.total_download_size)})
+              </Content>
+            </Content>
+          )}
+        </ModalBody>
+        <ModalFooter>
           <Button key="confirm" variant="primary" onClick={startUpgrade}>
             Proceed with Upgrade
-          </Button>,
+          </Button>
           <Button key="cancel" variant="link" onClick={() => setConfirmModalOpen(false)}>
             Cancel
-          </Button>,
-        ]}
-      >
-        {preflightData && (
-          <Content>
-            <Content component={ContentVariants.p}>
-              The following actions will be performed during this upgrade:
-            </Content>
-
-            {(preflightData.conflicts?.length ?? 0) > 0 && (
-              <>
-                <Content component={ContentVariants.h4}>Package Conflicts</Content>
-                <List>
-                  {preflightData.conflicts!.map((c, i) => (
-                    <ListItem key={i}>
-                      {c.package1} conflicts with {c.package2}
-                    </ListItem>
-                  ))}
-                </List>
-              </>
-            )}
-
-            {(preflightData.replacements?.length ?? 0) > 0 && (
-              <>
-                <Content component={ContentVariants.h4}>Package Replacements</Content>
-                <List>
-                  {preflightData.replacements!.map((r, i) => (
-                    <ListItem key={i}>
-                      {r.old_package} will be replaced by {r.new_package}
-                    </ListItem>
-                  ))}
-                </List>
-              </>
-            )}
-
-            {(preflightData.removals?.length ?? 0) > 0 && (
-              <>
-                <Content component={ContentVariants.h4}>Packages to Remove</Content>
-                <List>
-                  {preflightData.removals!.map((pkg, i) => (
-                    <ListItem key={i}>{pkg}</ListItem>
-                  ))}
-                </List>
-              </>
-            )}
-
-            {(preflightData.providers?.length ?? 0) > 0 && (
-              <>
-                <Content component={ContentVariants.h4}>Provider Selections</Content>
-                <List>
-                  {preflightData.providers!.map((p, i) => (
-                    <ListItem key={i}>
-                      {p.dependency}: {p.providers[0]} will be selected (from: {p.providers.join(", ")})
-                    </ListItem>
-                  ))}
-                </List>
-              </>
-            )}
-
-            {(preflightData.import_keys?.length ?? 0) > 0 && (
-              <>
-                <Content component={ContentVariants.h4}>PGP Keys to Import</Content>
-                <List>
-                  {preflightData.import_keys!.map((k, i) => (
-                    <ListItem key={i}>
-                      {k.fingerprint} ({k.uid})
-                    </ListItem>
-                  ))}
-                </List>
-              </>
-            )}
-
-            <Content component={ContentVariants.p} style={{ marginTop: "1rem" }}>
-              <strong>{preflightData.packages_to_upgrade}</strong> packages will be upgraded
-              (download: {formatSize(preflightData.total_download_size)})
-            </Content>
-          </Content>
-        )}
+          </Button>
+        </ModalFooter>
       </Modal>
     </Card>
   );

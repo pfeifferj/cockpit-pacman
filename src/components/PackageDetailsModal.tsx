@@ -8,12 +8,12 @@ import {
 	Label,
 	LabelGroup,
 	Popover,
-	Icon
-} from '@patternfly/react-core';
-import {
+	Icon,
 	Modal,
-	ModalVariant
-} from '@patternfly/react-core/deprecated';
+	ModalVariant,
+	ModalHeader,
+	ModalBody
+} from '@patternfly/react-core';
 import { OutlinedQuestionCircleIcon } from "@patternfly/react-icons";
 import { PackageDetails, SyncPackageDetails, formatSize, formatDate } from "../api";
 
@@ -40,14 +40,15 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
   return (
     <Modal
       variant={ModalVariant.medium}
-      title={packageDetails?.name ?? "Package Details"}
       isOpen={isOpen}
       onClose={onClose}
     >
-      {isLoading ? (
-        <Spinner />
-      ) : packageDetails ? (
-        <DescriptionList>
+      <ModalHeader title={packageDetails?.name ?? "Package Details"} />
+      <ModalBody>
+        {isLoading ? (
+          <Spinner />
+        ) : packageDetails ? (
+          <DescriptionList>
           <DescriptionListGroup>
             <DescriptionListTerm>Version</DescriptionListTerm>
             <DescriptionListDescription>
@@ -212,8 +213,9 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
               {formatDate(packageDetails.build_date)}
             </DescriptionListDescription>
           </DescriptionListGroup>
-        </DescriptionList>
-      ) : null}
+          </DescriptionList>
+        ) : null}
+      </ModalBody>
     </Modal>
   );
 };
