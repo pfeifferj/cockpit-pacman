@@ -111,3 +111,53 @@ export function createMockSpawnPromise(
 
   return promise;
 }
+
+interface StreamingMockProcess {
+  stream: (callback: (data: string) => void) => StreamingMockProcess;
+  then: (callback: () => void) => StreamingMockProcess;
+  catch: (callback: (error: unknown) => void) => StreamingMockProcess;
+  close: (reason?: string) => void;
+  _streamCallback?: (data: string) => void;
+  _thenCallback?: () => void;
+  _catchCallback?: (error: unknown) => void;
+  _emit: (data: string) => void;
+  _complete: () => void;
+  _fail: (error: unknown) => void;
+}
+
+export function createMockStreamingProcess(): StreamingMockProcess {
+  const proc: StreamingMockProcess = {
+    _streamCallback: undefined,
+    _thenCallback: undefined,
+    _catchCallback: undefined,
+    stream(callback) {
+      this._streamCallback = callback;
+      return this;
+    },
+    then(callback) {
+      this._thenCallback = callback;
+      return this;
+    },
+    catch(callback) {
+      this._catchCallback = callback;
+      return this;
+    },
+    close() {},
+    _emit(data: string) {
+      if (this._streamCallback) {
+        this._streamCallback(data);
+      }
+    },
+    _complete() {
+      if (this._thenCallback) {
+        this._thenCallback();
+      }
+    },
+    _fail(error: unknown) {
+      if (this._catchCallback) {
+        this._catchCallback(error);
+      }
+    },
+  };
+  return proc;
+}
