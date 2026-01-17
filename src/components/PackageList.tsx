@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useDebouncedValue } from "../hooks/useDebounce";
 import {
   Card,
   CardBody,
@@ -53,28 +54,23 @@ export const PackageList: React.FC = () => {
   const [repoSelectOpen, setRepoSelectOpen] = useState(false);
   const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
   const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const manualSearchRef = useRef(false);
 
-  // Debounced auto-search when input changes
+  const debouncedSearchInput = useDebouncedValue(
+    sanitizeSearchInput(searchInput),
+    SEARCH_DEBOUNCE_MS
+  );
+
   useEffect(() => {
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
+    if (manualSearchRef.current) {
+      manualSearchRef.current = false;
+      return;
     }
-
-    debounceRef.current = setTimeout(() => {
-      const sanitized = sanitizeSearchInput(searchInput);
-      if (sanitized !== searchValue) {
-        setSearchValue(sanitized);
-        setPage(1);
-      }
-    }, SEARCH_DEBOUNCE_MS);
-
-    return () => {
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
-    };
-  }, [searchInput, searchValue]);
+    if (debouncedSearchInput !== searchValue) {
+      setSearchValue(debouncedSearchInput);
+      setPage(1);
+    }
+  }, [debouncedSearchInput, searchValue]);
 
   // Map column index to backend sort field
   const getSortField = (index: number | null): string => {
@@ -118,20 +114,14 @@ export const PackageList: React.FC = () => {
   }, [loadPackages]);
 
   const handleSearch = () => {
-    // Cancel any pending debounce when manually searching
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-    }
+    manualSearchRef.current = true;
     const sanitized = sanitizeSearchInput(searchInput);
     setSearchValue(sanitized);
     setPage(1);
   };
 
   const handleSearchClear = () => {
-    // Cancel any pending debounce when clearing
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-    }
+    manualSearchRef.current = true;
     setSearchInput("");
     setSearchValue("");
     setPage(1);
