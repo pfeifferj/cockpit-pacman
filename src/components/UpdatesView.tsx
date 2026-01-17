@@ -56,9 +56,11 @@ import {
   getSyncPackageInfo,
   preflightUpgrade,
   formatSize,
+  listIgnoredPackages,
 } from "../api";
 
 import { PackageDetailsModal } from "./PackageDetailsModal";
+import { PinnedPackagesModal } from "./PinnedPackagesModal";
 
 interface UpgradeProgress {
   phase: "preparing" | "downloading" | "installing" | "hooks";
@@ -106,6 +108,8 @@ export const UpdatesView: React.FC = () => {
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [pinnedPackages, setPinnedPackages] = useState<string[]>([]);
+  const [pinnedModalOpen, setPinnedModalOpen] = useState(false);
 
   const repositories = useMemo(() => {
     const repos = new Set(updates.map((u) => u.repository));
@@ -227,10 +231,26 @@ export const UpdatesView: React.FC = () => {
     loadUpdates();
   }, [loadUpdates]);
 
-  // Initialize all packages as selected when updates load
+  const loadPinnedPackages = useCallback(async () => {
+    try {
+      const response = await listIgnoredPackages();
+      setPinnedPackages(response.packages);
+    } catch {
+      // Ignore errors loading pinned packages
+    }
+  }, []);
+
   useEffect(() => {
-    setSelectedPackages(new Set(updates.map((u) => u.name)));
-  }, [updates]);
+    loadPinnedPackages();
+  }, [loadPinnedPackages]);
+
+  // Initialize selected packages when updates load, excluding pinned packages
+  useEffect(() => {
+    const nonPinned = updates
+      .filter((u) => !pinnedPackages.includes(u.name))
+      .map((u) => u.name);
+    setSelectedPackages(new Set(nonPinned));
+  }, [updates, pinnedPackages]);
 
   useEffect(() => {
     return () => {
@@ -642,6 +662,13 @@ export const UpdatesView: React.FC = () => {
           <FlexItem>
             <Button
               variant="secondary"
+              onClick={() => setPinnedModalOpen(true)}
+              className="pf-v6-u-mr-sm"
+            >
+              Manage Pinned{pinnedPackages.length > 0 ? ` (${pinnedPackages.length})` : ""}
+            </Button>
+            <Button
+              variant="secondary"
               icon={<SyncAltIcon />}
               onClick={handleRefresh}
               className="pf-v6-u-mr-sm"
@@ -726,6 +753,7 @@ export const UpdatesView: React.FC = () => {
             {sortedUpdates.map((update) => {
               const netSize = update.new_size - update.current_size;
               const isSelected = selectedPackages.has(update.name);
+              const isPinned = pinnedPackages.includes(update.name);
               return (
                 <Tr
                   key={update.name}
@@ -745,6 +773,11 @@ export const UpdatesView: React.FC = () => {
                     <Button variant="link" isInline className="pf-v6-u-p-0">
                       {update.name}
                     </Button>
+                    {isPinned && (
+                      <Label color="orange" className="pf-v6-u-ml-sm" isCompact>
+                        pinned
+                      </Label>
+                    )}
                   </Td>
                   <Td dataLabel="Repository">
                     <Label color="blue">{update.repository}</Label>
@@ -860,6 +893,12 @@ export const UpdatesView: React.FC = () => {
           </Button>
         </ModalFooter>
       </Modal>
+
+      <PinnedPackagesModal
+        isOpen={pinnedModalOpen}
+        onClose={() => setPinnedModalOpen(false)}
+        onPinnedChange={() => loadPinnedPackages()}
+      />
     </Card>
   );
 };

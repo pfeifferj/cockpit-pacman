@@ -574,3 +574,26 @@ export function removeOrphans(callbacks: UpgradeCallbacks): { cancel: () => void
   }
   return runStreamingBackend("remove-orphans", args, callbacks);
 }
+
+export interface IgnoredPackagesResponse {
+  packages: string[];
+  total: number;
+}
+
+export interface IgnoreOperationResponse {
+  success: boolean;
+  package: string;
+  message: string;
+}
+
+export async function listIgnoredPackages(): Promise<IgnoredPackagesResponse> {
+  return runBackend<IgnoredPackagesResponse>("list-ignored");
+}
+
+export async function addIgnoredPackage(name: string): Promise<IgnoreOperationResponse> {
+  return runBackend<IgnoreOperationResponse>("add-ignored", [name]);
+}
+
+export async function removeIgnoredPackage(name: string): Promise<IgnoreOperationResponse> {
+  return runBackend<IgnoreOperationResponse>("remove-ignored", [name]);
+}

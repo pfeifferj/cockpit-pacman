@@ -1,9 +1,9 @@
 use std::env;
 
 use cockpit_pacman_backend::handlers::{
-    check_updates, init_keyring, keyring_status, list_installed, list_orphans, local_package_info,
-    preflight_upgrade, refresh_keyring, remove_orphans, run_upgrade, search, sync_database,
-    sync_package_info,
+    add_ignored, check_updates, init_keyring, keyring_status, list_ignored, list_installed,
+    list_orphans, local_package_info, preflight_upgrade, refresh_keyring, remove_ignored,
+    remove_orphans, run_upgrade, search, sync_database, sync_package_info,
 };
 use cockpit_pacman_backend::validation::{
     validate_package_name, validate_pagination, validate_search_query,
@@ -48,6 +48,9 @@ fn print_usage() {
     eprintln!("  remove-orphans [timeout]");
     eprintln!("                         Remove all orphan packages (requires root)");
     eprintln!("                         timeout: seconds (default: 300)");
+    eprintln!("  list-ignored           List packages ignored during upgrades");
+    eprintln!("  add-ignored NAME       Add a package to the ignored list (requires root)");
+    eprintln!("  remove-ignored NAME    Remove a package from the ignored list (requires root)");
 }
 
 fn main() {
@@ -158,6 +161,21 @@ fn main() {
         "remove-orphans" => {
             let timeout = args.get(2).and_then(|s| s.parse().ok());
             remove_orphans(timeout)
+        }
+        "list-ignored" => list_ignored(),
+        "add-ignored" => {
+            if args.len() < 3 {
+                eprintln!("Error: add-ignored requires a package name");
+                std::process::exit(1);
+            }
+            validate_package_name(&args[2]).and_then(|_| add_ignored(&args[2]))
+        }
+        "remove-ignored" => {
+            if args.len() < 3 {
+                eprintln!("Error: remove-ignored requires a package name");
+                std::process::exit(1);
+            }
+            validate_package_name(&args[2]).and_then(|_| remove_ignored(&args[2]))
         }
         "help" | "--help" | "-h" => {
             print_usage();
