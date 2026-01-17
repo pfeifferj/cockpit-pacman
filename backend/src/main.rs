@@ -23,10 +23,14 @@ fn print_usage() {
     eprintln!("                         Check what the upgrade will do (requires root)");
     eprintln!("                         ignore: comma-separated list of packages to skip");
     eprintln!("                         Returns conflicts, replacements, keys to import");
-    eprintln!("  sync-database [force]  Sync package databases (requires root)");
+    eprintln!("  sync-database [force] [timeout]");
+    eprintln!("                         Sync package databases (requires root)");
     eprintln!("                         force: true|false (default: true)");
-    eprintln!("  upgrade [ignore]       Perform system upgrade (requires root)");
+    eprintln!("                         timeout: seconds (default: 300)");
+    eprintln!("  upgrade [ignore] [timeout]");
+    eprintln!("                         Perform system upgrade (requires root)");
     eprintln!("                         ignore: comma-separated list of packages to skip");
+    eprintln!("                         timeout: seconds (default: 300)");
     eprintln!("  local-package-info NAME");
     eprintln!("                         Get detailed info for an installed package");
     eprintln!("  sync-package-info NAME [REPO]");
@@ -92,7 +96,8 @@ fn main() {
         }
         "sync-database" => {
             let force = args.get(2).map(|s| s == "true").unwrap_or(true);
-            sync_database(force)
+            let timeout = args.get(3).and_then(|s| s.parse().ok());
+            sync_database(force, timeout)
         }
         "upgrade" => {
             let ignore_pkgs: Vec<String> = args
@@ -105,7 +110,8 @@ fn main() {
                         .collect()
                 })
                 .unwrap_or_default();
-            run_upgrade(&ignore_pkgs)
+            let timeout = args.get(3).and_then(|s| s.parse().ok());
+            run_upgrade(&ignore_pkgs, timeout)
         }
         "local-package-info" => {
             if args.len() < 3 {

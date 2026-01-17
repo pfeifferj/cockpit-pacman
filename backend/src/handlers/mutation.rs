@@ -9,7 +9,9 @@ use crate::models::{
     ConflictInfo, KeyInfo, PreflightResponse, PreflightState, ProviderChoice, ReplacementInfo,
     StreamEvent,
 };
-use crate::util::{emit_event, is_cancelled, setup_signal_handler};
+use crate::util::{
+    emit_event, is_cancelled, setup_signal_handler, TimeoutGuard, DEFAULT_MUTATION_TIMEOUT_SECS,
+};
 
 pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
     let mut handle = get_handle()?;
@@ -134,8 +136,9 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
     Ok(())
 }
 
-pub fn sync_database(force: bool) -> Result<()> {
+pub fn sync_database(force: bool, timeout_secs: Option<u64>) -> Result<()> {
     setup_signal_handler();
+    let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
 
     if is_cancelled() {
         emit_event(&StreamEvent::Complete {
@@ -157,6 +160,14 @@ pub fn sync_database(force: bool) -> Result<()> {
                     success: false,
                     message: Some("Operation cancelled by user".to_string()),
                 });
+            } else if timeout.is_timed_out() {
+                emit_event(&StreamEvent::Complete {
+                    success: false,
+                    message: Some(format!(
+                        "Operation timed out after {} seconds",
+                        timeout.timeout_secs()
+                    )),
+                });
             } else {
                 emit_event(&StreamEvent::Complete {
                     success: true,
@@ -172,6 +183,15 @@ pub fn sync_database(force: bool) -> Result<()> {
                     message: Some("Operation cancelled by user".to_string()),
                 });
                 Ok(())
+            } else if timeout.is_timed_out() {
+                emit_event(&StreamEvent::Complete {
+                    success: false,
+                    message: Some(format!(
+                        "Operation timed out after {} seconds",
+                        timeout.timeout_secs()
+                    )),
+                });
+                Ok(())
             } else {
                 emit_event(&StreamEvent::Complete {
                     success: false,
@@ -183,8 +203,9 @@ pub fn sync_database(force: bool) -> Result<()> {
     }
 }
 
-pub fn run_upgrade(ignore_pkgs: &[String]) -> Result<()> {
+pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<()> {
     setup_signal_handler();
+    let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
 
     let mut handle = get_handle()?;
 
@@ -325,12 +346,34 @@ pub fn run_upgrade(ignore_pkgs: &[String]) -> Result<()> {
         return Ok(());
     }
 
+    if timeout.is_timed_out() {
+        emit_event(&StreamEvent::Complete {
+            success: false,
+            message: Some(format!(
+                "Operation timed out after {} seconds",
+                timeout.timeout_secs()
+            )),
+        });
+        return Ok(());
+    }
+
     let mut tx = TransactionGuard::new(&mut handle, TransFlag::NONE)?;
 
     if is_cancelled() {
         emit_event(&StreamEvent::Complete {
             success: false,
             message: Some("Operation cancelled by user".to_string()),
+        });
+        return Ok(());
+    }
+
+    if timeout.is_timed_out() {
+        emit_event(&StreamEvent::Complete {
+            success: false,
+            message: Some(format!(
+                "Operation timed out after {} seconds",
+                timeout.timeout_secs()
+            )),
         });
         return Ok(());
     }
@@ -347,6 +390,17 @@ pub fn run_upgrade(ignore_pkgs: &[String]) -> Result<()> {
         emit_event(&StreamEvent::Complete {
             success: false,
             message: Some("Operation cancelled by user".to_string()),
+        });
+        return Ok(());
+    }
+
+    if timeout.is_timed_out() {
+        emit_event(&StreamEvent::Complete {
+            success: false,
+            message: Some(format!(
+                "Operation timed out after {} seconds",
+                timeout.timeout_secs()
+            )),
         });
         return Ok(());
     }
@@ -372,13 +426,16 @@ pub fn run_upgrade(ignore_pkgs: &[String]) -> Result<()> {
     }
 
     let was_cancelled_before = is_cancelled();
+    let was_timed_out_before = timeout.is_timed_out();
     let commit_err: Option<String> = tx.commit().err().map(|e| e.to_string());
     if let Some(err_msg) = commit_err {
         let cancelled_during = !was_cancelled_before && is_cancelled();
+        let timed_out_during = !was_timed_out_before && timeout.is_timed_out();
         let err_lower = err_msg.to_lowercase();
         let error_indicates_interrupt = err_lower.contains("interrupt")
             || err_lower.contains("cancel")
-            || err_lower.contains("signal");
+            || err_lower.contains("signal")
+            || err_lower.contains("timeout");
 
         if cancelled_during || error_indicates_interrupt {
             emit_event(&StreamEvent::Complete {
@@ -386,6 +443,14 @@ pub fn run_upgrade(ignore_pkgs: &[String]) -> Result<()> {
                 message: Some(
                     "Operation interrupted - system may be in inconsistent state".to_string(),
                 ),
+            });
+        } else if timed_out_during {
+            emit_event(&StreamEvent::Complete {
+                success: false,
+                message: Some(format!(
+                    "Operation timed out after {} seconds - system may be in inconsistent state",
+                    timeout.timeout_secs()
+                )),
             });
         } else {
             emit_event(&StreamEvent::Complete {
