@@ -1,9 +1,9 @@
 use alpm::{Alpm, Db, Package};
 use alpm_utils::DbListExt;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-static REPO_MAP_CACHE: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+static REPO_MAP_CACHE: Mutex<Option<Arc<HashMap<String, String>>>> = Mutex::new(None);
 
 pub fn find_package_repo(handle: &Alpm, pkg_name: &str) -> Option<String> {
     handle
@@ -14,14 +14,14 @@ pub fn find_package_repo(handle: &Alpm, pkg_name: &str) -> Option<String> {
         .map(|db: &Db| db.name().to_string())
 }
 
-pub fn get_repo_map(handle: &Alpm) -> HashMap<String, String> {
+pub fn get_repo_map(handle: &Alpm) -> Arc<HashMap<String, String>> {
     let mut cache = REPO_MAP_CACHE.lock().unwrap();
     if let Some(ref map) = *cache {
-        return map.clone();
+        return Arc::clone(map);
     }
 
-    let map = build_repo_map_uncached(handle);
-    *cache = Some(map.clone());
+    let map = Arc::new(build_repo_map_uncached(handle));
+    *cache = Some(Arc::clone(&map));
     map
 }
 
