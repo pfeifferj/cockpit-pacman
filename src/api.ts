@@ -418,3 +418,31 @@ export function formatDate(timestamp: number | null): string {
   if (!timestamp) return "Unknown";
   return new Date(timestamp * 1000).toLocaleString();
 }
+
+// Keyring types
+export interface KeyringKey {
+  fingerprint: string;
+  uid: string;
+  created: string | null;
+  expires: string | null;
+  trust: string;
+}
+
+export interface KeyringStatusResponse {
+  keys: KeyringKey[];
+  total: number;
+  master_key_initialized: boolean;
+  warnings: string[];
+}
+
+export async function getKeyringStatus(): Promise<KeyringStatusResponse> {
+  return runBackend<KeyringStatusResponse>("keyring-status");
+}
+
+export function refreshKeyring(callbacks: UpgradeCallbacks): { cancel: () => void } {
+  return runStreamingBackend("refresh-keyring", [], callbacks);
+}
+
+export function initKeyring(callbacks: UpgradeCallbacks): { cancel: () => void } {
+  return runStreamingBackend("init-keyring", [], callbacks);
+}

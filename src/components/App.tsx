@@ -9,6 +9,7 @@ import {
 import { UpdatesView } from "./UpdatesView";
 import { PackageList } from "./PackageList";
 import { SearchView } from "./SearchView";
+import { KeyringView } from "./KeyringView";
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string | number>(0);
@@ -28,6 +29,9 @@ export const App: React.FC = () => {
           </Tab>
           <Tab eventKey={2} title={<TabTitleText>Search Packages</TabTitleText>}>
             <SearchView />
+          </Tab>
+          <Tab eventKey={3} title={<TabTitleText>Keyring</TabTitleText>}>
+            <KeyringView />
           </Tab>
         </Tabs>
       </PageSection>
