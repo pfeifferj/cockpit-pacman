@@ -3,6 +3,8 @@ import type {
   UpdatesResponse,
   PackageDetails,
   SearchResult,
+  PreflightResponse,
+  SyncPackageDetails,
 } from "../api";
 
 export const mockPackageListResponse: PackageListResponse = {
@@ -161,3 +163,56 @@ export function createMockStreamingProcess(): StreamingMockProcess {
   };
   return proc;
 }
+
+export const mockPreflightResponse: PreflightResponse = {
+  success: true,
+  packages_to_upgrade: 1,
+  total_download_size: 150000000,
+  conflicts: [],
+  replacements: [],
+  removals: [],
+  providers: [],
+  import_keys: [],
+};
+
+export const mockPreflightWithConflicts: PreflightResponse = {
+  success: true,
+  packages_to_upgrade: 2,
+  total_download_size: 200000000,
+  conflicts: [{ package1: "mesa", package2: "mesa-amber" }],
+  replacements: [{ old_package: "old-pkg", new_package: "new-pkg" }],
+  removals: [],
+  providers: [],
+  import_keys: [],
+};
+
+export const mockPreflightWithKeys: PreflightResponse = {
+  success: true,
+  packages_to_upgrade: 1,
+  total_download_size: 150000000,
+  conflicts: [],
+  replacements: [],
+  removals: [],
+  providers: [],
+  import_keys: [{ fingerprint: "ABCD1234", uid: "Test Packager <test@arch.org>" }],
+};
+
+export const mockSyncPackageDetails: SyncPackageDetails = {
+  name: "linux",
+  version: "6.7.1-arch1-1",
+  description: "The Linux kernel and modules",
+  url: "https://kernel.org/",
+  licenses: ["GPL-2.0-only"],
+  groups: [],
+  provides: ["VIRTUALBOX-GUEST-MODULES", "WIREGUARD-MODULE"],
+  depends: ["coreutils", "initramfs", "kmod"],
+  optdepends: ["wireless-regdb: to set the correct wireless channels"],
+  conflicts: [],
+  replaces: [],
+  download_size: 150000000,
+  installed_size: 145000000,
+  packager: "Jan Alexander Steffens (heftig) <heftig@archlinux.org>",
+  architecture: "x86_64",
+  build_date: 1704067200,
+  repository: "core",
+};
