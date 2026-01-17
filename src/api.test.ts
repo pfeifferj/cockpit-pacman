@@ -430,6 +430,67 @@ describe("runUpgrade", () => {
 
     expect(mockProc.close).toHaveBeenCalledWith("cancelled");
   });
+
+  it("handles complete event in buffer when process ends", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+    };
+
+    runUpgrade(callbacks);
+
+    const completeEvent: StreamEvent = { type: "complete", success: true };
+    mockProc._emit(JSON.stringify(completeEvent));
+    mockProc._complete();
+
+    expect(callbacks.onComplete).toHaveBeenCalledTimes(1);
+    expect(callbacks.onError).not.toHaveBeenCalled();
+  });
+
+  it("calls onError when process ends without complete event", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+    };
+
+    runUpgrade(callbacks);
+
+    const logEvent: StreamEvent = { type: "log", level: "info", message: "Starting" };
+    mockProc._emit(JSON.stringify(logEvent) + "\n");
+    mockProc._complete();
+
+    expect(callbacks.onError).toHaveBeenCalledWith(
+      "Backend process ended without sending completion status"
+    );
+    expect(callbacks.onComplete).not.toHaveBeenCalled();
+  });
+
+  it("works without optional callbacks", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+    };
+
+    runUpgrade(callbacks);
+
+    const logEvent: StreamEvent = { type: "log", level: "info", message: "test" };
+    mockProc._emit(JSON.stringify(logEvent) + "\n");
+
+    const completeEvent: StreamEvent = { type: "complete", success: true };
+    mockProc._emit(JSON.stringify(completeEvent) + "\n");
+
+    expect(callbacks.onComplete).toHaveBeenCalledTimes(1);
+    expect(callbacks.onError).not.toHaveBeenCalled();
+  });
 });
 
 describe("syncDatabase", () => {
