@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::collections::HashSet;
 
 use crate::alpm::{get_handle, reason_to_string};
-use crate::db::{build_repo_map, find_package_repo};
+use crate::db::{find_package_repo, get_repo_map};
 use crate::models::{
     Package, PackageDetails, PackageListResponse, SearchResponse, SearchResult, SyncPackageDetails,
     UpdateInfo, UpdatesResponse,
@@ -20,7 +20,7 @@ pub fn list_installed(
 ) -> Result<()> {
     let handle = get_handle()?;
     let localdb = handle.localdb();
-    let repo_map = build_repo_map(&handle);
+    let repo_map = get_repo_map(&handle);
 
     let search_lower = search.map(|s| s.to_lowercase());
     let filter_reason = filter.and_then(|f| match f {

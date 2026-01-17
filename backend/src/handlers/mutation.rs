@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::alpm::{get_handle, progress_to_string, setup_dl_cb, setup_log_cb, TransactionGuard};
+use crate::db::invalidate_repo_map_cache;
 use crate::models::{
     ConflictInfo, KeyInfo, PreflightResponse, PreflightState, ProviderChoice, ReplacementInfo,
     StreamEvent,
@@ -150,6 +151,7 @@ pub fn sync_database(force: bool) -> Result<()> {
 
     match handle.syncdbs_mut().update(force) {
         Ok(_) => {
+            invalidate_repo_map_cache();
             if is_cancelled() {
                 emit_event(&StreamEvent::Complete {
                     success: false,
