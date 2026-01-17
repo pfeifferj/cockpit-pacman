@@ -368,29 +368,14 @@ fn list_installed(
         _ => None,
     });
 
-    let mut repo_set: HashSet<String> = HashSet::new();
-
-    // First pass: collect all packages with their repos
-    let all_with_repos: Vec<_> = localdb
-        .pkgs()
-        .iter()
-        .map(|pkg| {
+    // Single pass: collect repos, apply filters, count by reason
+    let (mut filtered, repo_set, total_explicit, total_dependency) = localdb.pkgs().iter().fold(
+        (Vec::new(), HashSet::<String>::new(), 0usize, 0usize),
+        |(mut filtered, mut repo_set, mut total_explicit, mut total_dependency), pkg| {
             let repo = find_package_repo(&handle, pkg.name());
-            if let Some(ref r) = repo {
-                repo_set.insert(r.clone());
-            } else {
-                repo_set.insert("user".to_string());
-            }
-            (pkg, repo)
-        })
-        .collect();
+            repo_set.insert(repo.as_deref().unwrap_or("user").to_string());
 
-    // Second pass: apply search and repo filters, count by reason
-    let mut total_explicit = 0usize;
-    let mut total_dependency = 0usize;
-    let search_and_repo_filtered: Vec<_> = all_with_repos
-        .iter()
-        .filter(|(pkg, repo)| {
+            // Apply search filter
             if let Some(ref query) = search_lower {
                 let name_match = pkg.name().to_lowercase().contains(query);
                 let desc_match = pkg
@@ -398,37 +383,31 @@ fn list_installed(
                     .map(|d| d.to_lowercase().contains(query))
                     .unwrap_or(false);
                 if !name_match && !desc_match {
-                    return false;
+                    return (filtered, repo_set, total_explicit, total_dependency);
                 }
             }
 
+            // Apply repo filter
             if let Some(repo_f) = repo_filter {
-                let pkg_repo = repo.as_deref().unwrap_or("user");
-                if pkg_repo != repo_f {
-                    return false;
+                if repo.as_deref().unwrap_or("user") != repo_f {
+                    return (filtered, repo_set, total_explicit, total_dependency);
                 }
             }
 
-            // Count after search/repo filter but before reason filter
+            // Count by reason (after search/repo filter, before reason filter)
             match pkg.reason() {
                 alpm::PackageReason::Explicit => total_explicit += 1,
                 alpm::PackageReason::Depend => total_dependency += 1,
             }
 
-            true
-        })
-        .collect();
-
-    // Third pass: apply reason filter
-    let mut filtered: Vec<_> = search_and_repo_filtered
-        .into_iter()
-        .filter(|(pkg, _repo)| {
-            if let Some(reason) = filter_reason {
-                return pkg.reason() == reason;
+            // Apply reason filter
+            if filter_reason.is_none() || pkg.reason() == filter_reason.unwrap() {
+                filtered.push((pkg, repo));
             }
-            true
-        })
-        .collect();
+
+            (filtered, repo_set, total_explicit, total_dependency)
+        },
+    );
 
     // Sort before pagination
     let ascending = sort_dir != Some("desc");
