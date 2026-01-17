@@ -6,6 +6,7 @@ import {
   mockPackageDetails,
   mockSearchResponse,
   createMockSpawnPromise,
+  createMockStreamingProcess,
 } from "./test/mocks";
 import {
   formatSize,
@@ -14,6 +15,9 @@ import {
   checkUpdates,
   getPackageInfo,
   searchPackages,
+  runUpgrade,
+  syncDatabase,
+  StreamEvent,
 } from "./api";
 
 describe("formatSize", () => {
@@ -220,5 +224,281 @@ describe("searchPackages", () => {
     expect(result.total).toBe(2);
     expect(result.results[0].name).toBe("linux");
     expect(result.results[1].name).toBe("linux-lts");
+  });
+});
+
+describe("runUpgrade", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("calls onComplete when receiving success complete event", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+      onEvent: vi.fn(),
+    };
+
+    runUpgrade(callbacks);
+
+    const completeEvent: StreamEvent = { type: "complete", success: true };
+    mockProc._emit(JSON.stringify(completeEvent) + "\n");
+
+    expect(callbacks.onComplete).toHaveBeenCalledTimes(1);
+    expect(callbacks.onError).not.toHaveBeenCalled();
+  });
+
+  it("calls onError when receiving failed complete event", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+    };
+
+    runUpgrade(callbacks);
+
+    const completeEvent: StreamEvent = {
+      type: "complete",
+      success: false,
+      message: "Package conflict",
+    };
+    mockProc._emit(JSON.stringify(completeEvent) + "\n");
+
+    expect(callbacks.onError).toHaveBeenCalledWith("Package conflict");
+    expect(callbacks.onComplete).not.toHaveBeenCalled();
+  });
+
+  it("processes log events and calls onEvent", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+      onEvent: vi.fn(),
+      onData: vi.fn(),
+    };
+
+    runUpgrade(callbacks);
+
+    const logEvent: StreamEvent = {
+      type: "log",
+      level: "info",
+      message: "Starting upgrade",
+    };
+    mockProc._emit(JSON.stringify(logEvent) + "\n");
+
+    expect(callbacks.onEvent).toHaveBeenCalledWith(logEvent);
+    expect(callbacks.onData).toHaveBeenCalledWith("[info] Starting upgrade\n");
+  });
+
+  it("processes progress events", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+      onEvent: vi.fn(),
+      onData: vi.fn(),
+    };
+
+    runUpgrade(callbacks);
+
+    const progressEvent: StreamEvent = {
+      type: "progress",
+      operation: "upgrade_start",
+      package: "linux",
+      current: 1,
+      total: 5,
+      percent: 20,
+    };
+    mockProc._emit(JSON.stringify(progressEvent) + "\n");
+
+    expect(callbacks.onEvent).toHaveBeenCalledWith(progressEvent);
+    expect(callbacks.onData).toHaveBeenCalledWith("[upgrade_start] linux 20%\n");
+  });
+
+  it("handles buffered incomplete lines", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+      onEvent: vi.fn(),
+    };
+
+    runUpgrade(callbacks);
+
+    const event: StreamEvent = { type: "complete", success: true };
+    const json = JSON.stringify(event);
+
+    mockProc._emit(json.substring(0, 10));
+    expect(callbacks.onEvent).not.toHaveBeenCalled();
+
+    mockProc._emit(json.substring(10) + "\n");
+    expect(callbacks.onComplete).toHaveBeenCalled();
+  });
+
+  it("prevents duplicate complete callbacks", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+    };
+
+    runUpgrade(callbacks);
+
+    const completeEvent: StreamEvent = { type: "complete", success: true };
+    mockProc._emit(JSON.stringify(completeEvent) + "\n");
+    mockProc._emit(JSON.stringify(completeEvent) + "\n");
+
+    expect(callbacks.onComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats malformed JSON as raw output", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+      onData: vi.fn(),
+    };
+
+    runUpgrade(callbacks);
+
+    mockProc._emit("not valid json\n");
+
+    expect(callbacks.onData).toHaveBeenCalledWith("not valid json\n");
+  });
+
+  it("calls onError when process fails", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+    };
+
+    runUpgrade(callbacks);
+
+    mockProc._fail({ message: "Permission denied" });
+
+    expect(callbacks.onError).toHaveBeenCalledWith("Permission denied");
+    expect(callbacks.onComplete).not.toHaveBeenCalled();
+  });
+
+  it("passes ignore list as argument", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+    };
+
+    runUpgrade(callbacks, ["linux", "linux-headers"]);
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      expect.arrayContaining(["upgrade", "linux,linux-headers"]),
+      expect.any(Object)
+    );
+  });
+
+  it("returns cancel function", () => {
+    const mockProc = createMockStreamingProcess();
+    mockProc.close = vi.fn();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+    };
+
+    const { cancel } = runUpgrade(callbacks);
+    cancel();
+
+    expect(mockProc.close).toHaveBeenCalledWith("cancelled");
+  });
+});
+
+describe("syncDatabase", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("spawns sync-database command with force flag", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+    };
+
+    syncDatabase(callbacks);
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      expect.arrayContaining(["sync-database", "true"]),
+      expect.any(Object)
+    );
+  });
+
+  it("handles download progress events", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+      onEvent: vi.fn(),
+      onData: vi.fn(),
+    };
+
+    syncDatabase(callbacks);
+
+    const downloadEvent: StreamEvent = {
+      type: "download",
+      filename: "core.db",
+      event: "progress",
+      downloaded: 50000,
+      total: 100000,
+    };
+    mockProc._emit(JSON.stringify(downloadEvent) + "\n");
+
+    expect(callbacks.onEvent).toHaveBeenCalledWith(downloadEvent);
+    expect(callbacks.onData).toHaveBeenCalledWith("Downloading core.db: 50%\n");
+  });
+
+  it("handles download completed events", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+      onData: vi.fn(),
+    };
+
+    syncDatabase(callbacks);
+
+    const downloadEvent: StreamEvent = {
+      type: "download",
+      filename: "core.db",
+      event: "completed",
+    };
+    mockProc._emit(JSON.stringify(downloadEvent) + "\n");
+
+    expect(callbacks.onData).toHaveBeenCalledWith("Downloaded core.db\n");
   });
 });
