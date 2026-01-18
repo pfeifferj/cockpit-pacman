@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES } from "../constants";
+import { useSortableTable } from "../hooks/useSortableTable";
 import {
 	Card,
 	CardBody,
@@ -44,7 +45,7 @@ import {
   CheckCircleIcon,
   SyncAltIcon,
 } from "@patternfly/react-icons";
-import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
+import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
   UpdateInfo,
   SyncPackageDetails,
@@ -95,8 +96,6 @@ export const UpdatesView: React.FC = () => {
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [preflightData, setPreflightData] = useState<PreflightResponse | null>(null);
   const [preflightLoading, setPreflightLoading] = useState(false);
-  const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
-  const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
   const [selectedPackages, setSelectedPackages] = useState<Set<string>>(new Set());
   const [upgradeProgress, setUpgradeProgress] = useState<UpgradeProgress>({
     phase: "preparing",
@@ -110,6 +109,14 @@ export const UpdatesView: React.FC = () => {
   const [isCancelling, setIsCancelling] = useState(false);
   const [pinnedPackages, setPinnedPackages] = useState<string[]>([]);
   const [pinnedModalOpen, setPinnedModalOpen] = useState(false);
+  const [acknowledgedRemovals, setAcknowledgedRemovals] = useState(false);
+  const [acknowledgedConflicts, setAcknowledgedConflicts] = useState(false);
+  const [acknowledgedKeyImports, setAcknowledgedKeyImports] = useState(false);
+
+  const { activeSortIndex, activeSortDirection, getSortParams } = useSortableTable({
+    sortableColumns: [1, 2, 4, 5, 6], // name, repo, download, installed, net (offset by 1 for checkbox column)
+    defaultDirection: "asc",
+  });
 
   const repositories = useMemo(() => {
     const repos = new Set(updates.map((u) => u.repository));
@@ -132,24 +139,6 @@ export const UpdatesView: React.FC = () => {
     }
     return result;
   }, [updates, searchFilter, repoFilter]);
-
-  const sortableColumns = [1, 2, 4, 5, 6]; // name, repo, download, installed, net (offset by 1 for checkbox column)
-
-  const getSortParams = (columnIndex: number): ThProps["sort"] | undefined => {
-    if (!sortableColumns.includes(columnIndex)) return undefined;
-    return {
-      sortBy: {
-        index: activeSortIndex ?? undefined,
-        direction: activeSortDirection,
-        defaultDirection: "desc", // Start with Z-A since data is already A-Z
-      },
-      onSort: (_event, index, direction) => {
-        setActiveSortIndex(index);
-        setActiveSortDirection(direction);
-      },
-      columnIndex,
-    };
-  };
 
   const sortedUpdates = useMemo(() => {
     if (activeSortIndex === null) return filteredUpdates;
@@ -188,6 +177,19 @@ export const UpdatesView: React.FC = () => {
   const selectedUpdates = useMemo(() => {
     return updates.filter((u) => selectedPackages.has(u.name));
   }, [updates, selectedPackages]);
+
+  // Check if all required acknowledgments are made for dangerous operations
+  const allDangerousActionsAcknowledged = useMemo(() => {
+    if (!preflightData) return true;
+    const needsRemovalAck = (preflightData.removals?.length ?? 0) > 0;
+    const needsConflictAck = (preflightData.conflicts?.length ?? 0) > 0;
+    const needsKeyImportAck = (preflightData.import_keys?.length ?? 0) > 0;
+    return (
+      (!needsRemovalAck || acknowledgedRemovals) &&
+      (!needsConflictAck || acknowledgedConflicts) &&
+      (!needsKeyImportAck || acknowledgedKeyImports)
+    );
+  }, [preflightData, acknowledgedRemovals, acknowledgedConflicts, acknowledgedKeyImports]);
 
   const togglePackageSelection = (pkgName: string) => {
     setSelectedPackages((prev) => {
@@ -308,7 +310,10 @@ export const UpdatesView: React.FC = () => {
         (preflight.import_keys?.length ?? 0) > 0;
 
       if (hasIssues) {
-        // Show confirmation modal
+        // Reset acknowledgments and show confirmation modal
+        setAcknowledgedRemovals(false);
+        setAcknowledgedConflicts(false);
+        setAcknowledgedKeyImports(false);
         setConfirmModalOpen(true);
         return;
       }
@@ -820,9 +825,31 @@ export const UpdatesView: React.FC = () => {
                 The following actions will be performed during this upgrade:
               </Content>
 
+              {(preflightData.removals?.length ?? 0) > 0 && (
+                <Alert variant="danger" title="Packages will be removed" isInline className="pf-v6-u-mt-md">
+                  <Content component={ContentVariants.p}>
+                    The following packages will be removed to resolve dependencies:
+                  </Content>
+                  <List>
+                    {preflightData.removals!.map((pkg, i) => (
+                      <ListItem key={i}>{pkg}</ListItem>
+                    ))}
+                  </List>
+                  <Checkbox
+                    id="acknowledge-removals"
+                    label="I understand these packages will be removed"
+                    isChecked={acknowledgedRemovals}
+                    onChange={(_event, checked) => setAcknowledgedRemovals(checked)}
+                    className="pf-v6-u-mt-sm"
+                  />
+                </Alert>
+              )}
+
               {(preflightData.conflicts?.length ?? 0) > 0 && (
-                <>
-                  <Content component={ContentVariants.h4}>Package Conflicts</Content>
+                <Alert variant="warning" title="Package conflicts detected" isInline className="pf-v6-u-mt-md">
+                  <Content component={ContentVariants.p}>
+                    The following conflicts will be resolved automatically:
+                  </Content>
                   <List>
                     {preflightData.conflicts!.map((c, i) => (
                       <ListItem key={i}>
@@ -830,12 +857,43 @@ export const UpdatesView: React.FC = () => {
                       </ListItem>
                     ))}
                   </List>
-                </>
+                  <Checkbox
+                    id="acknowledge-conflicts"
+                    label="I understand conflicts will be resolved automatically"
+                    isChecked={acknowledgedConflicts}
+                    onChange={(_event, checked) => setAcknowledgedConflicts(checked)}
+                    className="pf-v6-u-mt-sm"
+                  />
+                </Alert>
+              )}
+
+              {(preflightData.import_keys?.length ?? 0) > 0 && (
+                <Alert variant="warning" title="PGP keys will be imported" isInline className="pf-v6-u-mt-md">
+                  <Content component={ContentVariants.p}>
+                    The following keys will be imported to verify package signatures:
+                  </Content>
+                  <List>
+                    {preflightData.import_keys!.map((k, i) => (
+                      <ListItem key={i}>
+                        {k.uid} ({k.fingerprint})
+                      </ListItem>
+                    ))}
+                  </List>
+                  <Checkbox
+                    id="acknowledge-key-imports"
+                    label="I trust these keys and want to import them"
+                    isChecked={acknowledgedKeyImports}
+                    onChange={(_event, checked) => setAcknowledgedKeyImports(checked)}
+                    className="pf-v6-u-mt-sm"
+                  />
+                </Alert>
               )}
 
               {(preflightData.replacements?.length ?? 0) > 0 && (
-                <>
-                  <Content component={ContentVariants.h4}>Package Replacements</Content>
+                <Alert variant="info" title="Package replacements" isInline className="pf-v6-u-mt-md">
+                  <Content component={ContentVariants.p}>
+                    The following packages will be replaced:
+                  </Content>
                   <List>
                     {preflightData.replacements!.map((r, i) => (
                       <ListItem key={i}>
@@ -843,44 +901,22 @@ export const UpdatesView: React.FC = () => {
                       </ListItem>
                     ))}
                   </List>
-                </>
-              )}
-
-              {(preflightData.removals?.length ?? 0) > 0 && (
-                <>
-                  <Content component={ContentVariants.h4}>Packages to Remove</Content>
-                  <List>
-                    {preflightData.removals!.map((pkg, i) => (
-                      <ListItem key={i}>{pkg}</ListItem>
-                    ))}
-                  </List>
-                </>
+                </Alert>
               )}
 
               {(preflightData.providers?.length ?? 0) > 0 && (
-                <>
-                  <Content component={ContentVariants.h4}>Provider Selections</Content>
+                <Alert variant="info" title="Provider selections" isInline className="pf-v6-u-mt-md">
+                  <Content component={ContentVariants.p}>
+                    The first available provider will be selected for the following dependencies:
+                  </Content>
                   <List>
                     {preflightData.providers!.map((p, i) => (
                       <ListItem key={i}>
-                        {p.dependency}: {p.providers[0]} will be selected (from: {p.providers.join(", ")})
+                        {p.dependency}: {p.providers[0]} (from: {p.providers.join(", ")})
                       </ListItem>
                     ))}
                   </List>
-                </>
-              )}
-
-              {(preflightData.import_keys?.length ?? 0) > 0 && (
-                <>
-                  <Content component={ContentVariants.h4}>PGP Keys to Import</Content>
-                  <List>
-                    {preflightData.import_keys!.map((k, i) => (
-                      <ListItem key={i}>
-                        {k.fingerprint} ({k.uid})
-                      </ListItem>
-                    ))}
-                  </List>
-                </>
+                </Alert>
               )}
 
               <Content component={ContentVariants.p} className="pf-v6-u-mt-md">
@@ -891,7 +927,12 @@ export const UpdatesView: React.FC = () => {
           )}
         </ModalBody>
         <ModalFooter>
-          <Button key="confirm" variant="primary" onClick={startUpgrade}>
+          <Button
+            key="confirm"
+            variant="primary"
+            onClick={startUpgrade}
+            isDisabled={!allDangerousActionsAcknowledged}
+          >
             Proceed with Upgrade
           </Button>
           <Button key="cancel" variant="link" onClick={() => setConfirmModalOpen(false)}>

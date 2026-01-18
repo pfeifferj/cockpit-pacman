@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
+import { useSortableTable } from "../hooks/useSortableTable";
 import {
   Card,
   CardBody,
@@ -24,7 +25,7 @@ import {
   Button,
 } from "@patternfly/react-core";
 import { SearchIcon } from "@patternfly/react-icons";
-import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
+import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import { SearchResult, SyncPackageDetails, searchPackages, getSyncPackageInfo, InstalledFilterType } from "../api";
 import { sanitizeSearchInput } from "../utils";
 import { PackageDetailsModal } from "./PackageDetailsModal";
@@ -50,10 +51,14 @@ export const SearchView: React.FC = () => {
   const [totalInstalled, setTotalInstalled] = useState(0);
   const [totalNotInstalled, setTotalNotInstalled] = useState(0);
   const [repositories, setRepositories] = useState<string[]>([]);
-  const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
-  const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMountedRef = useRef(true);
+  const currentQueryRef = useRef(currentQuery);
+
+  const { activeSortIndex, activeSortDirection, setActiveSortIndex, setActiveSortDirection } = useSortableTable({
+    sortableColumns: [0, 3, 4], // name, repository, status
+    defaultDirection: "asc",
+  });
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -63,10 +68,30 @@ export const SearchView: React.FC = () => {
   }, []);
 
   // Refs to avoid stale closures in debounced callback
-  const currentQueryRef = useRef(currentQuery);
   const perPageRef = useRef(perPage);
   currentQueryRef.current = currentQuery;
   perPageRef.current = perPage;
+
+  // Custom getSortParams with component-specific onSort behavior for server-side sorting
+  const getSortParams = (columnIndex: number) => {
+    if (![0, 3, 4].includes(columnIndex)) return undefined;
+    return {
+      sortBy: {
+        index: activeSortIndex ?? undefined,
+        direction: activeSortDirection,
+        defaultDirection: "asc" as const,
+      },
+      onSort: (_event: React.MouseEvent, index: number, direction: "asc" | "desc") => {
+        setActiveSortIndex(index);
+        setActiveSortDirection(direction);
+        setPage(1);
+        if (currentQuery) {
+          fetchResults(currentQuery, 1, perPage, installedFilter, false, index, direction);
+        }
+      },
+      columnIndex,
+    };
+  };
 
   // Debounced auto-search when input changes
   useEffect(() => {
@@ -125,7 +150,7 @@ export const SearchView: React.FC = () => {
         clearTimeout(debounceRef.current);
       }
     };
-  }, [searchInput]);
+  }, [searchInput, setActiveSortIndex]);
 
   const filteredResults = useMemo(() => {
     if (repoFilter === "all") return results;
@@ -258,29 +283,6 @@ export const SearchView: React.FC = () => {
         setDetailsLoading(false);
       }
     }
-  };
-
-  // Column indices: 0=name, 1=version, 2=description, 3=repository, 4=status
-  const sortableColumns = [0, 3, 4]; // name, repository, status
-
-  const getSortParams = (columnIndex: number): ThProps["sort"] | undefined => {
-    if (!sortableColumns.includes(columnIndex)) return undefined;
-    return {
-      sortBy: {
-        index: activeSortIndex ?? undefined,
-        direction: activeSortDirection,
-        defaultDirection: "desc", // Start with Z-A since data is already A-Z
-      },
-      onSort: (_event, index, direction) => {
-        setActiveSortIndex(index);
-        setActiveSortDirection(direction);
-        setPage(1);
-        if (currentQuery) {
-          fetchResults(currentQuery, 1, perPage, installedFilter, false, index, direction);
-        }
-      },
-      columnIndex,
-    };
   };
 
   return (

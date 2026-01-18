@@ -272,9 +272,14 @@ export const OrphansView: React.FC = () => {
             <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">
               {orphanData.orphans.length} orphan package{orphanData.orphans.length !== 1 ? "s" : ""} found
             </CardTitle>
-            <Content component={ContentVariants.p} className="pf-v6-u-mb-md">
-              Total size: <strong>{formatSize(orphanData.total_size)}</strong>
-            </Content>
+            <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
+              <FlexItem>
+                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--success--default)" }}>{formatSize(orphanData.total_size)}</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Space to Free</div>
+                </div>
+              </FlexItem>
+            </Flex>
           </FlexItem>
           <FlexItem>
             <Button

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useDebouncedValue } from "../hooks/useDebounce";
+import { useSortableTable } from "../hooks/useSortableTable";
 import {
   Card,
   CardBody,
@@ -20,7 +21,7 @@ import {
   SelectList,
   Button,
 } from "@patternfly/react-core";
-import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
+import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
   Package,
   PackageDetails,
@@ -52,10 +53,14 @@ export const PackageList: React.FC = () => {
   const [repositories, setRepositories] = useState<string[]>([]);
   const [repoFilter, setRepoFilter] = useState("all");
   const [repoSelectOpen, setRepoSelectOpen] = useState(false);
-  const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
-  const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
   const manualSearchRef = useRef(false);
   const isMountedRef = useRef(true);
+
+  const { activeSortIndex, activeSortDirection, getSortParams } = useSortableTable({
+    sortableColumns: [0, 3, 4], // name, size, reason
+    defaultDirection: "asc",
+    onSort: () => setPage(1),
+  });
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -167,26 +172,6 @@ export const PackageList: React.FC = () => {
   const handlePerPageSelect = (_event: React.MouseEvent | React.KeyboardEvent | MouseEvent, newPerPage: number) => {
     setPerPage(newPerPage);
     setPage(1);
-  };
-
-  // Column indices: 0=name, 1=version, 2=description, 3=size, 4=reason
-  const sortableColumns = [0, 3, 4]; // name, size, reason
-
-  const getSortParams = (columnIndex: number): ThProps["sort"] | undefined => {
-    if (!sortableColumns.includes(columnIndex)) return undefined;
-    return {
-      sortBy: {
-        index: activeSortIndex ?? undefined,
-        direction: activeSortDirection,
-        defaultDirection: "desc", // Start with Z-A since data is already A-Z
-      },
-      onSort: (_event, index, direction) => {
-        setActiveSortIndex(index);
-        setActiveSortDirection(direction);
-        setPage(1); // Reset to first page when sorting changes
-      },
-      columnIndex,
-    };
   };
 
   if (error && packages.length === 0) {

@@ -101,7 +101,9 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(screen.getByText("linux")).toBeInTheDocument();
       });
-      expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
     });
 
     it("deselecting a package shows partial upgrade warning", async () => {
@@ -177,6 +179,9 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(screen.getByText("linux")).toBeInTheDocument();
       });
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
 
       const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
       await act(async () => {
@@ -199,6 +204,9 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(screen.getByText("linux")).toBeInTheDocument();
       });
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
 
       const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
       await act(async () => {
@@ -216,6 +224,9 @@ describe("UpdatesView", () => {
       render(<UpdatesView />);
       await waitFor(() => {
         expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
       });
 
       const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
@@ -235,6 +246,9 @@ describe("UpdatesView", () => {
       render(<UpdatesView />);
       await waitFor(() => {
         expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
       });
 
       const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
@@ -262,6 +276,9 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(screen.getByText("linux")).toBeInTheDocument();
       });
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
 
       const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
       await act(async () => {
@@ -272,7 +289,20 @@ describe("UpdatesView", () => {
         expect(screen.getByText("Confirm Upgrade")).toBeInTheDocument();
       });
 
+      // The proceed button should be disabled until acknowledgment checkbox is checked
       const proceedButton = screen.getByRole("button", { name: /Proceed with Upgrade/i });
+      expect(proceedButton).toBeDisabled();
+
+      // Check the conflicts acknowledgment checkbox within the modal
+      const modal = screen.getByRole("dialog");
+      const conflictsCheckbox = modal.querySelector('input[id="acknowledge-conflicts"]') as HTMLInputElement;
+      await act(async () => {
+        fireEvent.click(conflictsCheckbox);
+      });
+
+      // Now the proceed button should be enabled
+      expect(proceedButton).not.toBeDisabled();
+
       await act(async () => {
         fireEvent.click(proceedButton);
       });
@@ -299,6 +329,9 @@ describe("UpdatesView", () => {
       render(<UpdatesView />);
       await waitFor(() => {
         expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
       });
 
       const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
@@ -333,6 +366,9 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(screen.getByText("linux")).toBeInTheDocument();
       });
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
 
       const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
       await act(async () => {
@@ -355,6 +391,9 @@ describe("UpdatesView", () => {
       render(<UpdatesView />);
       await waitFor(() => {
         expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
       });
 
       const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
@@ -381,6 +420,9 @@ describe("UpdatesView", () => {
       render(<UpdatesView />);
       await waitFor(() => {
         expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
       });
 
       const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
@@ -467,6 +509,9 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(screen.getByText("linux")).toBeInTheDocument();
       });
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
 
       const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
       await act(async () => {
@@ -493,6 +538,9 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(screen.getByText("linux")).toBeInTheDocument();
       });
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
 
       const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
       await act(async () => {
@@ -516,6 +564,9 @@ describe("UpdatesView", () => {
       render(<UpdatesView />);
       await waitFor(() => {
         expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
       });
 
       const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
@@ -647,6 +698,9 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(screen.getByText("linux")).toBeInTheDocument();
       });
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
 
       const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
       await act(async () => {
@@ -678,6 +732,9 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(screen.getByText("linux")).toBeInTheDocument();
       });
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
 
       const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
       await act(async () => {
@@ -706,6 +763,9 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(screen.getByText("linux")).toBeInTheDocument();
       });
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
 
       const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
       await act(async () => {
@@ -730,6 +790,9 @@ describe("UpdatesView", () => {
       render(<UpdatesView />);
       await waitFor(() => {
         expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
       });
 
       const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
@@ -759,6 +822,9 @@ describe("UpdatesView", () => {
       render(<UpdatesView />);
       await waitFor(() => {
         expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
       });
 
       const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
