@@ -39,24 +39,23 @@ pub fn get_cache_info() -> Result<()> {
         if path
             .extension()
             .is_some_and(|ext| ext == "zst" || ext == "xz" || ext == "gz")
+            && let Ok(metadata) = entry.metadata()
         {
-            if let Ok(metadata) = entry.metadata() {
-                let size = metadata.len() as i64;
-                total_size += size;
+            let size = metadata.len() as i64;
+            total_size += size;
 
-                let filename = path
-                    .file_name()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_default();
+            let filename = path
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
 
-                if let Some((name, version)) = parse_package_filename(&filename) {
-                    packages.push(CachePackage {
-                        name,
-                        version,
-                        filename,
-                        size,
-                    });
-                }
+            if let Some((name, version)) = parse_package_filename(&filename) {
+                packages.push(CachePackage {
+                    name,
+                    version,
+                    filename,
+                    size,
+                });
             }
         }
     }

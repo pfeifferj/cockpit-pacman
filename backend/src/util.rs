@@ -76,11 +76,7 @@ where
 {
     items.sort_by(|a, b| {
         let cmp = cmp_fn(a, b);
-        if ascending {
-            cmp
-        } else {
-            cmp.reverse()
-        }
+        if ascending { cmp } else { cmp.reverse() }
     });
 }
 
@@ -124,10 +120,10 @@ pub fn get_cache_dir() -> String {
         return dir;
     }
 
-    if let Ok(config) = pacmanconf::Config::new() {
-        if let Some(dir) = config.cache_dir.first() {
-            return dir.clone();
-        }
+    if let Ok(config) = pacmanconf::Config::new()
+        && let Some(dir) = config.cache_dir.first()
+    {
+        return dir.clone();
     }
 
     "/var/cache/pacman/pkg".to_string()
@@ -157,7 +153,7 @@ pub fn parse_package_filename(filename: &str) -> Option<(String, String)> {
 
 #[macro_export]
 macro_rules! check_cancel_early {
-    ($timeout:expr) => {{
+    ($timeout:expr_2021) => {{
         let result = $crate::util::check_cancel($timeout);
         if !matches!(result, $crate::util::CheckResult::Continue) {
             $crate::util::emit_cancellation_complete(&result);

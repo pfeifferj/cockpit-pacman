@@ -10,8 +10,8 @@ use std::time::Instant;
 use crate::alpm::get_handle;
 use crate::models::{CachedVersion, DowngradeResponse, StreamEvent};
 use crate::util::{
-    emit_event, get_cache_dir, is_cancelled, parse_package_filename, setup_signal_handler,
-    DEFAULT_MUTATION_TIMEOUT_SECS,
+    DEFAULT_MUTATION_TIMEOUT_SECS, emit_event, get_cache_dir, is_cancelled, parse_package_filename,
+    setup_signal_handler,
 };
 use crate::validation::{validate_package_name, validate_version};
 
@@ -53,10 +53,10 @@ pub fn list_downgrades(package_name: Option<&str>) -> Result<()> {
                 .unwrap_or_default();
 
             if let Some((name, version)) = parse_package_filename(&filename) {
-                if let Some(filter_name) = package_name {
-                    if name != filter_name {
-                        continue;
-                    }
+                if let Some(filter_name) = package_name
+                    && name != filter_name
+                {
+                    continue;
                 }
 
                 let installed_version = get_installed_version(&alpm, &name);
@@ -248,12 +248,12 @@ fn find_package_file(cache_path: &Path, name: &str, version: &str) -> Result<Str
             }
         };
         let path = entry.path();
-        if let Some(filename) = path.file_name().map(|s| s.to_string_lossy().to_string()) {
-            if let Some((pkg_name, pkg_version)) = parse_package_filename(&filename) {
-                if pkg_name == name && pkg_version == version {
-                    return Ok(filename);
-                }
-            }
+        if let Some(filename) = path.file_name().map(|s| s.to_string_lossy().to_string())
+            && let Some((pkg_name, pkg_version)) = parse_package_filename(&filename)
+            && pkg_name == name
+            && pkg_version == version
+        {
+            return Ok(filename);
         }
     }
 

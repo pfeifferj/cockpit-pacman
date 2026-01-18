@@ -63,10 +63,10 @@ pub fn list_installed(
                 }
             }
 
-            if let Some(repo_f) = repo_filter {
-                if repo.as_deref().unwrap_or("user") != repo_f {
-                    return (filtered, repo_set, total_explicit, total_dependency);
-                }
+            if let Some(repo_f) = repo_filter
+                && repo.as_deref().unwrap_or("user") != repo_f
+            {
+                return (filtered, repo_set, total_explicit, total_dependency);
             }
 
             match pkg.reason() {

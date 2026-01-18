@@ -3,7 +3,7 @@ use anyhow::Result;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::alpm::{get_handle, progress_to_string, setup_dl_cb, setup_log_cb, TransactionGuard};
+use crate::alpm::{TransactionGuard, get_handle, progress_to_string, setup_dl_cb, setup_log_cb};
 use crate::check_cancel_early;
 use crate::db::invalidate_repo_map_cache;
 use crate::models::{
@@ -11,8 +11,8 @@ use crate::models::{
     StreamEvent,
 };
 use crate::util::{
-    check_cancel, emit_cancellation_complete, emit_event, is_cancelled, setup_signal_handler,
-    CheckResult, TimeoutGuard, DEFAULT_MUTATION_TIMEOUT_SECS,
+    CheckResult, DEFAULT_MUTATION_TIMEOUT_SECS, TimeoutGuard, check_cancel,
+    emit_cancellation_complete, emit_event, is_cancelled, setup_signal_handler,
 };
 
 pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
@@ -474,13 +474,13 @@ pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to initialize transaction: {}", e))?;
 
     for name in &orphan_names {
-        if let Ok(pkg) = handle.localdb().pkg(name.as_str()) {
-            if let Err(e) = handle.trans_remove_pkg(pkg) {
-                emit_event(&StreamEvent::Log {
-                    level: "warning".to_string(),
-                    message: format!("Failed to mark {} for removal: {}", name, e),
-                });
-            }
+        if let Ok(pkg) = handle.localdb().pkg(name.as_str())
+            && let Err(e) = handle.trans_remove_pkg(pkg)
+        {
+            emit_event(&StreamEvent::Log {
+                level: "warning".to_string(),
+                message: format!("Failed to mark {} for removal: {}", name, e),
+            });
         }
     }
 
