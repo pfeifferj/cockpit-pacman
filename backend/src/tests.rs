@@ -1,7 +1,9 @@
 use crate::models::{
     Package, PackageDetails, PackageListResponse, SearchResult, UpdateInfo, UpdatesResponse,
 };
-use crate::validation::{validate_package_name, validate_pagination, validate_search_query};
+use crate::validation::{
+    validate_keep_versions, validate_package_name, validate_pagination, validate_search_query,
+};
 
 // --- Serialization tests ---
 
@@ -172,6 +174,22 @@ fn test_validate_pagination_invalid() {
     assert!(validate_pagination(0, 0).is_err()); // zero limit
     assert!(validate_pagination(0, 1001).is_err()); // limit too high
     assert!(validate_pagination(2_000_000, 50).is_err()); // offset too high
+}
+
+#[test]
+fn test_validate_keep_versions_valid() {
+    assert!(validate_keep_versions(0).is_ok());
+    assert!(validate_keep_versions(1).is_ok());
+    assert!(validate_keep_versions(3).is_ok());
+    assert!(validate_keep_versions(50).is_ok());
+    assert!(validate_keep_versions(100).is_ok());
+}
+
+#[test]
+fn test_validate_keep_versions_invalid() {
+    assert!(validate_keep_versions(101).is_err());
+    assert!(validate_keep_versions(1000).is_err());
+    assert!(validate_keep_versions(u32::MAX).is_err());
 }
 
 // --- Integration tests (require live pacman system) ---

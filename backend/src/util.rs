@@ -11,6 +11,10 @@ pub fn is_cancelled() -> bool {
     CANCELLED.load(AtomicOrdering::SeqCst)
 }
 
+pub fn reset_cancelled() {
+    CANCELLED.store(false, AtomicOrdering::SeqCst);
+}
+
 pub const DEFAULT_MUTATION_TIMEOUT_SECS: u64 = 300;
 
 pub struct TimeoutGuard {
@@ -42,19 +46,20 @@ impl TimeoutGuard {
 pub fn setup_signal_handler() {
     static HANDLER_SET: AtomicBool = AtomicBool::new(false);
 
-    if HANDLER_SET.load(AtomicOrdering::SeqCst) {
+    reset_cancelled();
+
+    if HANDLER_SET
+        .compare_exchange(false, true, AtomicOrdering::SeqCst, AtomicOrdering::SeqCst)
+        .is_err()
+    {
         return;
     }
 
-    match ctrlc::set_handler(move || {
+    if let Err(e) = ctrlc::set_handler(move || {
         CANCELLED.store(true, AtomicOrdering::SeqCst);
     }) {
-        Ok(()) => {
-            HANDLER_SET.store(true, AtomicOrdering::SeqCst);
-        }
-        Err(e) => {
-            eprintln!("Warning: Failed to set signal handler: {}", e);
-        }
+        eprintln!("Warning: Failed to set signal handler: {}", e);
+        HANDLER_SET.store(false, AtomicOrdering::SeqCst);
     }
 }
 

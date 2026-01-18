@@ -80,7 +80,14 @@ fn read_log_forward(file: &File, filter: Option<&str>) -> Result<LogReadResult> 
     let mut total_removed = 0usize;
     let mut total_other = 0usize;
 
-    for line in reader.lines().map_while(Result::ok) {
+    for line_result in reader.lines() {
+        let line = match line_result {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("Warning: Failed to read log line: {}", e);
+                continue;
+            }
+        };
         if let Some(entry) = parse_log_line(&line) {
             match entry.action.as_str() {
                 "upgraded" => total_upgraded += 1,

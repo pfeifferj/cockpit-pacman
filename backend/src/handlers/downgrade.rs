@@ -34,7 +34,14 @@ pub fn list_downgrades(package_name: Option<&str>) -> Result<()> {
 
     let mut packages: Vec<CachedVersion> = Vec::new();
 
-    for entry in entries.flatten() {
+    for entry_result in entries {
+        let entry = match entry_result {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("Warning: Failed to read directory entry: {}", e);
+                continue;
+            }
+        };
         let path = entry.path();
         if path
             .extension()
@@ -127,7 +134,14 @@ pub fn downgrade_package(name: &str, version: &str, timeout: Option<u64>) -> Res
     let stdout_handle = std::thread::spawn(move || {
         if let Some(stdout) = stdout {
             let reader = BufReader::new(stdout);
-            for line in reader.lines().map_while(Result::ok) {
+            for line_result in reader.lines() {
+                let line = match line_result {
+                    Ok(l) => l,
+                    Err(e) => {
+                        eprintln!("Warning: Failed to read stdout line: {}", e);
+                        continue;
+                    }
+                };
                 if !line.trim().is_empty() {
                     emit_event(&StreamEvent::Log {
                         level: "info".to_string(),
@@ -141,7 +155,14 @@ pub fn downgrade_package(name: &str, version: &str, timeout: Option<u64>) -> Res
     let stderr_handle = std::thread::spawn(move || {
         if let Some(stderr) = stderr {
             let reader = BufReader::new(stderr);
-            for line in reader.lines().map_while(Result::ok) {
+            for line_result in reader.lines() {
+                let line = match line_result {
+                    Ok(l) => l,
+                    Err(e) => {
+                        eprintln!("Warning: Failed to read stderr line: {}", e);
+                        continue;
+                    }
+                };
                 if !line.trim().is_empty() {
                     emit_event(&StreamEvent::Log {
                         level: "warning".to_string(),
@@ -176,8 +197,12 @@ pub fn downgrade_package(name: &str, version: &str, timeout: Option<u64>) -> Res
 
         match child.try_wait() {
             Ok(Some(status)) => {
-                let _ = stdout_handle.join();
-                let _ = stderr_handle.join();
+                if let Err(e) = stdout_handle.join() {
+                    eprintln!("Warning: stdout reader thread panicked: {:?}", e);
+                }
+                if let Err(e) = stderr_handle.join() {
+                    eprintln!("Warning: stderr reader thread panicked: {:?}", e);
+                }
 
                 if status.success() {
                     emit_event(&StreamEvent::Complete {
@@ -214,7 +239,14 @@ fn find_package_file(cache_path: &Path, name: &str, version: &str) -> Result<Str
     let entries = fs::read_dir(cache_path)
         .with_context(|| format!("Failed to read cache directory: {}", cache_path.display()))?;
 
-    for entry in entries.flatten() {
+    for entry_result in entries {
+        let entry = match entry_result {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("Warning: Failed to read directory entry: {}", e);
+                continue;
+            }
+        };
         let path = entry.path();
         if let Some(filename) = path.file_name().map(|s| s.to_string_lossy().to_string()) {
             if let Some((pkg_name, pkg_version)) = parse_package_filename(&filename) {

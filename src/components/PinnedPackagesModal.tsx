@@ -42,6 +42,7 @@ import {
   getSyncPackageInfo,
   SyncPackageDetails,
 } from "../api";
+import { sanitizeErrorMessage } from "../utils";
 import { SEARCH_DEBOUNCE_MS } from "../constants";
 
 interface PinnedPackagesModalProps {
@@ -262,7 +263,7 @@ export const PinnedPackagesModal: React.FC<PinnedPackagesModalProps> = ({
             isInline
             className="pf-v6-u-mb-md"
           >
-            {error}
+            {sanitizeErrorMessage(error)}
           </Alert>
         )}
 

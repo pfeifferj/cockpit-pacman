@@ -38,6 +38,7 @@ import {
   refreshKeyring,
   initKeyring,
 } from "../api";
+import { sanitizeErrorMessage } from "../utils";
 
 type ViewState = "loading" | "ready" | "refreshing" | "initializing" | "error";
 
@@ -266,7 +267,7 @@ export const KeyringView: React.FC = () => {
       <Card>
         <CardBody>
           <Alert variant="danger" title="Error loading keyring status">
-            {error}
+            {sanitizeErrorMessage(error)}
           </Alert>
           <div className="pf-v6-u-mt-md">
             <Button variant="primary" onClick={loadKeyringStatus}>

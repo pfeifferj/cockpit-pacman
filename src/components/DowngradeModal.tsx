@@ -26,6 +26,7 @@ import {
   downgradePackage,
   formatSize,
 } from "../api";
+import { sanitizeErrorMessage } from "../utils";
 
 type ModalState = "loading" | "select" | "confirm" | "downgrading" | "success" | "error";
 
@@ -183,7 +184,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
       case "error":
         return (
           <Alert variant="danger" title="Error">
-            {error}
+            {sanitizeErrorMessage(error)}
           </Alert>
         );
 

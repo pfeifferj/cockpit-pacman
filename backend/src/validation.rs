@@ -48,3 +48,10 @@ pub fn validate_version(version: &str) -> Result<()> {
     }
     Ok(())
 }
+
+pub fn validate_keep_versions(keep: u32) -> Result<()> {
+    if keep > 100 {
+        anyhow::bail!("Keep versions must be at most 100 (got {})", keep);
+    }
+    Ok(())
+}

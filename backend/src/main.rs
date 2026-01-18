@@ -7,7 +7,7 @@ use cockpit_pacman_backend::handlers::{
     run_upgrade, search, sync_database, sync_package_info,
 };
 use cockpit_pacman_backend::validation::{
-    validate_package_name, validate_pagination, validate_search_query,
+    validate_keep_versions, validate_package_name, validate_pagination, validate_search_query,
 };
 
 fn print_usage() {
@@ -192,7 +192,7 @@ fn main() {
         "cache-info" => get_cache_info(),
         "clean-cache" => {
             let keep_versions = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(3);
-            clean_cache(keep_versions)
+            validate_keep_versions(keep_versions).and_then(|_| clean_cache(keep_versions))
         }
         "history" => {
             let offset = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);

@@ -37,6 +37,7 @@ import {
   formatSize,
   formatNumber,
 } from "../api";
+import { sanitizeErrorMessage } from "../utils";
 
 type ViewState = "loading" | "ready" | "cleaning" | "success" | "error";
 
@@ -197,7 +198,7 @@ export const CacheView: React.FC = () => {
       <Card>
         <CardBody>
           <Alert variant="danger" title="Error loading cache information">
-            {error}
+            {sanitizeErrorMessage(error)}
           </Alert>
           <div className="pf-v6-u-mt-md">
             <Button variant="primary" onClick={loadCacheInfo}>

@@ -27,7 +27,14 @@ pub fn get_cache_info() -> Result<()> {
     let entries = fs::read_dir(cache_path)
         .with_context(|| format!("Failed to read cache directory: {}", cache_dir))?;
 
-    for entry in entries.flatten() {
+    for entry_result in entries {
+        let entry = match entry_result {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("Warning: Failed to read directory entry: {}", e);
+                continue;
+            }
+        };
         let path = entry.path();
         if path
             .extension()

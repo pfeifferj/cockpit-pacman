@@ -28,6 +28,7 @@ import {
   getHistory,
   formatNumber,
 } from "../api";
+import { sanitizeErrorMessage } from "../utils";
 
 type ViewState = "loading" | "ready" | "error";
 
@@ -167,7 +168,7 @@ export const HistoryView: React.FC = () => {
       <Card>
         <CardBody>
           <Alert variant="danger" title="Error loading history">
-            {error}
+            {sanitizeErrorMessage(error)}
           </Alert>
           <div className="pf-v6-u-mt-md">
             <Button variant="primary" onClick={loadHistory}>

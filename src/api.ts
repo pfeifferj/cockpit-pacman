@@ -419,6 +419,19 @@ export interface UpgradeCallbacks {
   timeout?: number;
 }
 
+function extractErrorMessage(ex: unknown): string {
+  if (ex instanceof Error) return ex.message;
+  if (ex && typeof ex === "object") {
+    const obj = ex as Record<string, unknown>;
+    if (typeof obj.message === "string") return obj.message;
+    if (typeof obj.exit_status === "number") {
+      return `Operation failed (exit ${obj.exit_status})`;
+    }
+  }
+  if (typeof ex === "string") return ex;
+  return "Operation failed with unknown error";
+}
+
 function runStreamingBackend(
   command: string,
   args: string[],
@@ -507,9 +520,7 @@ function runStreamingBackend(
   });
 
   proc.catch((ex: unknown) => {
-    const errObj = ex as { message?: string; exit_status?: number };
-    const message = errObj.message || `Operation failed (exit ${errObj.exit_status ?? "unknown"})`;
-    markComplete(false, message);
+    markComplete(false, extractErrorMessage(ex));
   });
 
   return {
