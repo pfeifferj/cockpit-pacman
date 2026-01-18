@@ -15,7 +15,6 @@ import {
   CodeBlockCode,
   Flex,
   FlexItem,
-  Label,
   ExpandableSection,
   Modal,
   ModalVariant,
@@ -25,10 +24,6 @@ import {
   Content,
   ContentVariants,
   Slider,
-  DescriptionList,
-  DescriptionListGroup,
-  DescriptionListTerm,
-  DescriptionListDescription,
 } from "@patternfly/react-core";
 import { TrashIcon, CheckCircleIcon, FolderIcon } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
@@ -301,36 +296,35 @@ export const CacheView: React.FC = () => {
         <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
           <FlexItem>
             <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">Package Cache</CardTitle>
-            <DescriptionList isHorizontal isCompact className="pf-v6-u-mb-md">
-              <DescriptionListGroup>
-                <DescriptionListTerm>Total size</DescriptionListTerm>
-                <DescriptionListDescription>
-                  <strong>{formatSize(cacheData.total_size)}</strong>
-                </DescriptionListDescription>
-              </DescriptionListGroup>
-              <DescriptionListGroup>
-                <DescriptionListTerm>Cached files</DescriptionListTerm>
-                <DescriptionListDescription>{cacheData.package_count}</DescriptionListDescription>
-              </DescriptionListGroup>
-              <DescriptionListGroup>
-                <DescriptionListTerm>Unique packages</DescriptionListTerm>
-                <DescriptionListDescription>{uniquePackageCount}</DescriptionListDescription>
-              </DescriptionListGroup>
-              <DescriptionListGroup>
-                <DescriptionListTerm>Multiple versions</DescriptionListTerm>
-                <DescriptionListDescription>
-                  <Label color={multiVersionPackages > 0 ? "blue" : "grey"}>
-                    {multiVersionPackages} package{multiVersionPackages !== 1 ? "s" : ""}
-                  </Label>
-                </DescriptionListDescription>
-              </DescriptionListGroup>
-              <DescriptionListGroup>
-                <DescriptionListTerm>Location</DescriptionListTerm>
-                <DescriptionListDescription>
-                  <code>{cacheData.path}</code>
-                </DescriptionListDescription>
-              </DescriptionListGroup>
-            </DescriptionList>
+            <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
+              <FlexItem>
+                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600 }}>{formatSize(cacheData.total_size)}</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Total Size</div>
+                </div>
+              </FlexItem>
+              <FlexItem>
+                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600 }}>{cacheData.package_count}</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Cached Files</div>
+                </div>
+              </FlexItem>
+              <FlexItem>
+                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600 }}>{uniquePackageCount}</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Unique Packages</div>
+                </div>
+              </FlexItem>
+              <FlexItem>
+                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: multiVersionPackages > 0 ? "var(--pf-t--global--color--status--info--default)" : undefined }}>{multiVersionPackages}</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Multi-Version</div>
+                </div>
+              </FlexItem>
+            </Flex>
+            <Content component={ContentVariants.small} style={{ color: "var(--pf-t--global--text--color--subtle)" }}>
+              Location: <code>{cacheData.path}</code>
+            </Content>
           </FlexItem>
           <FlexItem>
             <Button
