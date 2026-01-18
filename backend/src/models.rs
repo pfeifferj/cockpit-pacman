@@ -219,3 +219,55 @@ pub struct OrphanResponse {
     pub orphans: Vec<OrphanPackage>,
     pub total_size: i64,
 }
+
+#[derive(Serialize)]
+pub struct CachePackage {
+    pub name: String,
+    pub version: String,
+    pub filename: String,
+    pub size: i64,
+}
+
+#[derive(Serialize)]
+pub struct CacheInfo {
+    pub total_size: i64,
+    pub package_count: usize,
+    pub packages: Vec<CachePackage>,
+    pub path: String,
+}
+
+#[derive(Serialize)]
+pub struct LogEntry {
+    pub timestamp: String,
+    pub source: String,
+    pub action: String,
+    pub package: String,
+    pub old_version: Option<String>,
+    pub new_version: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct LogResponse {
+    pub entries: Vec<LogEntry>,
+    pub total: usize,
+    pub total_upgraded: usize,
+    pub total_installed: usize,
+    pub total_removed: usize,
+    pub total_other: usize,
+}
+
+#[derive(Serialize)]
+pub struct CachedVersion {
+    pub name: String,
+    pub version: String,
+    pub filename: String,
+    pub size: i64,
+    pub installed_version: Option<String>,
+    pub is_older: bool,
+}
+
+#[derive(Serialize)]
+pub struct DowngradeResponse {
+    pub packages: Vec<CachedVersion>,
+    pub total: usize,
+}

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
 	Spinner,
 	DescriptionList,
@@ -12,10 +12,14 @@ import {
 	Modal,
 	ModalVariant,
 	ModalHeader,
-	ModalBody
+	ModalBody,
+	ModalFooter,
+	Button,
 } from '@patternfly/react-core';
-import { OutlinedQuestionCircleIcon } from "@patternfly/react-icons";
+import { OutlinedQuestionCircleIcon, ArrowDownIcon } from "@patternfly/react-icons";
 import { PackageDetails, SyncPackageDetails, formatSize, formatDate } from "../api";
+import { sanitizeUrl } from "../utils";
+import { DowngradeModal } from "./DowngradeModal";
 
 type PackageInfo = PackageDetails | SyncPackageDetails;
 
@@ -34,10 +38,16 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
   isLoading,
   onClose,
 }) => {
+  const [downgradeModalOpen, setDowngradeModalOpen] = useState(false);
   const isOpen = packageDetails !== null || isLoading;
   const isInstalled = packageDetails && isInstalledPackage(packageDetails);
 
+  const handleDowngradeClose = () => {
+    setDowngradeModalOpen(false);
+  };
+
   return (
+    <>
     <Modal
       variant={ModalVariant.medium}
       isOpen={isOpen}
@@ -80,11 +90,11 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
             </DescriptionListDescription>
           </DescriptionListGroup>
 
-          {packageDetails.url && (
+          {sanitizeUrl(packageDetails.url) && (
             <DescriptionListGroup>
               <DescriptionListTerm>URL</DescriptionListTerm>
               <DescriptionListDescription>
-                <a href={packageDetails.url} target="_blank" rel="noopener noreferrer">
+                <a href={sanitizeUrl(packageDetails.url)!} target="_blank" rel="noopener noreferrer">
                   {packageDetails.url}
                 </a>
               </DescriptionListDescription>
@@ -216,6 +226,26 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
           </DescriptionList>
         ) : null}
       </ModalBody>
+      {isInstalled && packageDetails && (
+        <ModalFooter>
+          <Button
+            variant="secondary"
+            icon={<ArrowDownIcon />}
+            onClick={() => setDowngradeModalOpen(true)}
+          >
+            Downgrade
+          </Button>
+        </ModalFooter>
+      )}
     </Modal>
+    {isInstalled && packageDetails && (
+      <DowngradeModal
+        packageName={packageDetails.name}
+        currentVersion={packageDetails.version}
+        isOpen={downgradeModalOpen}
+        onClose={handleDowngradeClose}
+      />
+    )}
+    </>
   );
 };

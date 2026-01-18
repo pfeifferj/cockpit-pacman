@@ -542,4 +542,309 @@ describe("UpdatesView", () => {
       expect(screen.getByText(/Package foo has been replaced by bar/)).toBeInTheDocument();
     });
   });
+
+  describe("Batch Upgrades", () => {
+    const batchUpdatesResponse = {
+      updates: [
+        {
+          name: "linux",
+          current_version: "6.7.0-arch1-1",
+          new_version: "6.7.1-arch1-1",
+          download_size: 150000000,
+          current_size: 142000000,
+          new_size: 145000000,
+          repository: "core",
+        },
+        {
+          name: "glibc",
+          current_version: "2.38-1",
+          new_version: "2.39-1",
+          download_size: 50000000,
+          current_size: 45000000,
+          new_size: 48000000,
+          repository: "core",
+        },
+        {
+          name: "systemd",
+          current_version: "254-1",
+          new_version: "255-1",
+          download_size: 30000000,
+          current_size: 28000000,
+          new_size: 32000000,
+          repository: "core",
+        },
+      ],
+      warnings: [],
+    };
+
+    it("displays multiple packages in upgrade list", async () => {
+      mockCheckUpdates.mockResolvedValue(batchUpdatesResponse);
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+      expect(screen.getByText("glibc")).toBeInTheDocument();
+      expect(screen.getByText("systemd")).toBeInTheDocument();
+      expect(screen.getByText(/3 of 3 update/)).toBeInTheDocument();
+    });
+
+    it("tracks progress through multiple packages", async () => {
+      mockCheckUpdates.mockResolvedValue(batchUpdatesResponse);
+      mockRunUpgrade.mockImplementation((callbacks) => {
+        setTimeout(() => {
+          callbacks.onEvent?.({
+            type: "progress",
+            operation: "upgrading",
+            package: "glibc",
+            percent: 50,
+            current: 2,
+            total: 3,
+          });
+        }, 0);
+        return { cancel: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+
+      const applyButton = screen.getByRole("button", { name: /Apply 3 Updates/i });
+      await act(async () => {
+        fireEvent.click(applyButton);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("Upgrading packages")).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/glibc/)).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe("Mid-upgrade Failures", () => {
+    it("handles download failure gracefully", async () => {
+      mockRunUpgrade.mockImplementation((callbacks) => {
+        setTimeout(() => {
+          callbacks.onEvent?.({
+            type: "download",
+            filename: "linux-6.7.1-arch1-1.pkg.tar.zst",
+            event: "progress",
+            downloaded: 10000000,
+            total: 150000000,
+          });
+          callbacks.onError("Failed to download linux-6.7.1-arch1-1.pkg.tar.zst: Connection timed out");
+        }, 0);
+        return { cancel: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+
+      const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
+      await act(async () => {
+        fireEvent.click(applyButton);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/Failed to download/)).toBeInTheDocument();
+      });
+    });
+
+    it("handles install failure during transaction", async () => {
+      mockRunUpgrade.mockImplementation((callbacks) => {
+        setTimeout(() => {
+          callbacks.onEvent?.({
+            type: "progress",
+            operation: "upgrading",
+            package: "linux",
+            percent: 50,
+            current: 1,
+            total: 1,
+          });
+          callbacks.onError("Failed to commit transaction: conflicting files");
+        }, 0);
+        return { cancel: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+
+      const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
+      await act(async () => {
+        fireEvent.click(applyButton);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/Failed to commit transaction/)).toBeInTheDocument();
+      });
+    });
+
+    it("handles hook failure", async () => {
+      mockRunUpgrade.mockImplementation((callbacks) => {
+        setTimeout(() => {
+          callbacks.onEvent?.({
+            type: "event",
+            event: "running post-transaction hooks",
+            package: "linux",
+          });
+          callbacks.onError("Hook failed: mkinitcpio returned non-zero exit code");
+        }, 0);
+        return { cancel: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+
+      const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
+      await act(async () => {
+        fireEvent.click(applyButton);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/Hook failed/)).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe("Timeout Handling", () => {
+    it("handles backend timeout error", async () => {
+      mockRunUpgrade.mockImplementation((callbacks) => {
+        setTimeout(() => {
+          callbacks.onError("Operation timed out after 300s");
+        }, 0);
+        return { cancel: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+
+      const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
+      await act(async () => {
+        fireEvent.click(applyButton);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/timed out/)).toBeInTheDocument();
+      });
+    });
+
+    it("allows retry after timeout", async () => {
+      let callCount = 0;
+      mockRunUpgrade.mockImplementation((callbacks) => {
+        callCount++;
+        setTimeout(() => {
+          if (callCount === 1) {
+            callbacks.onError("Operation timed out after 300s");
+          } else {
+            callbacks.onComplete();
+          }
+        }, 0);
+        return { cancel: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+
+      const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
+      await act(async () => {
+        fireEvent.click(applyButton);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/timed out/)).toBeInTheDocument();
+      });
+
+      const retryButton = screen.getByRole("button", { name: "Retry" });
+      await act(async () => {
+        fireEvent.click(retryButton);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe("Sorting and Filtering", () => {
+    const sortTestResponse = {
+      updates: [
+        {
+          name: "aaa-package",
+          current_version: "1.0-1",
+          new_version: "1.1-1",
+          download_size: 1000,
+          current_size: 2000,
+          new_size: 2500,
+          repository: "extra",
+        },
+        {
+          name: "zzz-package",
+          current_version: "2.0-1",
+          new_version: "2.1-1",
+          download_size: 5000,
+          current_size: 3000,
+          new_size: 3500,
+          repository: "core",
+        },
+      ],
+      warnings: [],
+    };
+
+    it("filters updates by search term", async () => {
+      mockCheckUpdates.mockResolvedValue(sortTestResponse);
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("aaa-package")).toBeInTheDocument();
+      });
+      expect(screen.getByText("zzz-package")).toBeInTheDocument();
+
+      const searchInput = screen.getByPlaceholderText("Filter updates...");
+      await act(async () => {
+        fireEvent.change(searchInput, { target: { value: "zzz" } });
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByText("aaa-package")).not.toBeInTheDocument();
+      });
+      expect(screen.getByText("zzz-package")).toBeInTheDocument();
+    });
+
+    it("filters updates by repository", async () => {
+      mockCheckUpdates.mockResolvedValue(sortTestResponse);
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("aaa-package")).toBeInTheDocument();
+      });
+
+      const repoToggle = screen.getByRole("button", { name: /All repositories/i });
+      await act(async () => {
+        fireEvent.click(repoToggle);
+      });
+
+      const coreOption = screen.getByRole("option", { name: "core" });
+      await act(async () => {
+        fireEvent.click(coreOption);
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByText("aaa-package")).not.toBeInTheDocument();
+      });
+      expect(screen.getByText("zzz-package")).toBeInTheDocument();
+    });
+  });
 });

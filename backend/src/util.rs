@@ -78,3 +78,48 @@ where
         }
     });
 }
+
+pub enum CheckResult {
+    Continue,
+    Cancelled,
+    TimedOut(u64),
+}
+
+pub fn check_cancel(timeout: &TimeoutGuard) -> CheckResult {
+    if is_cancelled() {
+        CheckResult::Cancelled
+    } else if timeout.is_timed_out() {
+        CheckResult::TimedOut(timeout.timeout_secs())
+    } else {
+        CheckResult::Continue
+    }
+}
+
+pub fn emit_cancellation_complete(reason: &CheckResult) {
+    match reason {
+        CheckResult::Cancelled => {
+            emit_event(&StreamEvent::Complete {
+                success: false,
+                message: Some("Operation cancelled by user".to_string()),
+            });
+        }
+        CheckResult::TimedOut(secs) => {
+            emit_event(&StreamEvent::Complete {
+                success: false,
+                message: Some(format!("Operation timed out after {} seconds", secs)),
+            });
+        }
+        CheckResult::Continue => {}
+    }
+}
+
+#[macro_export]
+macro_rules! check_cancel_early {
+    ($timeout:expr) => {{
+        let result = $crate::util::check_cancel($timeout);
+        if !matches!(result, $crate::util::CheckResult::Continue) {
+            $crate::util::emit_cancellation_complete(&result);
+            return Ok(());
+        }
+    }};
+}

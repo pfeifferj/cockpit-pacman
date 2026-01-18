@@ -28,6 +28,7 @@ export default [
         MutationObserver: "readonly",
         MouseEvent: "readonly",
         HTMLDivElement: "readonly",
+        URL: "readonly",
       },
     },
     plugins: {

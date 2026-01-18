@@ -597,3 +597,83 @@ export async function addIgnoredPackage(name: string): Promise<IgnoreOperationRe
 export async function removeIgnoredPackage(name: string): Promise<IgnoreOperationResponse> {
   return runBackend<IgnoreOperationResponse>("remove-ignored", [name]);
 }
+
+export interface CachePackage {
+  name: string;
+  version: string;
+  filename: string;
+  size: number;
+}
+
+export interface CacheInfo {
+  total_size: number;
+  package_count: number;
+  packages: CachePackage[];
+  path: string;
+}
+
+export async function getCacheInfo(): Promise<CacheInfo> {
+  return runBackend<CacheInfo>("cache-info");
+}
+
+export function cleanCache(callbacks: UpgradeCallbacks, keepVersions: number = 3): { cancel: () => void } {
+  return runStreamingBackend("clean-cache", [String(keepVersions)], callbacks);
+}
+
+export interface LogEntry {
+  timestamp: string;
+  source: string;
+  action: string;
+  package: string;
+  old_version: string | null;
+  new_version: string | null;
+}
+
+export interface LogResponse {
+  entries: LogEntry[];
+  total: number;
+  total_upgraded: number;
+  total_installed: number;
+  total_removed: number;
+  total_other: number;
+}
+
+export type HistoryFilterType = "all" | "upgraded" | "installed" | "removed";
+
+export interface HistoryParams {
+  offset?: number;
+  limit?: number;
+  filter?: HistoryFilterType;
+}
+
+export async function getHistory(params: HistoryParams = {}): Promise<LogResponse> {
+  const { offset = 0, limit = 100, filter = "all" } = params;
+  return runBackend<LogResponse>("history", [String(offset), String(limit), filter]);
+}
+
+export interface CachedVersion {
+  name: string;
+  version: string;
+  filename: string;
+  size: number;
+  installed_version: string | null;
+  is_older: boolean;
+}
+
+export interface DowngradeResponse {
+  packages: CachedVersion[];
+  total: number;
+}
+
+export async function listDowngrades(packageName?: string): Promise<DowngradeResponse> {
+  const args = packageName ? [packageName] : [];
+  return runBackend<DowngradeResponse>("list-downgrades", args);
+}
+
+export function downgradePackage(
+  callbacks: UpgradeCallbacks,
+  name: string,
+  version: string
+): { cancel: () => void } {
+  return runStreamingBackend("downgrade", [name, version], callbacks);
+}

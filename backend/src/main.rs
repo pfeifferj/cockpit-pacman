@@ -1,9 +1,10 @@
 use std::env;
 
 use cockpit_pacman_backend::handlers::{
-    add_ignored, check_updates, init_keyring, keyring_status, list_ignored, list_installed,
-    list_orphans, local_package_info, preflight_upgrade, refresh_keyring, remove_ignored,
-    remove_orphans, run_upgrade, search, sync_database, sync_package_info,
+    add_ignored, check_updates, clean_cache, downgrade_package, get_cache_info, get_history,
+    init_keyring, keyring_status, list_downgrades, list_ignored, list_installed, list_orphans,
+    local_package_info, preflight_upgrade, refresh_keyring, remove_ignored, remove_orphans,
+    run_upgrade, search, sync_database, sync_package_info,
 };
 use cockpit_pacman_backend::validation::{
     validate_package_name, validate_pagination, validate_search_query,
@@ -51,6 +52,17 @@ fn print_usage() {
     eprintln!("  list-ignored           List packages ignored during upgrades");
     eprintln!("  add-ignored NAME       Add a package to the ignored list (requires root)");
     eprintln!("  remove-ignored NAME    Remove a package from the ignored list (requires root)");
+    eprintln!("  cache-info             Show package cache information and size");
+    eprintln!("  clean-cache [KEEP]     Clean package cache (requires root)");
+    eprintln!("                         KEEP: number of versions to keep (default: 3)");
+    eprintln!("  history [offset] [limit] [filter]");
+    eprintln!("                         View package history from pacman.log");
+    eprintln!("                         filter: all|upgraded|installed|removed");
+    eprintln!("  list-downgrades [NAME] List cached package versions available for downgrade");
+    eprintln!("                         NAME: optional package name to filter");
+    eprintln!("  downgrade NAME VERSION [timeout]");
+    eprintln!("                         Downgrade a package to a cached version (requires root)");
+    eprintln!("                         timeout: seconds (default: 300)");
 }
 
 fn main() {
@@ -176,6 +188,37 @@ fn main() {
                 std::process::exit(1);
             }
             validate_package_name(&args[2]).and_then(|_| remove_ignored(&args[2]))
+        }
+        "cache-info" => get_cache_info(),
+        "clean-cache" => {
+            let keep_versions = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(3);
+            clean_cache(keep_versions)
+        }
+        "history" => {
+            let offset = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let limit = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(100);
+            let filter = args
+                .get(4)
+                .map(|s| s.as_str())
+                .filter(|s| !s.is_empty() && *s != "all");
+            validate_pagination(offset, limit).and_then(|_| get_history(offset, limit, filter))
+        }
+        "list-downgrades" => {
+            let name = args.get(2).map(|s| s.as_str()).filter(|s| !s.is_empty());
+            if let Some(n) = name {
+                validate_package_name(n).and_then(|_| list_downgrades(Some(n)))
+            } else {
+                list_downgrades(None)
+            }
+        }
+        "downgrade" => {
+            if args.len() < 4 {
+                eprintln!("Error: downgrade requires NAME and VERSION");
+                std::process::exit(1);
+            }
+            let timeout = args.get(4).and_then(|s| s.parse().ok());
+            validate_package_name(&args[2])
+                .and_then(|_| downgrade_package(&args[2], &args[3], timeout))
         }
         "help" | "--help" | "-h" => {
             print_usage();

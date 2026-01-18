@@ -1,4 +1,4 @@
-import { Component, ErrorInfo, ReactNode } from "react";
+import { Component, ErrorInfo, ReactNode, Fragment } from "react";
 import {
   EmptyState,
   EmptyStateBody,
@@ -14,6 +14,7 @@ import { ExclamationCircleIcon } from "@patternfly/react-icons";
 interface ErrorBoundaryProps {
   children: ReactNode;
   fallbackTitle?: string;
+  onReset?: () => void;
 }
 
 interface ErrorBoundaryState {
@@ -21,6 +22,7 @@ interface ErrorBoundaryState {
   error: Error | null;
   errorInfo: ErrorInfo | null;
   showDetails: boolean;
+  resetKey: number;
 }
 
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
@@ -31,6 +33,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       error: null,
       errorInfo: null,
       showDetails: false,
+      resetKey: 0,
     };
   }
 
@@ -44,16 +47,18 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   handleReload = (): void => {
-    this.setState({
+    this.setState((prevState) => ({
       hasError: false,
       error: null,
       errorInfo: null,
       showDetails: false,
-    });
+      resetKey: prevState.resetKey + 1,
+    }));
+    this.props.onReset?.();
   };
 
   render(): ReactNode {
-    const { hasError, error, errorInfo, showDetails } = this.state;
+    const { hasError, error, errorInfo, showDetails, resetKey } = this.state;
     const { children, fallbackTitle = "Something went wrong" } = this.props;
 
     if (hasError) {
@@ -93,6 +98,6 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       );
     }
 
-    return children;
+    return <Fragment key={resetKey}>{children}</Fragment>;
   }
 }
