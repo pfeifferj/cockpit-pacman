@@ -11,3 +11,4 @@ coverage/
 .auth/
 playwright-report/
 test-results/
+todo.txt

@@ -41,22 +41,24 @@ import {
   SearchResult,
   getSyncPackageInfo,
   SyncPackageDetails,
+  getPackageInfo,
 } from "../api";
 import { sanitizeErrorMessage } from "../utils";
 import { SEARCH_DEBOUNCE_MS } from "../constants";
 
-interface PinnedPackagesModalProps {
+interface IgnoredPackagesModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onPinnedChange?: (packages: string[]) => void;
+  onIgnoredChange?: (packages: string[]) => void;
 }
 
-export const PinnedPackagesModal: React.FC<PinnedPackagesModalProps> = ({
+export const IgnoredPackagesModal: React.FC<IgnoredPackagesModalProps> = ({
   isOpen,
   onClose,
-  onPinnedChange,
+  onIgnoredChange,
 }) => {
-  const [pinnedPackages, setPinnedPackages] = useState<string[]>([]);
+  const [ignoredPackages, setIgnoredPackages] = useState<string[]>([]);
+  const [packageVersions, setPackageVersions] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchFilter, setSearchFilter] = useState("");
@@ -75,12 +77,12 @@ export const PinnedPackagesModal: React.FC<PinnedPackagesModalProps> = ({
   const textInputRef = useRef<HTMLInputElement | null>(null);
   const debouncedTypeahead = useDebouncedValue(typeaheadValue, SEARCH_DEBOUNCE_MS);
 
-  const loadPinnedPackages = useCallback(async () => {
+  const loadIgnoredPackages = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const response = await listIgnoredPackages();
-      setPinnedPackages(response.packages);
+      setIgnoredPackages(response.packages);
     } catch (ex) {
       setError(ex instanceof Error ? ex.message : String(ex));
     } finally {
@@ -90,13 +92,37 @@ export const PinnedPackagesModal: React.FC<PinnedPackagesModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      loadPinnedPackages();
+      loadIgnoredPackages();
       setTypeaheadValue("");
       setSelectedPackage(null);
       setPreviewPackage(null);
       setSuggestions([]);
     }
-  }, [isOpen, loadPinnedPackages]);
+  }, [isOpen, loadIgnoredPackages]);
+
+  useEffect(() => {
+    if (ignoredPackages.length === 0) {
+      setPackageVersions({});
+      return;
+    }
+
+    const fetchVersions = async () => {
+      const versions: Record<string, string> = {};
+      await Promise.all(
+        ignoredPackages.map(async (pkg) => {
+          try {
+            const info = await getPackageInfo(pkg);
+            versions[pkg] = info.version;
+          } catch {
+            versions[pkg] = "not installed";
+          }
+        })
+      );
+      setPackageVersions(versions);
+    };
+
+    fetchVersions();
+  }, [ignoredPackages]);
 
   // Fetch suggestions when typeahead value changes
   useEffect(() => {
@@ -157,8 +183,8 @@ export const PinnedPackagesModal: React.FC<PinnedPackagesModalProps> = ({
       setSelectedPackage(null);
       setPreviewPackage(null);
       setSuggestions([]);
-      await loadPinnedPackages();
-      onPinnedChange?.(pinnedPackages);
+      await loadIgnoredPackages();
+      onIgnoredChange?.(ignoredPackages);
     } catch (ex) {
       setError(ex instanceof Error ? ex.message : String(ex));
     } finally {
@@ -171,8 +197,8 @@ export const PinnedPackagesModal: React.FC<PinnedPackagesModalProps> = ({
     setError(null);
     try {
       await removeIgnoredPackage(packageName);
-      await loadPinnedPackages();
-      onPinnedChange?.(pinnedPackages);
+      await loadIgnoredPackages();
+      onIgnoredChange?.(ignoredPackages);
     } catch (ex) {
       setError(ex instanceof Error ? ex.message : String(ex));
     } finally {
@@ -202,7 +228,7 @@ export const PinnedPackagesModal: React.FC<PinnedPackagesModalProps> = ({
     textInputRef.current?.focus();
   };
 
-  const filteredPackages = pinnedPackages.filter((pkg) =>
+  const filteredPackages = ignoredPackages.filter((pkg) =>
     pkg.toLowerCase().includes(searchFilter.toLowerCase())
   );
 
@@ -231,7 +257,7 @@ export const PinnedPackagesModal: React.FC<PinnedPackagesModalProps> = ({
           placeholder="Search for package..."
           role="combobox"
           isExpanded={typeaheadOpen}
-          aria-controls="pinned-packages-typeahead"
+          aria-controls="ignored-packages-typeahead"
         />
         {typeaheadValue && (
           <TextInputGroupUtilities>
@@ -254,7 +280,7 @@ export const PinnedPackagesModal: React.FC<PinnedPackagesModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
     >
-      <ModalHeader title="Pinned Packages" />
+      <ModalHeader title="Ignored Packages" />
       <ModalBody>
         {error && (
           <Alert
@@ -273,7 +299,7 @@ export const PinnedPackagesModal: React.FC<PinnedPackagesModalProps> = ({
               <Flex spaceItems={{ default: "spaceItemsSm" }} alignItems={{ default: "alignItemsFlexStart" }}>
                 <FlexItem style={{ flex: 1, maxWidth: "400px" }}>
                   <Select
-                    id="pinned-packages-typeahead"
+                    id="ignored-packages-typeahead"
                     isOpen={typeaheadOpen}
                     selected={selectedPackage?.name}
                     onSelect={handleTypeaheadSelect}
@@ -289,13 +315,13 @@ export const PinnedPackagesModal: React.FC<PinnedPackagesModalProps> = ({
                         <SelectOption isDisabled>No packages found</SelectOption>
                       ) : (
                         suggestions.map((pkg) => {
-                          const isPinned = pinnedPackages.includes(pkg.name);
+                          const isIgnored = ignoredPackages.includes(pkg.name);
                           return (
                             <SelectOption
                               key={`${pkg.repository}/${pkg.name}`}
                               value={pkg.name}
-                              isDisabled={isPinned}
-                              description={`${pkg.version} - ${pkg.repository}${isPinned ? " (already pinned)" : ""}`}
+                              isDisabled={isIgnored}
+                              description={`${pkg.version} - ${pkg.repository}${isIgnored ? " (already ignored)" : ""}`}
                             >
                               {pkg.name}
                             </SelectOption>
@@ -310,9 +336,9 @@ export const PinnedPackagesModal: React.FC<PinnedPackagesModalProps> = ({
                     variant="primary"
                     onClick={handleAddPackage}
                     isLoading={adding}
-                    isDisabled={adding || !selectedPackage || pinnedPackages.includes(selectedPackage.name)}
+                    isDisabled={adding || !selectedPackage || ignoredPackages.includes(selectedPackage.name)}
                   >
-                    Pin Package
+                    Ignore Package
                   </Button>
                 </FlexItem>
               </Flex>
@@ -363,12 +389,12 @@ export const PinnedPackagesModal: React.FC<PinnedPackagesModalProps> = ({
           </Card>
         )}
 
-        {pinnedPackages.length > 0 && (
+        {ignoredPackages.length > 0 && (
           <Toolbar className="pf-v6-u-px-0 pf-v6-u-pb-sm">
             <ToolbarContent>
               <ToolbarItem>
                 <SearchInput
-                  placeholder="Filter pinned..."
+                  placeholder="Filter ignored..."
                   value={searchFilter}
                   onChange={(_event, value) => setSearchFilter(value)}
                   onClear={() => setSearchFilter("")}
@@ -379,19 +405,20 @@ export const PinnedPackagesModal: React.FC<PinnedPackagesModalProps> = ({
         )}
 
         {loading ? (
-          <EmptyState headingLevel="h4" icon={Spinner} titleText="Loading pinned packages" />
-        ) : pinnedPackages.length === 0 ? (
-          <EmptyState headingLevel="h4" titleText="No pinned packages">
+          <EmptyState headingLevel="h4" icon={Spinner} titleText="Loading ignored packages" />
+        ) : ignoredPackages.length === 0 ? (
+          <EmptyState headingLevel="h4" titleText="No ignored packages">
             <EmptyStateBody>
-              Pinned packages will be excluded from system upgrades.
-              Search for a package above to pin it.
+              Ignored packages will be excluded from system upgrades.
+              Search for a package above to ignore it.
             </EmptyStateBody>
           </EmptyState>
         ) : (
-          <Table aria-label="Pinned packages" variant="compact">
+          <Table aria-label="Ignored packages" variant="compact">
             <Thead>
               <Tr>
                 <Th>Package</Th>
+                <Th>Version</Th>
                 <Th screenReaderText="Actions" />
               </Tr>
             </Thead>
@@ -399,10 +426,15 @@ export const PinnedPackagesModal: React.FC<PinnedPackagesModalProps> = ({
               {filteredPackages.map((pkg) => (
                 <Tr key={pkg}>
                   <Td dataLabel="Package">{pkg}</Td>
+                  <Td dataLabel="Version">
+                    <span style={{ color: packageVersions[pkg] === "not installed" ? "var(--pf-t--global--text--color--subtle)" : undefined }}>
+                      {packageVersions[pkg] || "-"}
+                    </span>
+                  </Td>
                   <Td dataLabel="Actions" isActionCell>
                     <Button
                       variant="plain"
-                      aria-label={`Unpin ${pkg}`}
+                      aria-label={`Unignore ${pkg}`}
                       onClick={() => handleRemovePackage(pkg)}
                       isLoading={removing === pkg}
                       isDisabled={removing === pkg}

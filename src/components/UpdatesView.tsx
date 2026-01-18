@@ -62,7 +62,7 @@ import {
 } from "../api";
 
 import { PackageDetailsModal } from "./PackageDetailsModal";
-import { PinnedPackagesModal } from "./PinnedPackagesModal";
+import { IgnoredPackagesModal } from "./IgnoredPackagesModal";
 
 interface UpgradeProgress {
   phase: "preparing" | "downloading" | "installing" | "hooks";
@@ -108,8 +108,8 @@ export const UpdatesView: React.FC = () => {
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
-  const [pinnedPackages, setPinnedPackages] = useState<string[]>([]);
-  const [pinnedModalOpen, setPinnedModalOpen] = useState(false);
+  const [configIgnored, setConfigIgnored] = useState<string[]>([]);
+  const [ignoredModalOpen, setIgnoredModalOpen] = useState(false);
   const [acknowledgedRemovals, setAcknowledgedRemovals] = useState(false);
   const [acknowledgedConflicts, setAcknowledgedConflicts] = useState(false);
   const [acknowledgedKeyImports, setAcknowledgedKeyImports] = useState(false);
@@ -234,26 +234,26 @@ export const UpdatesView: React.FC = () => {
     loadUpdates();
   }, [loadUpdates]);
 
-  const loadPinnedPackages = useCallback(async () => {
+  const loadConfigIgnored = useCallback(async () => {
     try {
       const response = await listIgnoredPackages();
-      setPinnedPackages(response.packages);
+      setConfigIgnored(response.packages);
     } catch {
-      // Ignore errors loading pinned packages
+      // Ignore errors loading ignored packages
     }
   }, []);
 
   useEffect(() => {
-    loadPinnedPackages();
-  }, [loadPinnedPackages]);
+    loadConfigIgnored();
+  }, [loadConfigIgnored]);
 
-  // Initialize selected packages when updates load, excluding pinned packages
+  // Initialize selected packages when updates load, excluding ignored packages
   useEffect(() => {
-    const nonPinned = updates
-      .filter((u) => !pinnedPackages.includes(u.name))
+    const nonIgnored = updates
+      .filter((u) => !configIgnored.includes(u.name))
       .map((u) => u.name);
-    setSelectedPackages(new Set(nonPinned));
-  }, [updates, pinnedPackages]);
+    setSelectedPackages(new Set(nonIgnored));
+  }, [updates, configIgnored]);
 
   useEffect(() => {
     return () => {
@@ -674,10 +674,10 @@ export const UpdatesView: React.FC = () => {
           <FlexItem>
             <Button
               variant="secondary"
-              onClick={() => setPinnedModalOpen(true)}
+              onClick={() => setIgnoredModalOpen(true)}
               className="pf-v6-u-mr-sm"
             >
-              Manage Pinned{pinnedPackages.length > 0 ? ` (${pinnedPackages.length})` : ""}
+              Manage Ignored{configIgnored.length > 0 ? ` (${configIgnored.length})` : ""}
             </Button>
             <Button
               variant="secondary"
@@ -765,7 +765,7 @@ export const UpdatesView: React.FC = () => {
             {sortedUpdates.map((update) => {
               const netSize = update.new_size - update.current_size;
               const isSelected = selectedPackages.has(update.name);
-              const isPinned = pinnedPackages.includes(update.name);
+              const isConfigIgnored = configIgnored.includes(update.name);
               return (
                 <Tr
                   key={update.name}
@@ -785,9 +785,9 @@ export const UpdatesView: React.FC = () => {
                     <Button variant="link" isInline className="pf-v6-u-p-0">
                       {update.name}
                     </Button>
-                    {isPinned && (
+                    {isConfigIgnored && (
                       <Label color="orange" className="pf-v6-u-ml-sm" isCompact>
-                        pinned
+                        ignored
                       </Label>
                     )}
                   </Td>
@@ -942,10 +942,10 @@ export const UpdatesView: React.FC = () => {
         </ModalFooter>
       </Modal>
 
-      <PinnedPackagesModal
-        isOpen={pinnedModalOpen}
-        onClose={() => setPinnedModalOpen(false)}
-        onPinnedChange={() => loadPinnedPackages()}
+      <IgnoredPackagesModal
+        isOpen={ignoredModalOpen}
+        onClose={() => setIgnoredModalOpen(false)}
+        onIgnoredChange={() => loadConfigIgnored()}
       />
     </Card>
   );

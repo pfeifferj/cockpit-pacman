@@ -227,8 +227,14 @@ export const KeyringView: React.FC = () => {
         return "Marginal trust: Signatures from this key are partially trusted.";
       case "unknown":
         return "Unknown trust: Trust level has not been assigned to this key.";
+      case "undefined":
+        return "Undefined trust: Trust has not been defined for this key.";
       case "never":
         return "Never trust: Signatures from this key should never be trusted.";
+      case "expired":
+        return "Expired: This key has passed its expiration date.";
+      case "revoked":
+        return "Revoked: This key has been revoked and should not be trusted.";
       default:
         return "Trust level not recognized.";
     }
@@ -242,6 +248,8 @@ export const KeyringView: React.FC = () => {
       case "marginal":
         return "orange";
       case "never":
+      case "expired":
+      case "revoked":
         return "red";
       case "unknown":
       case "undefined":
