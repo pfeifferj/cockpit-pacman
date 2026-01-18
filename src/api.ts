@@ -665,7 +665,6 @@ export function cleanCache(callbacks: UpgradeCallbacks, keepVersions: number = 3
 
 export interface LogEntry {
   timestamp: string;
-  source: string;
   action: string;
   package: string;
   old_version: string | null;

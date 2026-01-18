@@ -122,13 +122,14 @@ checksum = "8628d1f5b9a7b1196ce1aa660e3ba7e2559d350649cbe94993519c127df667f2"
 
 [[package]]
 name = "cockpit-pacman-backend"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "alpm",
  "alpm-utils",
  "anyhow",
  "ctrlc",
  "pacman-key",
+ "pacman-log",
  "pacmanconf",
  "serde",
  "serde_json",
@@ -314,6 +315,16 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "pacman-log"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "326525d7e4995e9cd3f0d48f55d465f0a969886df0592b24c3f6c1e4bd33a190"
+dependencies = [
+ "chrono",
+ "thiserror",
 ]
 
 [[package]]

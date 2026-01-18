@@ -239,7 +239,6 @@ pub struct CacheInfo {
 #[derive(Serialize)]
 pub struct LogEntry {
     pub timestamp: String,
-    pub source: String,
     pub action: String,
     pub package: String,
     pub old_version: Option<String>,

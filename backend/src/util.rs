@@ -133,19 +133,6 @@ pub fn get_cache_dir() -> String {
     "/var/cache/pacman/pkg".to_string()
 }
 
-/// Get the pacman log path from environment, pacman.conf, or default.
-pub fn get_log_path() -> String {
-    if let Ok(path) = std::env::var("PACMAN_LOG_PATH") {
-        return path;
-    }
-
-    if let Ok(config) = pacmanconf::Config::new() {
-        return config.log_file.clone();
-    }
-
-    "/var/log/pacman.log".to_string()
-}
-
 /// Parse a pacman package filename into (name, version).
 /// Handles .pkg.tar.zst, .pkg.tar.xz, and .pkg.tar.gz extensions.
 /// Pacman filename format: {pkgname}-{pkgver}-{pkgrel}-{arch}.pkg.tar.{ext}
