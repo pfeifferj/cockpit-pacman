@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { LOG_CONTAINER_HEIGHT } from "../constants";
+import { LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES } from "../constants";
 import {
   Card,
   CardBody,
@@ -98,7 +98,10 @@ export const CacheView: React.FC = () => {
 
     const { cancel } = cleanCache(
       {
-        onData: (data) => setLog((prev) => prev + data),
+        onData: (data) => setLog((prev) => {
+          const newLog = prev + data;
+          return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
+        }),
         onComplete: () => {
           setState("success");
           cancelRef.current = null;

@@ -55,6 +55,14 @@ export const PackageList: React.FC = () => {
   const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
   const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
   const manualSearchRef = useRef(false);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const debouncedSearchInput = useDebouncedValue(
     sanitizeSearchInput(searchInput),
@@ -97,15 +105,19 @@ export const PackageList: React.FC = () => {
         sortBy: getSortField(activeSortIndex),
         sortDir: activeSortDirection,
       });
+      if (!isMountedRef.current) return;
       setPackages(response.packages);
       setTotal(response.total);
       setTotalExplicit(response.total_explicit);
       setTotalDependency(response.total_dependency);
       setRepositories(response.repositories || []);
     } catch (ex) {
+      if (!isMountedRef.current) return;
       setError(ex instanceof Error ? ex.message : String(ex));
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
     }
   }, [page, perPage, searchValue, filter, repoFilter, activeSortIndex, activeSortDirection]);
 
@@ -136,11 +148,15 @@ export const PackageList: React.FC = () => {
     setDetailsLoading(true);
     try {
       const details = await getPackageInfo(pkgName);
+      if (!isMountedRef.current) return;
       setSelectedPackage(details);
     } catch (ex) {
+      if (!isMountedRef.current) return;
       setError(ex instanceof Error ? ex.message : String(ex));
     } finally {
-      setDetailsLoading(false);
+      if (isMountedRef.current) {
+        setDetailsLoading(false);
+      }
     }
   };
 
@@ -226,6 +242,7 @@ export const PackageList: React.FC = () => {
             </ToolbarItem>
             <ToolbarItem>
               <Select
+                aria-label="Filter by repository"
                 isOpen={repoSelectOpen}
                 selected={repoFilter}
                 onSelect={(_event, value) => {
@@ -239,6 +256,7 @@ export const PackageList: React.FC = () => {
                     ref={toggleRef}
                     onClick={() => setRepoSelectOpen(!repoSelectOpen)}
                     isExpanded={repoSelectOpen}
+                    aria-label="Filter by repository"
                   >
                     {repoFilter === "all" ? "All repositories" : repoFilter}
                   </MenuToggle>

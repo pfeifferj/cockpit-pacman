@@ -114,8 +114,48 @@ impl fmt::Display for BackendError {
 
 impl std::error::Error for BackendError {}
 
+impl From<alpm::Error> for BackendError {
+    fn from(err: alpm::Error) -> Self {
+        match err {
+            alpm::Error::HandleLock => Self::database_locked(),
+            alpm::Error::Retrieve
+            | alpm::Error::RetrievePrepare
+            | alpm::Error::ServerBadUrl
+            | alpm::Error::ServerNone
+            | alpm::Error::Libcurl
+            | alpm::Error::ExternalDownload => Self::network_error(err.to_string()),
+            alpm::Error::PkgNotFound | alpm::Error::DbNotFound => Self::not_found(err.to_string()),
+            alpm::Error::PkgInvalid
+            | alpm::Error::PkgInvalidArch
+            | alpm::Error::PkgInvalidChecksum
+            | alpm::Error::PkgInvalidSig
+            | alpm::Error::FileConflicts
+            | alpm::Error::UnsatisfiedDeps
+            | alpm::Error::ConflictingDeps => Self::transaction_failed(err.to_string()),
+            alpm::Error::BadPerms => Self::permission_denied(err.to_string()),
+            _ => Self::internal(err.to_string()),
+        }
+    }
+}
+
+impl From<alpm::PrepareError<'_>> for BackendError {
+    fn from(err: alpm::PrepareError<'_>) -> Self {
+        Self::transaction_failed(format!("Failed to prepare transaction: {}", err))
+    }
+}
+
+impl From<alpm::CommitError> for BackendError {
+    fn from(err: alpm::CommitError) -> Self {
+        Self::transaction_failed(format!("Failed to commit transaction: {}", err))
+    }
+}
+
 impl From<anyhow::Error> for BackendError {
     fn from(err: anyhow::Error) -> Self {
+        if let Some(alpm_err) = err.downcast_ref::<alpm::Error>() {
+            return (*alpm_err).into();
+        }
+
         let message = err.to_string();
 
         if message.contains("unable to lock database")

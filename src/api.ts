@@ -1,4 +1,5 @@
 import { BACKEND_TIMEOUT_MS } from "./constants";
+import { sanitizeSearchInput } from "./utils";
 
 declare const cockpit: {
   spawn(args: string[], options?: {
@@ -317,7 +318,7 @@ export async function listInstalled(
   return runBackend<PackageListResponse>("list-installed", [
     String(offset),
     String(limit),
-    search,
+    sanitizeSearchInput(search),
     filter,
     repo,
     sortBy,
@@ -335,7 +336,7 @@ export async function getPackageInfo(name: string): Promise<PackageDetails> {
 
 export async function searchPackages(params: SearchParams): Promise<SearchResponse> {
   const { query, offset = 0, limit = 100, installed = "all", sortBy = "", sortDir = "" } = params;
-  return runBackend<SearchResponse>("search", [query, String(offset), String(limit), installed, sortBy, sortDir]);
+  return runBackend<SearchResponse>("search", [sanitizeSearchInput(query), String(offset), String(limit), installed, sortBy, sortDir]);
 }
 
 export async function getSyncPackageInfo(name: string, repo?: string): Promise<SyncPackageDetails> {
@@ -344,7 +345,7 @@ export async function getSyncPackageInfo(name: string, repo?: string): Promise<S
 }
 
 export async function preflightUpgrade(ignore?: string[]): Promise<PreflightResponse> {
-  const args = ignore && ignore.length > 0 ? [ignore.join(",")] : [];
+  const args = ignore && ignore.length > 0 ? [ignore.map(pkg => sanitizeSearchInput(pkg)).join(",")] : [];
   return runBackend<PreflightResponse>("preflight-upgrade", args);
 }
 
@@ -391,11 +392,30 @@ export type StreamEvent =
   | StreamEventEvent
   | StreamEventComplete;
 
+/**
+ * Callbacks for streaming backend operations (sync, upgrade, orphan removal, etc.)
+ *
+ * @example
+ * ```typescript
+ * const { cancel } = runUpgrade({
+ *   onEvent: (event) => console.log('Event:', event),
+ *   onData: (data) => setLog(prev => prev + data),
+ *   onComplete: () => setState('success'),
+ *   onError: (err) => setError(err),
+ *   timeout: 300,
+ * });
+ * ```
+ */
 export interface UpgradeCallbacks {
+  /** Called for each structured StreamEvent (log, progress, download, etc.) */
   onEvent?: (event: StreamEvent) => void;
+  /** Called with raw formatted output text for display in logs */
   onData?: (data: string) => void;
+  /** Called when the operation completes successfully */
   onComplete: () => void;
+  /** Called when the operation fails with an error message */
   onError: (error: string) => void;
+  /** Timeout in seconds for the operation (default: 300) */
   timeout?: number;
 }
 
@@ -405,15 +425,23 @@ function runStreamingBackend(
   callbacks: UpgradeCallbacks
 ): { cancel: () => void } {
   let buffer = "";
-  let receivedComplete = false;
+  let completionHandled = false;
 
   const markComplete = (success: boolean, message?: string) => {
-    if (receivedComplete) return; // Prevent duplicate callbacks
-    receivedComplete = true;
-    if (success) {
-      callbacks.onComplete();
-    } else {
-      callbacks.onError(message || "Operation failed");
+    // Guard against duplicate callbacks from concurrent paths (stream, then, catch)
+    // Set flag immediately before any other work to prevent re-entry
+    if (completionHandled) return;
+    completionHandled = true;
+
+    // Execute callback outside the guard check to avoid issues if callback throws
+    try {
+      if (success) {
+        callbacks.onComplete();
+      } else {
+        callbacks.onError(message || "Operation failed");
+      }
+    } catch (callbackError) {
+      console.error("Callback error in markComplete:", callbackError);
     }
   };
 
@@ -473,7 +501,7 @@ function runStreamingBackend(
     }
     // If no complete event was received, this is an error condition
     // The backend should always emit a complete event
-    if (!receivedComplete) {
+    if (!completionHandled) {
       markComplete(false, "Backend process ended without sending completion status");
     }
   });
@@ -491,7 +519,7 @@ function runStreamingBackend(
 
 export function runUpgrade(callbacks: UpgradeCallbacks, ignore?: string[]): { cancel: () => void } {
   const args: string[] = [];
-  args.push(ignore && ignore.length > 0 ? ignore.join(",") : "");
+  args.push(ignore && ignore.length > 0 ? ignore.map(pkg => sanitizeSearchInput(pkg)).join(",") : "");
   if (callbacks.timeout !== undefined) {
     args.push(String(callbacks.timeout));
   }
@@ -516,7 +544,7 @@ export function formatSize(bytes: number): string {
 }
 
 export function formatDate(timestamp: number | null): string {
-  if (!timestamp) return "Unknown";
+  if (timestamp === null || timestamp === undefined) return "Unknown";
   return new Date(timestamp * 1000).toLocaleString();
 }
 
@@ -666,7 +694,7 @@ export interface DowngradeResponse {
 }
 
 export async function listDowngrades(packageName?: string): Promise<DowngradeResponse> {
-  const args = packageName ? [packageName] : [];
+  const args = packageName ? [sanitizeSearchInput(packageName)] : [];
   return runBackend<DowngradeResponse>("list-downgrades", args);
 }
 
@@ -675,5 +703,5 @@ export function downgradePackage(
   name: string,
   version: string
 ): { cancel: () => void } {
-  return runStreamingBackend("downgrade", [name, version], callbacks);
+  return runStreamingBackend("downgrade", [sanitizeSearchInput(name), sanitizeSearchInput(version)], callbacks);
 }

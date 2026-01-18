@@ -53,6 +53,14 @@ export const SearchView: React.FC = () => {
   const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
   const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Refs to avoid stale closures in debounced callback
   const currentQueryRef = useRef(currentQuery);
@@ -74,6 +82,7 @@ export const SearchView: React.FC = () => {
     debounceRef.current = setTimeout(async () => {
       // Use refs to get current values, avoiding stale closure
       if (query !== currentQueryRef.current) {
+        if (!isMountedRef.current) return;
         setCurrentQuery(query);
         setHasSearched(true);
         setRepoFilter("all");
@@ -89,12 +98,14 @@ export const SearchView: React.FC = () => {
             limit: perPageRef.current,
             installed: "all",
           });
+          if (!isMountedRef.current) return;
           setResults(response.results);
           setTotal(response.total);
           setTotalInstalled(response.total_installed);
           setTotalNotInstalled(response.total_not_installed);
           setRepositories(response.repositories);
         } catch (ex) {
+          if (!isMountedRef.current) return;
           setError(ex instanceof Error ? ex.message : String(ex));
           setResults([]);
           setTotal(0);
@@ -102,7 +113,9 @@ export const SearchView: React.FC = () => {
           setTotalNotInstalled(0);
           setRepositories([]);
         } finally {
-          setLoading(false);
+          if (isMountedRef.current) {
+            setLoading(false);
+          }
         }
       }
     }, SEARCH_DEBOUNCE_MS);
@@ -143,6 +156,7 @@ export const SearchView: React.FC = () => {
         sortBy: getSortField(sortIdx),
         sortDir: sortDirection,
       });
+      if (!isMountedRef.current) return;
       setResults(response.results);
       setTotal(response.total);
       setTotalInstalled(response.total_installed);
@@ -151,6 +165,7 @@ export const SearchView: React.FC = () => {
         setRepositories(response.repositories);
       }
     } catch (ex) {
+      if (!isMountedRef.current) return;
       setError(ex instanceof Error ? ex.message : String(ex));
       setResults([]);
       setTotal(0);
@@ -160,7 +175,9 @@ export const SearchView: React.FC = () => {
         setRepositories([]);
       }
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -231,11 +248,15 @@ export const SearchView: React.FC = () => {
     setDetailsLoading(true);
     try {
       const details = await getSyncPackageInfo(pkgName, repo);
+      if (!isMountedRef.current) return;
       setSelectedPackage(details);
     } catch (ex) {
+      if (!isMountedRef.current) return;
       setError(ex instanceof Error ? ex.message : String(ex));
     } finally {
-      setDetailsLoading(false);
+      if (isMountedRef.current) {
+        setDetailsLoading(false);
+      }
     }
   };
 
@@ -300,6 +321,7 @@ export const SearchView: React.FC = () => {
             {repositories.length > 0 && (
               <ToolbarItem>
                 <Select
+                  aria-label="Filter by repository"
                   isOpen={repoSelectOpen}
                   selected={repoFilter}
                   onSelect={(_event: React.MouseEvent | undefined, value: string | number | undefined) => {
@@ -312,6 +334,7 @@ export const SearchView: React.FC = () => {
                       ref={toggleRef}
                       onClick={() => setRepoSelectOpen(!repoSelectOpen)}
                       isExpanded={repoSelectOpen}
+                      aria-label="Filter by repository"
                     >
                       {repoFilter === "all" ? "All repositories" : repoFilter}
                     </MenuToggle>

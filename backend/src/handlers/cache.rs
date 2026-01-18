@@ -4,19 +4,18 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::models::{CacheInfo, CachePackage, StreamEvent};
-use crate::util::emit_event;
-
-const CACHE_DIR: &str = "/var/cache/pacman/pkg";
+use crate::util::{emit_event, get_cache_dir, parse_package_filename};
 
 pub fn get_cache_info() -> Result<()> {
-    let cache_path = Path::new(CACHE_DIR);
+    let cache_dir = get_cache_dir();
+    let cache_path = Path::new(&cache_dir);
 
     if !cache_path.exists() {
         let info = CacheInfo {
             total_size: 0,
             package_count: 0,
             packages: vec![],
-            path: CACHE_DIR.to_string(),
+            path: cache_dir,
         };
         println!("{}", serde_json::to_string(&info)?);
         return Ok(());
@@ -26,7 +25,7 @@ pub fn get_cache_info() -> Result<()> {
     let mut total_size: i64 = 0;
 
     let entries = fs::read_dir(cache_path)
-        .with_context(|| format!("Failed to read cache directory: {}", CACHE_DIR))?;
+        .with_context(|| format!("Failed to read cache directory: {}", cache_dir))?;
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -55,33 +54,21 @@ pub fn get_cache_info() -> Result<()> {
         }
     }
 
-    packages.sort_by(|a, b| a.name.cmp(&b.name).then(b.version.cmp(&a.version)));
+    packages.sort_by(|a, b| {
+        a.name
+            .cmp(&b.name)
+            .then_with(|| alpm::vercmp(b.version.as_str(), a.version.as_str()))
+    });
 
     let info = CacheInfo {
         total_size,
         package_count: packages.len(),
         packages,
-        path: CACHE_DIR.to_string(),
+        path: cache_dir,
     };
 
     println!("{}", serde_json::to_string(&info)?);
     Ok(())
-}
-
-fn parse_package_filename(filename: &str) -> Option<(String, String)> {
-    let name = filename
-        .strip_suffix(".pkg.tar.zst")
-        .or_else(|| filename.strip_suffix(".pkg.tar.xz"))
-        .or_else(|| filename.strip_suffix(".pkg.tar.gz"))?;
-
-    let parts: Vec<&str> = name.rsplitn(3, '-').collect();
-    if parts.len() >= 3 {
-        let version = format!("{}-{}", parts[1], parts[0]);
-        let pkg_name = parts[2..].join("-");
-        Some((pkg_name, version))
-    } else {
-        None
-    }
 }
 
 pub fn clean_cache(keep_versions: u32) -> Result<()> {

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { LOG_CONTAINER_HEIGHT } from "../constants";
+import { LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES } from "../constants";
+import { useSortableTable } from "../hooks/useSortableTable";
 import {
   Card,
   CardBody,
@@ -26,7 +27,7 @@ import {
   ContentVariants,
 } from "@patternfly/react-core";
 import { TrashIcon, CheckCircleIcon } from "@patternfly/react-icons";
-import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
+import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
   OrphanPackage,
   OrphanResponse,
@@ -45,10 +46,13 @@ export const OrphansView: React.FC = () => {
   const [log, setLog] = useState("");
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
-  const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
-  const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
   const cancelRef = useRef<(() => void) | null>(null);
   const logContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const { activeSortIndex, activeSortDirection, getSortParams } = useSortableTable({
+    sortableColumns: [0, 2, 3],
+    defaultDirection: "asc",
+  });
 
   const loadOrphans = useCallback(async () => {
     setState("loading");
@@ -92,7 +96,10 @@ export const OrphansView: React.FC = () => {
     setIsDetailsExpanded(true);
 
     const { cancel } = removeOrphans({
-      onData: (data) => setLog((prev) => prev + data),
+      onData: (data) => setLog((prev) => {
+        const newLog = prev + data;
+        return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
+      }),
       onComplete: () => {
         setState("success");
         setOrphanData(null);
@@ -114,24 +121,6 @@ export const OrphansView: React.FC = () => {
       setState("ready");
       setLog("");
     }
-  };
-
-  const sortableColumns = [0, 2, 3];
-
-  const getSortParams = (columnIndex: number): ThProps["sort"] | undefined => {
-    if (!sortableColumns.includes(columnIndex)) return undefined;
-    return {
-      sortBy: {
-        index: activeSortIndex ?? undefined,
-        direction: activeSortDirection,
-        defaultDirection: "asc",
-      },
-      onSort: (_event, index, direction) => {
-        setActiveSortIndex(index);
-        setActiveSortDirection(direction);
-      },
-      columnIndex,
-    };
   };
 
   const sortedOrphans = React.useMemo(() => {

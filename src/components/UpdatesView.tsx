@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { LOG_CONTAINER_HEIGHT } from "../constants";
+import { LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES } from "../constants";
 import {
 	Card,
 	CardBody,
@@ -272,7 +272,10 @@ export const UpdatesView: React.FC = () => {
     setLog("");
     setSelectedPackages(new Set());
     syncDatabase({
-      onData: (data) => setLog((prev) => prev + data),
+      onData: (data) => setLog((prev) => {
+        const newLog = prev + data;
+        return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
+      }),
       onComplete: () => loadUpdates(),
       onError: (err) => {
         setState("error");
@@ -364,7 +367,10 @@ export const UpdatesView: React.FC = () => {
 
     const { cancel } = runUpgrade({
       onEvent: handleEvent,
-      onData: (data) => setLog((prev) => prev + data),
+      onData: (data) => setLog((prev) => {
+        const newLog = prev + data;
+        return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
+      }),
       onComplete: () => {
         setState("success");
         setUpdates([]);

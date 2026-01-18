@@ -2,18 +2,23 @@ use alpm::Alpm;
 use anyhow::{Context, Result};
 use std::cmp::Ordering;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::Instant;
 
 use crate::alpm::get_handle;
 use crate::models::{CachedVersion, DowngradeResponse, StreamEvent};
-use crate::util::emit_event;
-
-const CACHE_DIR: &str = "/var/cache/pacman/pkg";
+use crate::util::{
+    emit_event, get_cache_dir, is_cancelled, parse_package_filename, setup_signal_handler,
+    DEFAULT_MUTATION_TIMEOUT_SECS,
+};
+use crate::validation::{validate_package_name, validate_version};
 
 pub fn list_downgrades(package_name: Option<&str>) -> Result<()> {
     let alpm = get_handle()?;
-    let cache_path = Path::new(CACHE_DIR);
+    let cache_dir = get_cache_dir();
+    let cache_path = Path::new(&cache_dir);
 
     if !cache_path.exists() {
         let response = DowngradeResponse {
@@ -25,7 +30,7 @@ pub fn list_downgrades(package_name: Option<&str>) -> Result<()> {
     }
 
     let entries = fs::read_dir(cache_path)
-        .with_context(|| format!("Failed to read cache directory: {}", CACHE_DIR))?;
+        .with_context(|| format!("Failed to read cache directory: {}", cache_dir))?;
 
     let mut packages: Vec<CachedVersion> = Vec::new();
 
@@ -81,7 +86,12 @@ pub fn list_downgrades(package_name: Option<&str>) -> Result<()> {
 }
 
 pub fn downgrade_package(name: &str, version: &str, timeout: Option<u64>) -> Result<()> {
-    let cache_path = Path::new(CACHE_DIR);
+    setup_signal_handler();
+    validate_package_name(name)?;
+    validate_version(version)?;
+
+    let cache_dir = get_cache_dir();
+    let cache_path = Path::new(&cache_dir);
     let target_filename = find_package_file(cache_path, name, version)?;
 
     emit_event(&StreamEvent::Event {
@@ -90,12 +100,10 @@ pub fn downgrade_package(name: &str, version: &str, timeout: Option<u64>) -> Res
     });
 
     let pkg_path = cache_path.join(&target_filename);
+    let timeout_secs = timeout.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS);
+    let timeout_duration = std::time::Duration::from_secs(timeout_secs);
+    let start_time = Instant::now();
 
-    let mut cmd = Command::new("pacman");
-    cmd.args(["-U", "--noconfirm"]);
-    cmd.arg(&pkg_path);
-
-    let timeout_secs = timeout.unwrap_or(300);
     emit_event(&StreamEvent::Log {
         level: "info".to_string(),
         message: format!(
@@ -105,37 +113,101 @@ pub fn downgrade_package(name: &str, version: &str, timeout: Option<u64>) -> Res
         ),
     });
 
-    let output = cmd.output().context("Failed to run pacman")?;
+    let mut child = Command::new("pacman")
+        .args(["-U", "--noconfirm"])
+        .arg(&pkg_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("Failed to spawn pacman")?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
 
-    for line in stdout.lines().chain(stderr.lines()) {
-        if !line.trim().is_empty() {
-            emit_event(&StreamEvent::Log {
-                level: "info".to_string(),
-                message: line.to_string(),
+    let stdout_handle = std::thread::spawn(move || {
+        if let Some(stdout) = stdout {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines().map_while(Result::ok) {
+                if !line.trim().is_empty() {
+                    emit_event(&StreamEvent::Log {
+                        level: "info".to_string(),
+                        message: line,
+                    });
+                }
+            }
+        }
+    });
+
+    let stderr_handle = std::thread::spawn(move || {
+        if let Some(stderr) = stderr {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines().map_while(Result::ok) {
+                if !line.trim().is_empty() {
+                    emit_event(&StreamEvent::Log {
+                        level: "warning".to_string(),
+                        message: line,
+                    });
+                }
+            }
+        }
+    });
+
+    loop {
+        if is_cancelled() {
+            let _ = child.kill();
+            emit_event(&StreamEvent::Complete {
+                success: false,
+                message: Some("Operation cancelled by user".to_string()),
             });
+            return Ok(());
+        }
+
+        if start_time.elapsed() > timeout_duration {
+            let _ = child.kill();
+            emit_event(&StreamEvent::Complete {
+                success: false,
+                message: Some(format!(
+                    "Operation timed out after {} seconds",
+                    timeout_secs
+                )),
+            });
+            return Ok(());
+        }
+
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let _ = stdout_handle.join();
+                let _ = stderr_handle.join();
+
+                if status.success() {
+                    emit_event(&StreamEvent::Complete {
+                        success: true,
+                        message: Some(format!("Successfully downgraded {} to {}", name, version)),
+                    });
+                } else {
+                    emit_event(&StreamEvent::Complete {
+                        success: false,
+                        message: Some(format!(
+                            "Failed to downgrade {}: exit code {}",
+                            name,
+                            status.code().unwrap_or(-1)
+                        )),
+                    });
+                }
+                return Ok(());
+            }
+            Ok(None) => {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(e) => {
+                emit_event(&StreamEvent::Complete {
+                    success: false,
+                    message: Some(format!("Failed to check process status: {}", e)),
+                });
+                return Err(e.into());
+            }
         }
     }
-
-    if output.status.success() {
-        emit_event(&StreamEvent::Complete {
-            success: true,
-            message: Some(format!("Successfully downgraded {} to {}", name, version)),
-        });
-    } else {
-        emit_event(&StreamEvent::Complete {
-            success: false,
-            message: Some(format!(
-                "Failed to downgrade {}: exit code {}",
-                name,
-                output.status.code().unwrap_or(-1)
-            )),
-        });
-    }
-
-    Ok(())
 }
 
 fn find_package_file(cache_path: &Path, name: &str, version: &str) -> Result<String> {
@@ -154,22 +226,6 @@ fn find_package_file(cache_path: &Path, name: &str, version: &str) -> Result<Str
     }
 
     anyhow::bail!("Package file not found in cache: {}-{}", name, version)
-}
-
-fn parse_package_filename(filename: &str) -> Option<(String, String)> {
-    let name = filename
-        .strip_suffix(".pkg.tar.zst")
-        .or_else(|| filename.strip_suffix(".pkg.tar.xz"))
-        .or_else(|| filename.strip_suffix(".pkg.tar.gz"))?;
-
-    let parts: Vec<&str> = name.rsplitn(3, '-').collect();
-    if parts.len() >= 3 {
-        let version = format!("{}-{}", parts[1], parts[0]);
-        let pkg_name = parts[2..].join("-");
-        Some((pkg_name, version))
-    } else {
-        None
-    }
 }
 
 fn get_installed_version(alpm: &Alpm, name: &str) -> Option<String> {

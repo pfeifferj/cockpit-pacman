@@ -19,6 +19,7 @@ vi.mock("../api", async () => {
     runUpgrade: vi.fn(),
     syncDatabase: vi.fn(),
     getSyncPackageInfo: vi.fn(),
+    listIgnoredPackages: vi.fn(),
   };
 });
 
@@ -27,6 +28,7 @@ const mockPreflightUpgrade = vi.mocked(api.preflightUpgrade);
 const mockRunUpgrade = vi.mocked(api.runUpgrade);
 const mockSyncDatabase = vi.mocked(api.syncDatabase);
 const mockGetSyncPackageInfo = vi.mocked(api.getSyncPackageInfo);
+const mockListIgnoredPackages = vi.mocked(api.listIgnoredPackages);
 
 describe("UpdatesView", () => {
   beforeEach(() => {
@@ -34,6 +36,7 @@ describe("UpdatesView", () => {
     mockCheckUpdates.mockResolvedValue(mockUpdatesResponse);
     mockPreflightUpgrade.mockResolvedValue(mockPreflightResponse);
     mockGetSyncPackageInfo.mockResolvedValue(mockSyncPackageDetails);
+    mockListIgnoredPackages.mockResolvedValue({ packages: [], total: 0 });
     mockRunUpgrade.mockReturnValue({ cancel: vi.fn() });
     mockSyncDatabase.mockImplementation((callbacks) => {
       setTimeout(() => callbacks.onComplete(), 0);

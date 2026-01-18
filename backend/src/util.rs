@@ -113,6 +113,53 @@ pub fn emit_cancellation_complete(reason: &CheckResult) {
     }
 }
 
+/// Get the pacman cache directory from environment, pacman.conf, or default.
+pub fn get_cache_dir() -> String {
+    if let Ok(dir) = std::env::var("PACMAN_CACHE_DIR") {
+        return dir;
+    }
+
+    if let Ok(config) = pacmanconf::Config::new() {
+        if let Some(dir) = config.cache_dir.first() {
+            return dir.clone();
+        }
+    }
+
+    "/var/cache/pacman/pkg".to_string()
+}
+
+/// Get the pacman log path from environment, pacman.conf, or default.
+pub fn get_log_path() -> String {
+    if let Ok(path) = std::env::var("PACMAN_LOG_PATH") {
+        return path;
+    }
+
+    if let Ok(config) = pacmanconf::Config::new() {
+        return config.log_file.clone();
+    }
+
+    "/var/log/pacman.log".to_string()
+}
+
+/// Parse a pacman package filename into (name, version).
+/// Handles .pkg.tar.zst, .pkg.tar.xz, and .pkg.tar.gz extensions.
+/// Returns None if the filename cannot be parsed.
+pub fn parse_package_filename(filename: &str) -> Option<(String, String)> {
+    let name = filename
+        .strip_suffix(".pkg.tar.zst")
+        .or_else(|| filename.strip_suffix(".pkg.tar.xz"))
+        .or_else(|| filename.strip_suffix(".pkg.tar.gz"))?;
+
+    let parts: Vec<&str> = name.rsplitn(3, '-').collect();
+    if parts.len() >= 3 {
+        let version = format!("{}-{}", parts[1], parts[0]);
+        let pkg_name = parts[2..].join("-");
+        Some((pkg_name, version))
+    } else {
+        None
+    }
+}
+
 #[macro_export]
 macro_rules! check_cancel_early {
     ($timeout:expr) => {{

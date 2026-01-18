@@ -32,3 +32,19 @@ pub fn validate_pagination(offset: usize, limit: usize) -> Result<()> {
     }
     Ok(())
 }
+
+pub fn validate_version(version: &str) -> Result<()> {
+    if version.is_empty() {
+        anyhow::bail!("Version cannot be empty");
+    }
+    if version.len() > 128 {
+        anyhow::bail!("Version string too long (max 128)");
+    }
+    if version.contains("..") || version.contains('/') || version.contains('\\') {
+        anyhow::bail!("Version contains invalid path characters");
+    }
+    if version.chars().any(|c| c.is_control()) {
+        anyhow::bail!("Version contains invalid control characters");
+    }
+    Ok(())
+}
