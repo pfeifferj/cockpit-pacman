@@ -148,17 +148,20 @@ pub fn get_log_path() -> String {
 
 /// Parse a pacman package filename into (name, version).
 /// Handles .pkg.tar.zst, .pkg.tar.xz, and .pkg.tar.gz extensions.
+/// Pacman filename format: {pkgname}-{pkgver}-{pkgrel}-{arch}.pkg.tar.{ext}
 /// Returns None if the filename cannot be parsed.
 pub fn parse_package_filename(filename: &str) -> Option<(String, String)> {
-    let name = filename
+    let base = filename
         .strip_suffix(".pkg.tar.zst")
         .or_else(|| filename.strip_suffix(".pkg.tar.xz"))
         .or_else(|| filename.strip_suffix(".pkg.tar.gz"))?;
 
-    let parts: Vec<&str> = name.rsplitn(3, '-').collect();
-    if parts.len() >= 3 {
-        let version = format!("{}-{}", parts[1], parts[0]);
-        let pkg_name = parts[2..].join("-");
+    // Split into [arch, pkgrel, pkgver, ...name_parts]
+    let parts: Vec<&str> = base.rsplitn(4, '-').collect();
+    if parts.len() >= 4 {
+        // parts[0] = arch (ignored), parts[1] = pkgrel, parts[2] = pkgver
+        let version = format!("{}-{}", parts[2], parts[1]);
+        let pkg_name = parts[3..].join("-");
         Some((pkg_name, version))
     } else {
         None

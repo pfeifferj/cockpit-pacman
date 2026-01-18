@@ -1,6 +1,7 @@
 use crate::models::{
     Package, PackageDetails, PackageListResponse, SearchResult, UpdateInfo, UpdatesResponse,
 };
+use crate::util::parse_package_filename;
 use crate::validation::{
     validate_keep_versions, validate_package_name, validate_pagination, validate_search_query,
 };
@@ -190,6 +191,65 @@ fn test_validate_keep_versions_invalid() {
     assert!(validate_keep_versions(101).is_err());
     assert!(validate_keep_versions(1000).is_err());
     assert!(validate_keep_versions(u32::MAX).is_err());
+}
+
+// --- Package filename parsing tests ---
+
+#[test]
+fn test_parse_package_filename_simple() {
+    let result = parse_package_filename("ada-1.0.0-1-x86_64.pkg.tar.zst");
+    assert_eq!(result, Some(("ada".to_string(), "1.0.0-1".to_string())));
+}
+
+#[test]
+fn test_parse_package_filename_with_dashes_in_name() {
+    let result = parse_package_filename("lib32-glibc-2.39-1-x86_64.pkg.tar.zst");
+    assert_eq!(
+        result,
+        Some(("lib32-glibc".to_string(), "2.39-1".to_string()))
+    );
+}
+
+#[test]
+fn test_parse_package_filename_complex_version() {
+    let result = parse_package_filename("linux-6.7.0.arch1-1-x86_64.pkg.tar.zst");
+    assert_eq!(
+        result,
+        Some(("linux".to_string(), "6.7.0.arch1-1".to_string()))
+    );
+}
+
+#[test]
+fn test_parse_package_filename_xz_extension() {
+    let result = parse_package_filename("pacman-6.0.2-7-x86_64.pkg.tar.xz");
+    assert_eq!(result, Some(("pacman".to_string(), "6.0.2-7".to_string())));
+}
+
+#[test]
+fn test_parse_package_filename_gz_extension() {
+    let result = parse_package_filename("gzip-1.13-1-x86_64.pkg.tar.gz");
+    assert_eq!(result, Some(("gzip".to_string(), "1.13-1".to_string())));
+}
+
+#[test]
+fn test_parse_package_filename_invalid_extension() {
+    let result = parse_package_filename("package-1.0-1-x86_64.pkg.tar.bz2");
+    assert_eq!(result, None);
+}
+
+#[test]
+fn test_parse_package_filename_too_few_parts() {
+    let result = parse_package_filename("incomplete-1.0.pkg.tar.zst");
+    assert_eq!(result, None);
+}
+
+#[test]
+fn test_parse_package_filename_any_arch() {
+    let result = parse_package_filename("bash-completion-2.11-2-any.pkg.tar.zst");
+    assert_eq!(
+        result,
+        Some(("bash-completion".to_string(), "2.11-2".to_string()))
+    );
 }
 
 // --- Integration tests (require live pacman system) ---
