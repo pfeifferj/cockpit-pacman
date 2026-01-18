@@ -24,6 +24,8 @@ import {
   Content,
   ContentVariants,
   Slider,
+  ClipboardCopy,
+  ClipboardCopyVariant,
 } from "@patternfly/react-core";
 import { TrashIcon, CheckCircleIcon, FolderIcon } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
@@ -295,7 +297,22 @@ export const CacheView: React.FC = () => {
       <CardBody>
         <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
           <FlexItem>
-            <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">Package Cache</CardTitle>
+            <CardTitle className="pf-v6-u-m-0">Package Cache</CardTitle>
+            <Flex spaceItems={{ default: "spaceItemsSm" }} alignItems={{ default: "alignItemsCenter" }} className="pf-v6-u-mb-md">
+              <FlexItem>
+                <FolderIcon color="var(--pf-t--global--icon--color--subtle)" />
+              </FlexItem>
+              <FlexItem>
+                <ClipboardCopy
+                  isReadOnly
+                  hoverTip="Copy path"
+                  clickTip="Copied"
+                  variant={ClipboardCopyVariant.inline}
+                >
+                  {cacheData.path}
+                </ClipboardCopy>
+              </FlexItem>
+            </Flex>
             <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
               <FlexItem>
                 <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
@@ -322,9 +339,6 @@ export const CacheView: React.FC = () => {
                 </div>
               </FlexItem>
             </Flex>
-            <Content component={ContentVariants.small} style={{ color: "var(--pf-t--global--text--color--subtle)" }}>
-              Location: <code>{cacheData.path}</code>
-            </Content>
           </FlexItem>
           <FlexItem>
             <Button

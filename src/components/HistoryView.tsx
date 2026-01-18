@@ -18,10 +18,6 @@ import {
   MenuToggle,
   Select,
   SelectOption,
-  DescriptionList,
-  DescriptionListGroup,
-  DescriptionListTerm,
-  DescriptionListDescription,
 } from "@patternfly/react-core";
 import { HistoryIcon, ArrowUpIcon, ArrowDownIcon, PlusIcon, MinusIcon } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
@@ -209,26 +205,26 @@ export const HistoryView: React.FC = () => {
         <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
           <FlexItem>
             <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">Package History</CardTitle>
-            <DescriptionList isHorizontal isCompact className="pf-v6-u-mb-md">
-              <DescriptionListGroup>
-                <DescriptionListTerm>Upgraded</DescriptionListTerm>
-                <DescriptionListDescription>
-                  <Label color="blue">{historyData?.total_upgraded || 0}</Label>
-                </DescriptionListDescription>
-              </DescriptionListGroup>
-              <DescriptionListGroup>
-                <DescriptionListTerm>Installed</DescriptionListTerm>
-                <DescriptionListDescription>
-                  <Label color="green">{historyData?.total_installed || 0}</Label>
-                </DescriptionListDescription>
-              </DescriptionListGroup>
-              <DescriptionListGroup>
-                <DescriptionListTerm>Removed</DescriptionListTerm>
-                <DescriptionListDescription>
-                  <Label color="red">{historyData?.total_removed || 0}</Label>
-                </DescriptionListDescription>
-              </DescriptionListGroup>
-            </DescriptionList>
+            <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
+              <FlexItem>
+                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--info--default)" }}>{historyData?.total_upgraded || 0}</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Upgraded</div>
+                </div>
+              </FlexItem>
+              <FlexItem>
+                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--success--default)" }}>{historyData?.total_installed || 0}</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Installed</div>
+                </div>
+              </FlexItem>
+              <FlexItem>
+                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--danger--default)" }}>{historyData?.total_removed || 0}</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Removed</div>
+                </div>
+              </FlexItem>
+            </Flex>
           </FlexItem>
           <FlexItem>
             <Select
