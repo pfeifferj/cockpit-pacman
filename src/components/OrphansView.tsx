@@ -35,6 +35,7 @@ import {
   removeOrphans,
   formatSize,
   formatDate,
+  formatNumber,
 } from "../api";
 
 type ViewState = "loading" | "ready" | "removing" | "success" | "error";
@@ -270,7 +271,7 @@ export const OrphansView: React.FC = () => {
         <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
           <FlexItem>
             <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">
-              {orphanData.orphans.length} orphan package{orphanData.orphans.length !== 1 ? "s" : ""} found
+              {formatNumber(orphanData.orphans.length)} orphan package{orphanData.orphans.length !== 1 ? "s" : ""} found
             </CardTitle>
             <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
               <FlexItem>

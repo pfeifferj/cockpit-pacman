@@ -35,6 +35,7 @@ import {
   getCacheInfo,
   cleanCache,
   formatSize,
+  formatNumber,
 } from "../api";
 
 type ViewState = "loading" | "ready" | "cleaning" | "success" | "error";
@@ -322,19 +323,19 @@ export const CacheView: React.FC = () => {
               </FlexItem>
               <FlexItem>
                 <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600 }}>{cacheData.package_count}</div>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600 }}>{formatNumber(cacheData.package_count)}</div>
                   <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Cached Files</div>
                 </div>
               </FlexItem>
               <FlexItem>
                 <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600 }}>{uniquePackageCount}</div>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600 }}>{formatNumber(uniquePackageCount)}</div>
                   <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Unique Packages</div>
                 </div>
               </FlexItem>
               <FlexItem>
                 <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: multiVersionPackages > 0 ? "var(--pf-t--global--color--status--info--default)" : undefined }}>{multiVersionPackages}</div>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: multiVersionPackages > 0 ? "var(--pf-t--global--color--status--info--default)" : undefined }}>{formatNumber(multiVersionPackages)}</div>
                   <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Multi-Version</div>
                 </div>
               </FlexItem>

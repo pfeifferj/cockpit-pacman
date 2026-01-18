@@ -543,6 +543,10 @@ export function formatSize(bytes: number): string {
   return `${sign}${(abs / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
 }
 
+export function formatNumber(n: number): string {
+  return n.toLocaleString();
+}
+
 export function formatDate(timestamp: number | null): string {
   if (timestamp === null || timestamp === undefined) return "Unknown";
   return new Date(timestamp * 1000).toLocaleString();

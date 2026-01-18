@@ -57,6 +57,7 @@ import {
   getSyncPackageInfo,
   preflightUpgrade,
   formatSize,
+  formatNumber,
   listIgnoredPackages,
 } from "../api";
 
@@ -644,8 +645,8 @@ export const UpdatesView: React.FC = () => {
         <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
           <FlexItem>
             <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">
-              {selectedPackages.size} of {updates.length} update{updates.length !== 1 ? "s" : ""} selected
-              {filteredUpdates.length !== updates.length && ` (${filteredUpdates.length} shown)`}
+              {formatNumber(selectedPackages.size)} of {formatNumber(updates.length)} update{updates.length !== 1 ? "s" : ""} selected
+              {filteredUpdates.length !== updates.length && ` (${formatNumber(filteredUpdates.length)} shown)`}
             </CardTitle>
             <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
               <FlexItem>
@@ -692,7 +693,7 @@ export const UpdatesView: React.FC = () => {
               isLoading={preflightLoading}
               isDisabled={preflightLoading || selectedPackages.size === 0}
             >
-              {preflightLoading ? "Checking..." : `Apply ${selectedPackages.size} Update${selectedPackages.size !== 1 ? "s" : ""}`}
+              {preflightLoading ? "Checking..." : `Apply ${formatNumber(selectedPackages.size)} Update${selectedPackages.size !== 1 ? "s" : ""}`}
             </Button>
           </FlexItem>
         </Flex>

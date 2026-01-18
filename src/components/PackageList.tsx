@@ -30,6 +30,7 @@ import {
   listInstalled,
   getPackageInfo,
   formatSize,
+  formatNumber,
 } from "../api";
 import { sanitizeSearchInput } from "../utils";
 import { PackageDetailsModal } from "./PackageDetailsModal";
@@ -209,17 +210,17 @@ export const PackageList: React.FC = () => {
             <ToolbarItem>
               <ToggleGroup aria-label="Package filter">
                 <ToggleGroupItem
-                  text={<>All <Badge isRead>{totalExplicit + totalDependency}</Badge></>}
+                  text={<>All <Badge isRead>{formatNumber(totalExplicit + totalDependency)}</Badge></>}
                   isSelected={filter === "all"}
                   onChange={() => handleFilterChange("all")}
                 />
                 <ToggleGroupItem
-                  text={<>Explicit <Badge isRead>{totalExplicit}</Badge></>}
+                  text={<>Explicit <Badge isRead>{formatNumber(totalExplicit)}</Badge></>}
                   isSelected={filter === "explicit"}
                   onChange={() => handleFilterChange("explicit")}
                 />
                 <ToggleGroupItem
-                  text={<>Dependencies <Badge isRead>{totalDependency}</Badge></>}
+                  text={<>Dependencies <Badge isRead>{formatNumber(totalDependency)}</Badge></>}
                   isSelected={filter === "dependency"}
                   onChange={() => handleFilterChange("dependency")}
                 />

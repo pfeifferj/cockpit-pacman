@@ -26,6 +26,7 @@ import {
   LogResponse,
   HistoryFilterType,
   getHistory,
+  formatNumber,
 } from "../api";
 
 type ViewState = "loading" | "ready" | "error";
@@ -93,7 +94,7 @@ export const HistoryView: React.FC = () => {
     setPage(1);
   };
 
-  const sortableColumns = [0, 1, 2];
+  const sortableColumns = [0, 2, 3];
 
   const getSortParams = (columnIndex: number): ThProps["sort"] | undefined => {
     if (!sortableColumns.includes(columnIndex)) return undefined;
@@ -118,13 +119,13 @@ export const HistoryView: React.FC = () => {
       let comparison = 0;
       switch (activeSortIndex) {
         case 0:
-          comparison = a.timestamp.localeCompare(b.timestamp);
-          break;
-        case 1:
-          comparison = a.action.localeCompare(b.action);
+          comparison = a.package.localeCompare(b.package);
           break;
         case 2:
-          comparison = a.package.localeCompare(b.package);
+          comparison = a.action.localeCompare(b.action);
+          break;
+        case 3:
+          comparison = a.timestamp.localeCompare(b.timestamp);
           break;
         default:
           return 0;
@@ -208,19 +209,19 @@ export const HistoryView: React.FC = () => {
             <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
               <FlexItem>
                 <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--info--default)" }}>{historyData?.total_upgraded || 0}</div>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--info--default)" }}>{formatNumber(historyData?.total_upgraded || 0)}</div>
                   <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Upgraded</div>
                 </div>
               </FlexItem>
               <FlexItem>
                 <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--success--default)" }}>{historyData?.total_installed || 0}</div>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--success--default)" }}>{formatNumber(historyData?.total_installed || 0)}</div>
                   <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Installed</div>
                 </div>
               </FlexItem>
               <FlexItem>
                 <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--danger--default)" }}>{historyData?.total_removed || 0}</div>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--danger--default)" }}>{formatNumber(historyData?.total_removed || 0)}</div>
                   <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Removed</div>
                 </div>
               </FlexItem>
@@ -261,16 +262,19 @@ export const HistoryView: React.FC = () => {
             <Table aria-label="Package history" variant="compact">
               <Thead>
                 <Tr>
-                  <Th sort={getSortParams(0)}>Time</Th>
-                  <Th sort={getSortParams(1)}>Action</Th>
-                  <Th sort={getSortParams(2)}>Package</Th>
+                  <Th sort={getSortParams(0)}>Package</Th>
                   <Th>Version</Th>
+                  <Th sort={getSortParams(2)}>Action</Th>
+                  <Th sort={getSortParams(3)}>Time</Th>
                 </Tr>
               </Thead>
               <Tbody>
                 {sortedEntries.map((entry: LogEntry, index: number) => (
                   <Tr key={`${entry.timestamp}-${entry.package}-${index}`}>
-                    <Td dataLabel="Time">{formatTimestamp(entry.timestamp)}</Td>
+                    <Td dataLabel="Package">{entry.package}</Td>
+                    <Td dataLabel="Version">
+                      <code>{formatVersion(entry)}</code>
+                    </Td>
                     <Td dataLabel="Action">
                       <Label
                         color={ACTION_COLORS[entry.action] || "grey"}
@@ -279,10 +283,7 @@ export const HistoryView: React.FC = () => {
                         {entry.action}
                       </Label>
                     </Td>
-                    <Td dataLabel="Package">{entry.package}</Td>
-                    <Td dataLabel="Version">
-                      <code>{formatVersion(entry)}</code>
-                    </Td>
+                    <Td dataLabel="Time">{formatTimestamp(entry.timestamp)}</Td>
                   </Tr>
                 ))}
               </Tbody>

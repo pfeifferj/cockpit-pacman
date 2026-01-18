@@ -40,9 +40,9 @@ export const App: React.FC = () => {
               <SearchView />
             </ErrorBoundary>
           </Tab>
-          <Tab eventKey={3} title={<TabTitleText>Keyring</TabTitleText>}>
-            <ErrorBoundary fallbackTitle="Error loading keyring">
-              <KeyringView />
+          <Tab eventKey={3} title={<TabTitleText>History</TabTitleText>}>
+            <ErrorBoundary fallbackTitle="Error loading history">
+              <HistoryView />
             </ErrorBoundary>
           </Tab>
           <Tab eventKey={4} title={<TabTitleText>Orphans</TabTitleText>}>
@@ -55,9 +55,9 @@ export const App: React.FC = () => {
               <CacheView />
             </ErrorBoundary>
           </Tab>
-          <Tab eventKey={6} title={<TabTitleText>History</TabTitleText>}>
-            <ErrorBoundary fallbackTitle="Error loading history">
-              <HistoryView />
+          <Tab eventKey={6} title={<TabTitleText>Keyring</TabTitleText>}>
+            <ErrorBoundary fallbackTitle="Error loading keyring">
+              <KeyringView />
             </ErrorBoundary>
           </Tab>
         </Tabs>
