@@ -10,9 +10,38 @@ use anyhow::{Context, Result};
 use pacman_key::KeyValidity;
 use pacmanconf::Config;
 
+use crate::models::UpdateInfo;
+
 pub fn get_handle() -> Result<Alpm> {
     let conf = Config::new().context("Failed to parse pacman.conf")?;
     alpm_with_conf(&conf).context("Failed to initialize alpm handle")
+}
+
+/// Find all packages with available updates by comparing local versions to sync databases.
+pub fn find_available_updates(handle: &Alpm) -> Vec<UpdateInfo> {
+    let localdb = handle.localdb();
+    let mut updates = Vec::new();
+
+    for pkg in localdb.pkgs() {
+        for syncdb in handle.syncdbs() {
+            if let Ok(syncpkg) = syncdb.pkg(pkg.name()) {
+                if syncpkg.version() > pkg.version() {
+                    updates.push(UpdateInfo {
+                        name: pkg.name().to_string(),
+                        current_version: pkg.version().to_string(),
+                        new_version: syncpkg.version().to_string(),
+                        download_size: syncpkg.download_size(),
+                        current_size: pkg.isize(),
+                        new_size: syncpkg.isize(),
+                        repository: syncdb.name().to_string(),
+                    });
+                }
+                break;
+            }
+        }
+    }
+
+    updates
 }
 
 pub fn progress_to_string(progress: Progress) -> &'static str {

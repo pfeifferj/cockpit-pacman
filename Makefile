@@ -35,8 +35,11 @@ dist: packaging/arch/PKGBUILD
 install:
 	install -d $(DESTDIR)$(PREFIX)/share/cockpit/pacman
 	install -d $(DESTDIR)$(PREFIX)/libexec/cockpit-pacman
+	install -d $(DESTDIR)$(PREFIX)/lib/systemd/system
 	install -m 644 dist/* $(DESTDIR)$(PREFIX)/share/cockpit/pacman/
 	install -m 755 $(BACKEND_BIN) $(DESTDIR)$(PREFIX)/libexec/cockpit-pacman/
+	install -m 644 systemd/cockpit-pacman-scheduled.service $(DESTDIR)$(PREFIX)/lib/systemd/system/
+	install -m 644 systemd/cockpit-pacman-scheduled.timer $(DESTDIR)$(PREFIX)/lib/systemd/system/
 
 devel-install: build
 	mkdir -p ~/.local/share/cockpit

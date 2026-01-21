@@ -63,6 +63,7 @@ import {
 
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { IgnoredPackagesModal } from "./IgnoredPackagesModal";
+import { ScheduleModal } from "./ScheduleModal";
 
 interface UpgradeProgress {
   phase: "preparing" | "downloading" | "installing" | "hooks";
@@ -110,6 +111,7 @@ export const UpdatesView: React.FC = () => {
   const [isCancelling, setIsCancelling] = useState(false);
   const [configIgnored, setConfigIgnored] = useState<string[]>([]);
   const [ignoredModalOpen, setIgnoredModalOpen] = useState(false);
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [acknowledgedRemovals, setAcknowledgedRemovals] = useState(false);
   const [acknowledgedConflicts, setAcknowledgedConflicts] = useState(false);
   const [acknowledgedKeyImports, setAcknowledgedKeyImports] = useState(false);
@@ -674,6 +676,13 @@ export const UpdatesView: React.FC = () => {
           <FlexItem>
             <Button
               variant="secondary"
+              onClick={() => setScheduleModalOpen(true)}
+              className="pf-v6-u-mr-sm"
+            >
+              Manage Schedule
+            </Button>
+            <Button
+              variant="secondary"
               onClick={() => setIgnoredModalOpen(true)}
               className="pf-v6-u-mr-sm"
             >
@@ -946,6 +955,11 @@ export const UpdatesView: React.FC = () => {
         isOpen={ignoredModalOpen}
         onClose={() => setIgnoredModalOpen(false)}
         onIgnoredChange={() => loadConfigIgnored()}
+      />
+
+      <ScheduleModal
+        isOpen={scheduleModalOpen}
+        onClose={() => setScheduleModalOpen(false)}
       />
     </Card>
   );

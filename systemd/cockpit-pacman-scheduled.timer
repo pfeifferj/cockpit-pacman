@@ -1,0 +1,10 @@
+[Unit]
+Description=Cockpit Pacman Scheduled Upgrade Timer
+
+[Timer]
+OnCalendar=weekly
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target
