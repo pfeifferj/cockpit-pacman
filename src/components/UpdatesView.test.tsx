@@ -20,6 +20,7 @@ vi.mock("../api", async () => {
     syncDatabase: vi.fn(),
     getSyncPackageInfo: vi.fn(),
     listIgnoredPackages: vi.fn(),
+    getRebootStatus: vi.fn(),
   };
 });
 
@@ -29,6 +30,7 @@ const mockRunUpgrade = vi.mocked(api.runUpgrade);
 const mockSyncDatabase = vi.mocked(api.syncDatabase);
 const mockGetSyncPackageInfo = vi.mocked(api.getSyncPackageInfo);
 const mockListIgnoredPackages = vi.mocked(api.listIgnoredPackages);
+const mockGetRebootStatus = vi.mocked(api.getRebootStatus);
 
 describe("UpdatesView", () => {
   beforeEach(() => {
@@ -37,6 +39,14 @@ describe("UpdatesView", () => {
     mockPreflightUpgrade.mockResolvedValue(mockPreflightResponse);
     mockGetSyncPackageInfo.mockResolvedValue(mockSyncPackageDetails);
     mockListIgnoredPackages.mockResolvedValue({ packages: [], total: 0 });
+    mockGetRebootStatus.mockResolvedValue({
+      requires_reboot: false,
+      reason: "none",
+      running_kernel: null,
+      installed_kernel: null,
+      kernel_package: null,
+      updated_packages: [],
+    });
     mockRunUpgrade.mockReturnValue({ cancel: vi.fn() });
     mockSyncDatabase.mockImplementation((callbacks) => {
       setTimeout(() => callbacks.onComplete(), 0);
@@ -914,6 +924,64 @@ describe("UpdatesView", () => {
         expect(screen.queryByText("aaa-package")).not.toBeInTheDocument();
       });
       expect(screen.getByText("zzz-package")).toBeInTheDocument();
+    });
+  });
+
+  describe("Reboot Indicator", () => {
+    it("shows kernel update alert when reboot needed", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
+      mockGetRebootStatus.mockResolvedValue({
+        requires_reboot: true,
+        reason: "kernel_update",
+        running_kernel: "6.18.4-arch1-1",
+        installed_kernel: "6.18.5.arch1-1",
+        kernel_package: "linux",
+        updated_packages: [],
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("System is up to date")).toBeInTheDocument();
+      });
+      expect(screen.getByText(/System reboot recommended/)).toBeInTheDocument();
+      expect(screen.getByText(/Running kernel.*6\.18\.4-arch1-1.*differs from installed kernel.*6\.18\.5\.arch1-1/)).toBeInTheDocument();
+    });
+
+    it("shows critical packages alert when reboot needed", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
+      mockGetRebootStatus.mockResolvedValue({
+        requires_reboot: true,
+        reason: "critical_packages",
+        running_kernel: "6.18.5-arch1-1",
+        installed_kernel: "6.18.5.arch1-1",
+        kernel_package: "linux",
+        updated_packages: ["systemd", "linux-firmware"],
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("System is up to date")).toBeInTheDocument();
+      });
+      expect(screen.getByText(/System reboot recommended/)).toBeInTheDocument();
+      expect(screen.getByText(/systemd, linux-firmware/)).toBeInTheDocument();
+    });
+
+    it("does not show alert when no reboot needed", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
+      mockGetRebootStatus.mockResolvedValue({
+        requires_reboot: false,
+        reason: "none",
+        running_kernel: "6.18.5-arch1-1",
+        installed_kernel: "6.18.5.arch1-1",
+        kernel_package: "linux",
+        updated_packages: [],
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("System is up to date")).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/System reboot recommended/)).not.toBeInTheDocument();
     });
   });
 });

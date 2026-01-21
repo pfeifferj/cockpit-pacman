@@ -287,3 +287,13 @@ pub struct ScheduledRunsResponse {
     pub runs: Vec<ScheduledRunEntry>,
     pub total: usize,
 }
+
+#[derive(Serialize)]
+pub struct RebootStatus {
+    pub requires_reboot: bool,
+    pub reason: String,
+    pub running_kernel: Option<String>,
+    pub installed_kernel: Option<String>,
+    pub kernel_package: Option<String>,
+    pub updated_packages: Vec<String>,
+}

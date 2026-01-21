@@ -2,10 +2,10 @@ use std::env;
 
 use cockpit_pacman_backend::handlers::{
     add_ignored, check_updates, clean_cache, downgrade_package, get_cache_info, get_history,
-    get_schedule_config, get_scheduled_runs, init_keyring, keyring_status, list_downgrades,
-    list_ignored, list_installed, list_orphans, local_package_info, preflight_upgrade,
-    refresh_keyring, remove_ignored, remove_orphans, run_upgrade, scheduled_run, search,
-    set_schedule_config, sync_database, sync_package_info,
+    get_reboot_status, get_schedule_config, get_scheduled_runs, init_keyring, keyring_status,
+    list_downgrades, list_ignored, list_installed, list_orphans, local_package_info,
+    preflight_upgrade, refresh_keyring, remove_ignored, remove_orphans, run_upgrade, scheduled_run,
+    search, set_schedule_config, sync_database, sync_package_info,
 };
 use cockpit_pacman_backend::validation::{
     validate_keep_versions, validate_package_name, validate_pagination, validate_search_query,
@@ -74,6 +74,7 @@ fn print_usage() {
     eprintln!("  list-scheduled-runs [offset] [limit]");
     eprintln!("                         List scheduled run history");
     eprintln!("  scheduled-run          Execute scheduled operation (called by systemd)");
+    eprintln!("  reboot-status          Check if system reboot is recommended");
 }
 
 fn main() {
@@ -250,6 +251,7 @@ fn main() {
             validate_pagination(offset, limit).and_then(|_| get_scheduled_runs(offset, limit))
         }
         "scheduled-run" => scheduled_run(),
+        "reboot-status" => get_reboot_status(),
         "help" | "--help" | "-h" => {
             print_usage();
             Ok(())
