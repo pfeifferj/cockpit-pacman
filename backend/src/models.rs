@@ -270,3 +270,20 @@ pub struct DowngradeResponse {
     pub packages: Vec<CachedVersion>,
     pub total: usize,
 }
+
+#[derive(Serialize)]
+pub struct ScheduledRunEntry {
+    pub timestamp: String,
+    pub mode: String,
+    pub success: bool,
+    pub packages_checked: usize,
+    pub packages_upgraded: usize,
+    pub error: Option<String>,
+    pub details: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct ScheduledRunsResponse {
+    pub runs: Vec<ScheduledRunEntry>,
+    pub total: usize,
+}

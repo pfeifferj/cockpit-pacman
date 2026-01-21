@@ -1,11 +1,11 @@
 use anyhow::Result;
 use std::collections::HashSet;
 
-use crate::alpm::{get_handle, reason_to_string};
+use crate::alpm::{find_available_updates, get_handle, reason_to_string};
 use crate::db::{find_package_repo, get_repo_map};
 use crate::models::{
     OrphanPackage, OrphanResponse, Package, PackageDetails, PackageListResponse, SearchResponse,
-    SearchResult, SyncPackageDetails, UpdateInfo, UpdatesResponse,
+    SearchResult, SyncPackageDetails, UpdatesResponse,
 };
 use crate::util::sort_with_direction;
 
@@ -139,27 +139,7 @@ pub fn list_installed(
 
 pub fn check_updates() -> Result<()> {
     let handle = get_handle()?;
-    let localdb = handle.localdb();
-    let mut updates: Vec<UpdateInfo> = Vec::new();
-
-    for pkg in localdb.pkgs() {
-        for syncdb in handle.syncdbs() {
-            if let Ok(syncpkg) = syncdb.pkg(pkg.name()) {
-                if syncpkg.version() > pkg.version() {
-                    updates.push(UpdateInfo {
-                        name: pkg.name().to_string(),
-                        current_version: pkg.version().to_string(),
-                        new_version: syncpkg.version().to_string(),
-                        download_size: syncpkg.download_size(),
-                        current_size: pkg.isize(),
-                        new_size: syncpkg.isize(),
-                        repository: syncdb.name().to_string(),
-                    });
-                }
-                break;
-            }
-        }
-    }
+    let updates = find_available_updates(&handle);
 
     let response = UpdatesResponse {
         updates,

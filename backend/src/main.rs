@@ -2,9 +2,10 @@ use std::env;
 
 use cockpit_pacman_backend::handlers::{
     add_ignored, check_updates, clean_cache, downgrade_package, get_cache_info, get_history,
-    init_keyring, keyring_status, list_downgrades, list_ignored, list_installed, list_orphans,
-    local_package_info, preflight_upgrade, refresh_keyring, remove_ignored, remove_orphans,
-    run_upgrade, search, sync_database, sync_package_info,
+    get_schedule_config, get_scheduled_runs, init_keyring, keyring_status, list_downgrades,
+    list_ignored, list_installed, list_orphans, local_package_info, preflight_upgrade,
+    refresh_keyring, remove_ignored, remove_orphans, run_upgrade, scheduled_run, search,
+    set_schedule_config, sync_database, sync_package_info,
 };
 use cockpit_pacman_backend::validation::{
     validate_keep_versions, validate_package_name, validate_pagination, validate_search_query,
@@ -63,6 +64,16 @@ fn print_usage() {
     eprintln!("  downgrade NAME VERSION [timeout]");
     eprintln!("                         Downgrade a package to a cached version (requires root)");
     eprintln!("                         timeout: seconds (default: 300)");
+    eprintln!("  get-schedule           Get scheduled upgrade configuration");
+    eprintln!("  set-schedule [enabled] [mode] [schedule] [max_packages]");
+    eprintln!("                         Configure scheduled upgrades (requires root)");
+    eprintln!("                         enabled: true|false");
+    eprintln!("                         mode: check|upgrade");
+    eprintln!("                         schedule: systemd OnCalendar spec (e.g., weekly, daily)");
+    eprintln!("                         max_packages: safety limit (0 = unlimited)");
+    eprintln!("  list-scheduled-runs [offset] [limit]");
+    eprintln!("                         List scheduled run history");
+    eprintln!("  scheduled-run          Execute scheduled operation (called by systemd)");
 }
 
 fn main() {
@@ -220,6 +231,25 @@ fn main() {
             validate_package_name(&args[2])
                 .and_then(|_| downgrade_package(&args[2], &args[3], timeout))
         }
+        "get-schedule" => get_schedule_config(),
+        "set-schedule" => {
+            let enabled = args.get(2).and_then(|s| match s.as_str() {
+                "true" => Some(true),
+                "false" => Some(false),
+                "" => None,
+                _ => None,
+            });
+            let mode = args.get(3).map(|s| s.as_str()).filter(|s| !s.is_empty());
+            let schedule = args.get(4).map(|s| s.as_str()).filter(|s| !s.is_empty());
+            let max_packages = args.get(5).and_then(|s| s.parse().ok());
+            set_schedule_config(enabled, mode, schedule, max_packages)
+        }
+        "list-scheduled-runs" => {
+            let offset = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let limit = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(50);
+            validate_pagination(offset, limit).and_then(|_| get_scheduled_runs(offset, limit))
+        }
+        "scheduled-run" => scheduled_run(),
         "help" | "--help" | "-h" => {
             print_usage();
             Ok(())

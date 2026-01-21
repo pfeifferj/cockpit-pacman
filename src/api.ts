@@ -719,3 +719,65 @@ export function downgradePackage(
 ): { cancel: () => void } {
   return runStreamingBackend("downgrade", [sanitizeSearchInput(name), sanitizeSearchInput(version)], callbacks);
 }
+
+export type ScheduleMode = "check" | "upgrade";
+
+export interface ScheduleConfig {
+  enabled: boolean;
+  mode: ScheduleMode;
+  schedule: string;
+  max_packages: number;
+  timer_active: boolean;
+  timer_next_run: string | null;
+}
+
+export interface ScheduleSetResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface ScheduledRunEntry {
+  timestamp: string;
+  mode: string;
+  success: boolean;
+  packages_checked: number;
+  packages_upgraded: number;
+  error: string | null;
+  details: string[];
+}
+
+export interface ScheduledRunsResponse {
+  runs: ScheduledRunEntry[];
+  total: number;
+}
+
+export interface ScheduledRunsParams {
+  offset?: number;
+  limit?: number;
+}
+
+export async function getScheduleConfig(): Promise<ScheduleConfig> {
+  return runBackend<ScheduleConfig>("get-schedule");
+}
+
+export interface SetScheduleParams {
+  enabled?: boolean;
+  mode?: ScheduleMode;
+  schedule?: string;
+  max_packages?: number;
+}
+
+export async function setScheduleConfig(params: SetScheduleParams): Promise<ScheduleSetResponse> {
+  const args: string[] = [
+    params.enabled !== undefined ? String(params.enabled) : "",
+    params.mode || "",
+    params.schedule || "",
+    params.max_packages !== undefined ? String(params.max_packages) : "",
+  ];
+  return runBackend<ScheduleSetResponse>("set-schedule", args);
+}
+
+export async function getScheduledRuns(params: ScheduledRunsParams = {}): Promise<ScheduledRunsResponse> {
+  const { offset = 0, limit = 50 } = params;
+  return runBackend<ScheduledRunsResponse>("list-scheduled-runs", [String(offset), String(limit)]);
+}

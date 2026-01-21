@@ -55,3 +55,56 @@ pub fn validate_keep_versions(keep: u32) -> Result<()> {
     }
     Ok(())
 }
+
+pub fn validate_schedule(schedule: &str) -> Result<()> {
+    if schedule.is_empty() {
+        anyhow::bail!("Schedule cannot be empty");
+    }
+    if schedule.len() > 256 {
+        anyhow::bail!("Schedule string too long (max 256)");
+    }
+    // Critical: prevent injection of systemd directives via newlines or other control chars
+    if schedule.chars().any(|c| c.is_control()) {
+        anyhow::bail!("Schedule contains invalid control characters");
+    }
+    // Reject characters that could be used for injection
+    if schedule.contains('[') || schedule.contains(']') || schedule.contains('=') {
+        anyhow::bail!("Schedule contains invalid characters");
+    }
+    // Only allow known safe presets or valid OnCalendar-like patterns
+    let safe_presets = [
+        "hourly",
+        "daily",
+        "weekly",
+        "monthly",
+        "yearly",
+        "quarterly",
+    ];
+    if safe_presets.contains(&schedule) {
+        return Ok(());
+    }
+    // For custom schedules, validate basic OnCalendar format
+    // Allow: digits, letters, spaces, dashes, colons, asterisks, commas, slashes, dots
+    let valid_chars = |c: char| {
+        c.is_ascii_alphanumeric()
+            || c == ' '
+            || c == '-'
+            || c == ':'
+            || c == '*'
+            || c == ','
+            || c == '/'
+            || c == '.'
+            || c == '~'
+    };
+    if !schedule.chars().all(valid_chars) {
+        anyhow::bail!("Schedule contains invalid characters for OnCalendar format");
+    }
+    Ok(())
+}
+
+pub fn validate_max_packages(max: usize) -> Result<()> {
+    if max > 1000 {
+        anyhow::bail!("max_packages must be at most 1000 (got {})", max);
+    }
+    Ok(())
+}

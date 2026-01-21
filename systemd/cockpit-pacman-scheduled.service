@@ -1,0 +1,19 @@
+[Unit]
+Description=Cockpit Pacman Scheduled Upgrade
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=!/var/lib/pacman/db.lck
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/cockpit-pacman/cockpit-pacman-backend scheduled-run
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=1800
+
+# Security hardening
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+LockPersonality=yes
