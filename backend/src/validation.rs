@@ -148,3 +148,20 @@ pub fn validate_mirror_timeout(timeout: u64) -> Result<()> {
     }
     Ok(())
 }
+
+pub fn validate_depth(depth: u32) -> Result<()> {
+    if depth == 0 || depth > 5 {
+        anyhow::bail!("Depth must be between 1 and 5 (got {})", depth);
+    }
+    Ok(())
+}
+
+pub fn validate_direction(direction: &str) -> Result<()> {
+    match direction {
+        "forward" | "reverse" | "both" => Ok(()),
+        _ => anyhow::bail!(
+            "Direction must be 'forward', 'reverse', or 'both' (got '{}')",
+            direction
+        ),
+    }
+}

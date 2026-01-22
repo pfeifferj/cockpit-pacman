@@ -2,16 +2,17 @@ use std::env;
 
 use cockpit_pacman_backend::handlers::{
     add_ignored, check_updates, clean_cache, downgrade_package, fetch_mirror_status,
-    get_cache_info, get_grouped_history, get_history, get_reboot_status, get_schedule_config,
-    get_scheduled_runs, init_keyring, keyring_status, list_downgrades, list_ignored,
-    list_installed, list_mirrors, list_orphans, local_package_info, preflight_upgrade,
-    refresh_keyring, remove_ignored, remove_orphans, run_upgrade, save_mirrorlist, scheduled_run,
-    search, set_schedule_config, sync_database, sync_package_info, test_mirrors,
+    get_cache_info, get_dependency_tree, get_grouped_history, get_history, get_reboot_status,
+    get_schedule_config, get_scheduled_runs, init_keyring, keyring_status, list_downgrades,
+    list_ignored, list_installed, list_mirrors, list_orphans, local_package_info,
+    preflight_upgrade, refresh_keyring, remove_ignored, remove_orphans, run_upgrade,
+    save_mirrorlist, scheduled_run, search, set_schedule_config, sync_database, sync_package_info,
+    test_mirrors,
 };
 use cockpit_pacman_backend::models::MirrorEntry;
 use cockpit_pacman_backend::validation::{
-    validate_keep_versions, validate_mirror_timeout, validate_mirror_url, validate_package_name,
-    validate_pagination, validate_search_query,
+    validate_depth, validate_direction, validate_keep_versions, validate_mirror_timeout,
+    validate_mirror_url, validate_package_name, validate_pagination, validate_search_query,
 };
 
 fn print_usage() {
@@ -90,6 +91,10 @@ fn print_usage() {
     eprintln!("                         timeout: seconds (default: 60)");
     eprintln!("  save-mirrorlist <json> Save mirrorlist (requires root)");
     eprintln!("                         json: JSON array of mirror entries");
+    eprintln!("  dependency-tree NAME [depth] [direction]");
+    eprintln!("                         Get dependency tree for a package");
+    eprintln!("                         depth: 1-10 (default: 3)");
+    eprintln!("                         direction: forward|reverse|both (default: forward)");
 }
 
 fn main() {
@@ -299,6 +304,22 @@ fn main() {
             serde_json::from_str::<Vec<MirrorEntry>>(&args[2])
                 .map_err(|e| anyhow::anyhow!("Invalid JSON: {}", e))
                 .and_then(|mirrors| save_mirrorlist(&mirrors))
+        }
+        "dependency-tree" => {
+            if args.len() < 3 {
+                eprintln!("Error: dependency-tree requires a package name");
+                std::process::exit(1);
+            }
+            let depth = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(3);
+            let direction = args
+                .get(4)
+                .map(|s| s.as_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("forward");
+            validate_package_name(&args[2])
+                .and_then(|_| validate_depth(depth))
+                .and_then(|_| validate_direction(direction))
+                .and_then(|_| get_dependency_tree(&args[2], depth, direction))
         }
         "help" | "--help" | "-h" => {
             print_usage();

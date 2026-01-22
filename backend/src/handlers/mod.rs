@@ -1,5 +1,6 @@
 pub mod cache;
 pub mod config;
+pub mod dependency;
 pub mod downgrade;
 pub mod keyring;
 pub mod log;
@@ -11,6 +12,7 @@ pub mod scheduled;
 
 pub use cache::{clean_cache, get_cache_info};
 pub use config::{add_ignored, list_ignored, remove_ignored};
+pub use dependency::get_dependency_tree;
 pub use downgrade::{downgrade_package, list_downgrades};
 pub use keyring::{init_keyring, keyring_status, refresh_keyring};
 pub use log::{get_grouped_history, get_history};

@@ -380,3 +380,30 @@ pub struct SaveMirrorlistResponse {
     pub backup_path: Option<String>,
     pub message: String,
 }
+
+#[derive(Serialize, Clone)]
+pub struct DependencyNode {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub depth: u32,
+    pub installed: bool,
+    pub reason: Option<String>,
+    pub repository: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct DependencyEdge {
+    pub source: String,
+    pub target: String,
+    pub edge_type: String,
+}
+
+#[derive(Serialize)]
+pub struct DependencyTreeResponse {
+    pub nodes: Vec<DependencyNode>,
+    pub edges: Vec<DependencyEdge>,
+    pub root: String,
+    pub max_depth_reached: bool,
+    pub warnings: Vec<String>,
+}

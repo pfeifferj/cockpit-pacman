@@ -993,3 +993,44 @@ export function formatSpeed(bytesPerSecond: number): string {
   if (bytesPerSecond < 1024 * 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KiB/s`;
   return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MiB/s`;
 }
+
+export interface DependencyNode {
+  id: string;
+  name: string;
+  version: string;
+  depth: number;
+  installed: boolean;
+  reason: "explicit" | "dependency" | null;
+  repository: string | null;
+}
+
+export interface DependencyEdge {
+  source: string;
+  target: string;
+  edge_type: "depends" | "optdepends" | "required_by" | "optional_for";
+}
+
+export interface DependencyTreeResponse {
+  nodes: DependencyNode[];
+  edges: DependencyEdge[];
+  root: string;
+  max_depth_reached: boolean;
+  warnings: string[];
+}
+
+export type DependencyDirection = "forward" | "reverse" | "both";
+
+export interface DependencyTreeParams {
+  name: string;
+  depth?: number;
+  direction?: DependencyDirection;
+}
+
+export async function getDependencyTree(params: DependencyTreeParams): Promise<DependencyTreeResponse> {
+  const { name, depth = 3, direction = "forward" } = params;
+  return runBackend<DependencyTreeResponse>("dependency-tree", [
+    sanitizeSearchInput(name),
+    String(depth),
+    direction,
+  ]);
+}
