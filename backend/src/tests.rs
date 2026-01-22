@@ -3,7 +3,8 @@ use crate::models::{
 };
 use crate::util::parse_package_filename;
 use crate::validation::{
-    validate_keep_versions, validate_package_name, validate_pagination, validate_search_query,
+    validate_keep_versions, validate_mirror_timeout, validate_mirror_url, validate_package_name,
+    validate_pagination, validate_search_query,
 };
 
 // --- Serialization tests ---
@@ -191,6 +192,91 @@ fn test_validate_keep_versions_invalid() {
     assert!(validate_keep_versions(101).is_err());
     assert!(validate_keep_versions(1000).is_err());
     assert!(validate_keep_versions(u32::MAX).is_err());
+}
+
+#[test]
+fn test_validate_mirror_url_valid() {
+    assert!(validate_mirror_url("https://mirror.archlinux.org/$repo/os/$arch").is_ok());
+    assert!(validate_mirror_url("https://geo.mirror.pkgbuild.com/$repo/os/$arch").is_ok());
+    assert!(validate_mirror_url("http://mirror.example.com/$repo/os/$arch").is_ok());
+    assert!(validate_mirror_url("https://mirror.example.com/archlinux/$repo/os/$arch/").is_ok());
+}
+
+#[test]
+fn test_validate_mirror_url_empty() {
+    assert!(validate_mirror_url("").is_err());
+}
+
+#[test]
+fn test_validate_mirror_url_too_long() {
+    let long_url = format!("https://mirror.example.com/{}", "a".repeat(2100));
+    assert!(validate_mirror_url(&long_url).is_err());
+}
+
+#[test]
+fn test_validate_mirror_url_invalid_scheme() {
+    assert!(validate_mirror_url("ftp://mirror.example.com/$repo/os/$arch").is_err());
+    assert!(validate_mirror_url("file:///etc/pacman.d/mirrorlist").is_err());
+    assert!(validate_mirror_url("rsync://mirror.example.com/$repo/os/$arch").is_err());
+    assert!(validate_mirror_url("mirror.example.com/$repo/os/$arch").is_err());
+}
+
+#[test]
+fn test_validate_mirror_url_control_chars() {
+    assert!(validate_mirror_url("https://mirror.example.com/\x00$repo/os/$arch").is_err());
+    assert!(validate_mirror_url("https://mirror.example.com/\n$repo/os/$arch").is_err());
+}
+
+#[test]
+fn test_validate_mirror_url_path_traversal() {
+    assert!(validate_mirror_url("https://mirror.example.com/../$repo/os/$arch").is_err());
+    assert!(validate_mirror_url("https://mirror.example.com//../$repo/os/$arch").is_err());
+}
+
+#[test]
+fn test_validate_mirror_url_dangerous_chars() {
+    assert!(validate_mirror_url("https://mirror.example.com/$repo/os/$arch;rm -rf").is_err());
+    assert!(validate_mirror_url("https://mirror.example.com/$repo/os/$arch|cat").is_err());
+    assert!(validate_mirror_url("https://mirror.example.com/$repo/os/$arch&echo").is_err());
+    assert!(validate_mirror_url("https://mirror.example.com/$repo/os/$arch`id`").is_err());
+    assert!(validate_mirror_url("https://mirror.example.com/$repo/os/$arch'").is_err());
+    assert!(validate_mirror_url("https://mirror.example.com/$repo/os/$arch\"").is_err());
+}
+
+#[test]
+fn test_validate_mirror_url_invalid_dollar() {
+    assert!(validate_mirror_url("https://mirror.example.com/$repo/os/$arch$foo").is_err());
+    assert!(validate_mirror_url("https://mirror.example.com/$notrepo/os/$arch").is_err());
+}
+
+#[test]
+fn test_validate_mirror_url_at_boundary() {
+    // "https://mirror.example.com/" is 27 characters
+    let base_len = "https://mirror.example.com/".len();
+    assert_eq!(base_len, 27);
+
+    let url_2048 = format!("https://mirror.example.com/{}", "a".repeat(2048 - base_len));
+    assert_eq!(url_2048.len(), 2048);
+    assert!(validate_mirror_url(&url_2048).is_ok());
+
+    let url_2049 = format!("https://mirror.example.com/{}", "a".repeat(2049 - base_len));
+    assert_eq!(url_2049.len(), 2049);
+    assert!(validate_mirror_url(&url_2049).is_err());
+}
+
+#[test]
+fn test_validate_mirror_timeout_valid() {
+    assert!(validate_mirror_timeout(1).is_ok());
+    assert!(validate_mirror_timeout(30).is_ok());
+    assert!(validate_mirror_timeout(60).is_ok());
+    assert!(validate_mirror_timeout(300).is_ok());
+}
+
+#[test]
+fn test_validate_mirror_timeout_invalid() {
+    assert!(validate_mirror_timeout(0).is_err());
+    assert!(validate_mirror_timeout(301).is_err());
+    assert!(validate_mirror_timeout(1000).is_err());
 }
 
 // --- Package filename parsing tests ---

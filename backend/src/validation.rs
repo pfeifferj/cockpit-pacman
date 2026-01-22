@@ -108,3 +108,43 @@ pub fn validate_max_packages(max: usize) -> Result<()> {
     }
     Ok(())
 }
+
+pub fn validate_mirror_url(url: &str) -> Result<()> {
+    if url.is_empty() {
+        anyhow::bail!("Mirror URL cannot be empty");
+    }
+    if url.len() > 2048 {
+        anyhow::bail!("Mirror URL too long (max 2048)");
+    }
+    if url.chars().any(|c| c.is_control()) {
+        anyhow::bail!("Mirror URL contains invalid control characters");
+    }
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        anyhow::bail!("Mirror URL must start with https:// or http://");
+    }
+    if url.contains("..") || url.contains("//./") || url.contains("/../") {
+        anyhow::bail!("Mirror URL contains suspicious path traversal");
+    }
+    let dangerous_chars = ['<', '>', '"', '\'', '`', '|', ';', '&', '\\', '\n', '\r'];
+    if url.chars().any(|c| dangerous_chars.contains(&c)) {
+        anyhow::bail!("Mirror URL contains potentially dangerous characters");
+    }
+    // Check that $ only appears as part of $repo or $arch
+    if url.contains('$') {
+        let replaced = url.replace("$repo", "").replace("$arch", "");
+        if replaced.contains('$') {
+            anyhow::bail!("Mirror URL contains invalid $ usage (only $repo and $arch allowed)");
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_mirror_timeout(timeout: u64) -> Result<()> {
+    if timeout == 0 || timeout > 300 {
+        anyhow::bail!(
+            "Mirror timeout must be between 1 and 300 seconds (got {})",
+            timeout
+        );
+    }
+    Ok(())
+}
