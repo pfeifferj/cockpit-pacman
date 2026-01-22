@@ -37,8 +37,9 @@ import {
   Flex,
   FlexItem,
 } from "@patternfly/react-core";
-import { TrashIcon, CheckCircleIcon } from "@patternfly/react-icons";
+import { TrashIcon, CheckCircleIcon, TopologyIcon } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
+import { DependencyView } from "./DependencyView";
 import {
   Package,
   PackageDetails,
@@ -140,6 +141,10 @@ export const PackageList: React.FC = () => {
   }, []);
 
   const loadPackages = useCallback(async () => {
+    if (filter === "graph") {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -535,15 +540,17 @@ export const PackageList: React.FC = () => {
       <CardBody>
         <Toolbar>
           <ToolbarContent>
-            <ToolbarItem>
-              <SearchInput
-                placeholder="Search packages..."
-                value={searchInput}
-                onChange={(_event, value) => setSearchInput(value)}
-                onClear={handleSearchClear}
-                onSearch={handleSearch}
-              />
-            </ToolbarItem>
+            {filter !== "graph" && (
+              <ToolbarItem>
+                <SearchInput
+                  placeholder="Search packages..."
+                  value={searchInput}
+                  onChange={(_event, value) => setSearchInput(value)}
+                  onClear={handleSearchClear}
+                  onSearch={handleSearch}
+                />
+              </ToolbarItem>
+            )}
             <ToolbarItem>
               <ToggleGroup aria-label="Package filter">
                 <ToggleGroupItem
@@ -566,9 +573,14 @@ export const PackageList: React.FC = () => {
                   isSelected={filter === "orphan"}
                   onChange={() => handleFilterChange("orphan")}
                 />
+                <ToggleGroupItem
+                  text={<><TopologyIcon /> Graph</>}
+                  isSelected={filter === "graph"}
+                  onChange={() => handleFilterChange("graph")}
+                />
               </ToggleGroup>
             </ToolbarItem>
-            {filter !== "orphan" && (
+            {filter !== "orphan" && filter !== "graph" && (
               <>
                 <ToolbarItem>
                   <Select
@@ -618,7 +630,9 @@ export const PackageList: React.FC = () => {
           </ToolbarContent>
         </Toolbar>
 
-        {filter === "orphan" ? (
+        {filter === "graph" ? (
+          <DependencyView />
+        ) : filter === "orphan" ? (
           loading ? (
             <div className="pf-v6-u-p-xl pf-v6-u-text-align-center">
               <Spinner /> Checking for orphan packages...
@@ -630,7 +644,7 @@ export const PackageList: React.FC = () => {
           renderPackageContent()
         )}
 
-        {filter !== "orphan" && (
+        {filter !== "orphan" && filter !== "graph" && (
           <Toolbar>
             <ToolbarContent>
               <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>

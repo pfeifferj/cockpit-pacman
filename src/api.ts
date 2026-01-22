@@ -37,7 +37,7 @@ export interface UpdatesResponse {
   warnings: string[];
 }
 
-export type FilterType = "all" | "explicit" | "dependency" | "orphan";
+export type FilterType = "all" | "explicit" | "dependency" | "orphan" | "graph";
 
 export type SortDirection = "asc" | "desc";
 
