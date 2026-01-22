@@ -15,8 +15,10 @@ import {
 	ModalBody,
 	ModalFooter,
 	Button,
+	EmptyState,
+	EmptyStateBody,
 } from '@patternfly/react-core';
-import { OutlinedQuestionCircleIcon, ArrowDownIcon } from "@patternfly/react-icons";
+import { OutlinedQuestionCircleIcon, ArrowDownIcon, ExclamationCircleIcon } from "@patternfly/react-icons";
 import { PackageDetails, SyncPackageDetails, formatSize, formatDate } from "../api";
 import { sanitizeUrl } from "../utils";
 import { DowngradeModal } from "./DowngradeModal";
@@ -31,15 +33,17 @@ interface PackageDetailsModalProps {
   packageDetails: PackageInfo | null;
   isLoading: boolean;
   onClose: () => void;
+  error?: string | null;
 }
 
 export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
   packageDetails,
   isLoading,
   onClose,
+  error,
 }) => {
   const [downgradeModalOpen, setDowngradeModalOpen] = useState(false);
-  const isOpen = packageDetails !== null || isLoading;
+  const isOpen = packageDetails !== null || isLoading || !!error;
   const isInstalled = packageDetails && isInstalledPackage(packageDetails);
 
   const handleDowngradeClose = () => {
@@ -53,10 +57,16 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
     >
-      <ModalHeader title={packageDetails?.name ?? "Package Details"} />
+      <ModalHeader title={packageDetails?.name ?? (error ? "Package Details" : "Loading...")} />
       <ModalBody>
         {isLoading ? (
           <Spinner />
+        ) : error ? (
+          <EmptyState headingLevel="h4" icon={ExclamationCircleIcon} titleText="Package not found">
+            <EmptyStateBody>
+              {error}
+            </EmptyStateBody>
+          </EmptyState>
         ) : packageDetails ? (
           <DescriptionList>
           <DescriptionListGroup>

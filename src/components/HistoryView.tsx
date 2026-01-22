@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Accordion,
   AccordionContent,
@@ -22,6 +22,7 @@ import {
   Select,
   SelectOption,
 } from "@patternfly/react-core";
+import { PackageDetailsModal } from "./PackageDetailsModal";
 import { HistoryIcon, ArrowUpIcon, ArrowDownIcon, PlusIcon, MinusIcon } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
@@ -29,7 +30,11 @@ import {
   LogGroup,
   GroupedLogResponse,
   HistoryFilterType,
+  PackageDetails,
+  SyncPackageDetails,
   getGroupedHistory,
+  getPackageInfo,
+  getSyncPackageInfo,
   formatNumber,
 } from "../api";
 import { sanitizeErrorMessage } from "../utils";
@@ -67,6 +72,10 @@ export const HistoryView: React.FC = () => {
   const [filter, setFilter] = useState<HistoryFilterType>("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [selectedPackage, setSelectedPackage] = useState<PackageDetails | SyncPackageDetails | null>(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
 
   const loadHistory = useCallback(async () => {
     setState("loading");
@@ -88,6 +97,37 @@ export const HistoryView: React.FC = () => {
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const handleRowClick = async (pkgName: string) => {
+    setDetailsLoading(true);
+    setDetailsError(null);
+    setSelectedPackage(null);
+    try {
+      const details = await getPackageInfo(pkgName);
+      if (!isMountedRef.current) return;
+      setSelectedPackage(details);
+    } catch {
+      if (!isMountedRef.current) return;
+      try {
+        const syncDetails = await getSyncPackageInfo(pkgName);
+        if (!isMountedRef.current) return;
+        setSelectedPackage(syncDetails);
+      } catch {
+        if (!isMountedRef.current) return;
+        setDetailsError(`Package "${pkgName}" is not installed and not available in any configured repository.`);
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setDetailsLoading(false);
+      }
+    }
+  };
 
   const handleFilterChange = (value: HistoryFilterType) => {
     setFilter(value);
@@ -337,8 +377,12 @@ export const HistoryView: React.FC = () => {
                       </Thead>
                       <Tbody>
                         {group.entries.map((entry: LogEntry, index: number) => (
-                          <Tr key={`${entry.timestamp}-${entry.package}-${index}`}>
-                            <Td dataLabel="Package">{entry.package}</Td>
+                          <Tr key={`${entry.timestamp}-${entry.package}-${index}`} isClickable onRowClick={() => handleRowClick(entry.package)}>
+                            <Td dataLabel="Package">
+                              <Button variant="link" isInline className="pf-v6-u-p-0">
+                                {entry.package}
+                              </Button>
+                            </Td>
                             <Td dataLabel="Version">
                               <code>{formatVersion(entry)}</code>
                             </Td>
@@ -371,6 +415,16 @@ export const HistoryView: React.FC = () => {
             />
           </>
         )}
+
+        <PackageDetailsModal
+          packageDetails={selectedPackage}
+          isLoading={detailsLoading}
+          onClose={() => {
+            setSelectedPackage(null);
+            setDetailsError(null);
+          }}
+          error={detailsError}
+        />
       </CardBody>
     </Card>
   );

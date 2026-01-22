@@ -28,12 +28,17 @@ import {
   ClipboardCopyVariant,
 } from "@patternfly/react-core";
 import { TrashIcon, CheckCircleIcon, FolderIcon } from "@patternfly/react-icons";
+import { PackageDetailsModal } from "./PackageDetailsModal";
 import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
 import {
   CacheInfo,
   CachePackage,
+  PackageDetails,
+  SyncPackageDetails,
   getCacheInfo,
   cleanCache,
+  getPackageInfo,
+  getSyncPackageInfo,
   formatSize,
   formatNumber,
 } from "../api";
@@ -51,8 +56,12 @@ export const CacheView: React.FC = () => {
   const [keepVersions, setKeepVersions] = useState(3);
   const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
   const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
+  const [selectedPackage, setSelectedPackage] = useState<PackageDetails | SyncPackageDetails | null>(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
   const cancelRef = useRef<(() => void) | null>(null);
   const logContainerRef = useRef<HTMLDivElement | null>(null);
+  const isMountedRef = useRef(true);
 
   const loadCacheInfo = useCallback(async () => {
     setState("loading");
@@ -73,11 +82,37 @@ export const CacheView: React.FC = () => {
 
   useEffect(() => {
     return () => {
+      isMountedRef.current = false;
       if (cancelRef.current) {
         cancelRef.current();
       }
     };
   }, []);
+
+  const handleRowClick = async (pkgName: string) => {
+    setDetailsLoading(true);
+    setDetailsError(null);
+    setSelectedPackage(null);
+    try {
+      const details = await getPackageInfo(pkgName);
+      if (!isMountedRef.current) return;
+      setSelectedPackage(details);
+    } catch {
+      if (!isMountedRef.current) return;
+      try {
+        const syncDetails = await getSyncPackageInfo(pkgName);
+        if (!isMountedRef.current) return;
+        setSelectedPackage(syncDetails);
+      } catch {
+        if (!isMountedRef.current) return;
+        setDetailsError(`Package "${pkgName}" is not installed and not available in any configured repository.`);
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setDetailsLoading(false);
+      }
+    }
+  };
 
   useEffect(() => {
     if (logContainerRef.current) {
@@ -363,8 +398,12 @@ export const CacheView: React.FC = () => {
           </Thead>
           <Tbody>
             {sortedPackages.map((pkg: CachePackage) => (
-              <Tr key={pkg.filename}>
-                <Td dataLabel="Package">{pkg.name}</Td>
+              <Tr key={pkg.filename} isClickable onRowClick={() => handleRowClick(pkg.name)}>
+                <Td dataLabel="Package">
+                  <Button variant="link" isInline className="pf-v6-u-p-0">
+                    {pkg.name}
+                  </Button>
+                </Td>
                 <Td dataLabel="Version">{pkg.version}</Td>
                 <Td dataLabel="Size">{formatSize(pkg.size)}</Td>
               </Tr>
@@ -418,6 +457,16 @@ export const CacheView: React.FC = () => {
           </Button>
         </ModalFooter>
       </Modal>
+
+      <PackageDetailsModal
+        packageDetails={selectedPackage}
+        isLoading={detailsLoading}
+        onClose={() => {
+          setSelectedPackage(null);
+          setDetailsError(null);
+        }}
+        error={detailsError}
+      />
     </Card>
   );
 };

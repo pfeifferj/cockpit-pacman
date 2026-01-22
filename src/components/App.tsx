@@ -10,7 +10,6 @@ import { UpdatesView } from "./UpdatesView";
 import { PackageList } from "./PackageList";
 import { SearchView } from "./SearchView";
 import { KeyringView } from "./KeyringView";
-import { OrphansView } from "./OrphansView";
 import { CacheView } from "./CacheView";
 import { HistoryView } from "./HistoryView";
 import { MirrorsView } from "./MirrorsView";
@@ -47,27 +46,22 @@ export const App: React.FC = () => {
               <HistoryView />
             </ErrorBoundary>
           </Tab>
-          <Tab eventKey={4} title={<TabTitleText>Orphans</TabTitleText>}>
-            <ErrorBoundary fallbackTitle="Error loading orphans">
-              <OrphansView />
-            </ErrorBoundary>
-          </Tab>
-          <Tab eventKey={5} title={<TabTitleText>Cache</TabTitleText>}>
+          <Tab eventKey={4} title={<TabTitleText>Cache</TabTitleText>}>
             <ErrorBoundary fallbackTitle="Error loading cache">
               <CacheView />
             </ErrorBoundary>
           </Tab>
-          <Tab eventKey={6} title={<TabTitleText>Keyring</TabTitleText>}>
+          <Tab eventKey={5} title={<TabTitleText>Keyring</TabTitleText>}>
             <ErrorBoundary fallbackTitle="Error loading keyring">
               <KeyringView />
             </ErrorBoundary>
           </Tab>
-          <Tab eventKey={7} title={<TabTitleText>Mirrors</TabTitleText>}>
+          <Tab eventKey={6} title={<TabTitleText>Mirrors</TabTitleText>}>
             <ErrorBoundary fallbackTitle="Error loading mirrors">
               <MirrorsView />
             </ErrorBoundary>
           </Tab>
-          <Tab eventKey={8} title={<TabTitleText>Dependencies</TabTitleText>}>
+          <Tab eventKey={7} title={<TabTitleText>Dependencies</TabTitleText>}>
             <ErrorBoundary fallbackTitle="Error loading dependencies">
               <DependencyView />
             </ErrorBoundary>
