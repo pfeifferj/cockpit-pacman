@@ -8,6 +8,7 @@ import type {
   RebootStatus,
   GroupedLogResponse,
   LogGroup,
+  DependencyTreeResponse,
 } from "../api";
 
 export const mockPackageListResponse: PackageListResponse = {
@@ -335,4 +336,43 @@ export const mockGroupedLogResponse: GroupedLogResponse = {
   total_installed: 2,
   total_removed: 1,
   total_other: 0,
+};
+
+export const mockDependencyTreeResponse: DependencyTreeResponse = {
+  nodes: [
+    {
+      id: "linux",
+      name: "linux",
+      version: "6.7.0-arch1-1",
+      depth: 0,
+      installed: true,
+      reason: "explicit",
+      repository: "core",
+    },
+    {
+      id: "kmod",
+      name: "kmod",
+      version: "33-1",
+      depth: 1,
+      installed: true,
+      reason: "dependency",
+      repository: "core",
+    },
+    {
+      id: "zlib",
+      name: "zlib",
+      version: "1.3.1-1",
+      depth: 2,
+      installed: true,
+      reason: "dependency",
+      repository: "core",
+    },
+  ],
+  edges: [
+    { source: "linux", target: "kmod", edge_type: "depends" },
+    { source: "kmod", target: "zlib", edge_type: "depends" },
+  ],
+  root: "linux",
+  max_depth_reached: false,
+  warnings: [],
 };
