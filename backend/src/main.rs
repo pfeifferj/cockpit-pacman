@@ -1,11 +1,11 @@
 use std::env;
 
 use cockpit_pacman_backend::handlers::{
-    add_ignored, check_updates, clean_cache, downgrade_package, get_cache_info, get_history,
-    get_reboot_status, get_schedule_config, get_scheduled_runs, init_keyring, keyring_status,
-    list_downgrades, list_ignored, list_installed, list_orphans, local_package_info,
-    preflight_upgrade, refresh_keyring, remove_ignored, remove_orphans, run_upgrade, scheduled_run,
-    search, set_schedule_config, sync_database, sync_package_info,
+    add_ignored, check_updates, clean_cache, downgrade_package, get_cache_info,
+    get_grouped_history, get_history, get_reboot_status, get_schedule_config, get_scheduled_runs,
+    init_keyring, keyring_status, list_downgrades, list_ignored, list_installed, list_orphans,
+    local_package_info, preflight_upgrade, refresh_keyring, remove_ignored, remove_orphans,
+    run_upgrade, scheduled_run, search, set_schedule_config, sync_database, sync_package_info,
 };
 use cockpit_pacman_backend::validation::{
     validate_keep_versions, validate_package_name, validate_pagination, validate_search_query,
@@ -58,6 +58,10 @@ fn print_usage() {
     eprintln!("                         KEEP: number of versions to keep (default: 3)");
     eprintln!("  history [offset] [limit] [filter]");
     eprintln!("                         View package history from pacman.log");
+    eprintln!("                         filter: all|upgraded|installed|removed");
+    eprintln!("  history-grouped [offset] [limit] [filter]");
+    eprintln!("                         View package history grouped by upgrade runs");
+    eprintln!("                         Groups entries within 60s of each other");
     eprintln!("                         filter: all|upgraded|installed|removed");
     eprintln!("  list-downgrades [NAME] List cached package versions available for downgrade");
     eprintln!("                         NAME: optional package name to filter");
@@ -214,6 +218,16 @@ fn main() {
                 .map(|s| s.as_str())
                 .filter(|s| !s.is_empty() && *s != "all");
             validate_pagination(offset, limit).and_then(|_| get_history(offset, limit, filter))
+        }
+        "history-grouped" => {
+            let offset = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let limit = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(20);
+            let filter = args
+                .get(4)
+                .map(|s| s.as_str())
+                .filter(|s| !s.is_empty() && *s != "all");
+            validate_pagination(offset, limit)
+                .and_then(|_| get_grouped_history(offset, limit, filter))
         }
         "list-downgrades" => {
             let name = args.get(2).map(|s| s.as_str()).filter(|s| !s.is_empty());
