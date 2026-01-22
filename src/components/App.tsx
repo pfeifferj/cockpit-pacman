@@ -13,6 +13,7 @@ import { KeyringView } from "./KeyringView";
 import { OrphansView } from "./OrphansView";
 import { CacheView } from "./CacheView";
 import { HistoryView } from "./HistoryView";
+import { MirrorsView } from "./MirrorsView";
 import { ErrorBoundary } from "./ErrorBoundary";
 
 export const App: React.FC = () => {
@@ -58,6 +59,11 @@ export const App: React.FC = () => {
           <Tab eventKey={6} title={<TabTitleText>Keyring</TabTitleText>}>
             <ErrorBoundary fallbackTitle="Error loading keyring">
               <KeyringView />
+            </ErrorBoundary>
+          </Tab>
+          <Tab eventKey={7} title={<TabTitleText>Mirrors</TabTitleText>}>
+            <ErrorBoundary fallbackTitle="Error loading mirrors">
+              <MirrorsView />
             </ErrorBoundary>
           </Tab>
         </Tabs>

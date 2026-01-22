@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
 pub struct Package {
@@ -185,6 +185,13 @@ pub enum StreamEvent {
         success: bool,
         message: Option<String>,
     },
+    #[serde(rename = "mirror_test")]
+    MirrorTest {
+        url: String,
+        current: usize,
+        total: usize,
+        result: MirrorTestResult,
+    },
 }
 
 #[derive(Serialize)]
@@ -319,4 +326,57 @@ pub struct RebootStatus {
     pub installed_kernel: Option<String>,
     pub kernel_package: Option<String>,
     pub updated_packages: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct MirrorEntry {
+    pub url: String,
+    pub enabled: bool,
+    pub comment: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct MirrorListResponse {
+    pub mirrors: Vec<MirrorEntry>,
+    pub total: usize,
+    pub enabled_count: usize,
+    pub path: String,
+    pub last_modified: Option<i64>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct MirrorStatus {
+    pub url: String,
+    pub country: Option<String>,
+    pub country_code: Option<String>,
+    pub last_sync: Option<String>,
+    pub delay: Option<i64>,
+    pub score: Option<f64>,
+    pub completion_pct: Option<f64>,
+    pub active: bool,
+    pub ipv4: bool,
+    pub ipv6: bool,
+}
+
+#[derive(Serialize)]
+pub struct MirrorStatusResponse {
+    pub mirrors: Vec<MirrorStatus>,
+    pub total: usize,
+    pub last_check: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct MirrorTestResult {
+    pub url: String,
+    pub success: bool,
+    pub speed_bps: Option<u64>,
+    pub latency_ms: Option<u64>,
+    pub error: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct SaveMirrorlistResponse {
+    pub success: bool,
+    pub backup_path: Option<String>,
+    pub message: String,
 }

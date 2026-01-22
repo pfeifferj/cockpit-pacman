@@ -1,14 +1,17 @@
 use std::env;
 
 use cockpit_pacman_backend::handlers::{
-    add_ignored, check_updates, clean_cache, downgrade_package, get_cache_info,
-    get_grouped_history, get_history, get_reboot_status, get_schedule_config, get_scheduled_runs,
-    init_keyring, keyring_status, list_downgrades, list_ignored, list_installed, list_orphans,
-    local_package_info, preflight_upgrade, refresh_keyring, remove_ignored, remove_orphans,
-    run_upgrade, scheduled_run, search, set_schedule_config, sync_database, sync_package_info,
+    add_ignored, check_updates, clean_cache, downgrade_package, fetch_mirror_status,
+    get_cache_info, get_grouped_history, get_history, get_reboot_status, get_schedule_config,
+    get_scheduled_runs, init_keyring, keyring_status, list_downgrades, list_ignored,
+    list_installed, list_mirrors, list_orphans, local_package_info, preflight_upgrade,
+    refresh_keyring, remove_ignored, remove_orphans, run_upgrade, save_mirrorlist, scheduled_run,
+    search, set_schedule_config, sync_database, sync_package_info, test_mirrors,
 };
+use cockpit_pacman_backend::models::MirrorEntry;
 use cockpit_pacman_backend::validation::{
-    validate_keep_versions, validate_package_name, validate_pagination, validate_search_query,
+    validate_keep_versions, validate_mirror_timeout, validate_mirror_url, validate_package_name,
+    validate_pagination, validate_search_query,
 };
 
 fn print_usage() {
@@ -79,6 +82,14 @@ fn print_usage() {
     eprintln!("                         List scheduled run history");
     eprintln!("  scheduled-run          Execute scheduled operation (called by systemd)");
     eprintln!("  reboot-status          Check if system reboot is recommended");
+    eprintln!("  list-mirrors           List mirrors from /etc/pacman.d/mirrorlist");
+    eprintln!("  fetch-mirror-status    Fetch mirror status from archlinux.org API");
+    eprintln!("  test-mirrors [urls] [timeout]");
+    eprintln!("                         Test mirror speed and latency");
+    eprintln!("                         urls: comma-separated list of mirror URLs");
+    eprintln!("                         timeout: seconds (default: 60)");
+    eprintln!("  save-mirrorlist <json> Save mirrorlist (requires root)");
+    eprintln!("                         json: JSON array of mirror entries");
 }
 
 fn main() {
@@ -266,6 +277,29 @@ fn main() {
         }
         "scheduled-run" => scheduled_run(),
         "reboot-status" => get_reboot_status(),
+        "list-mirrors" => list_mirrors(),
+        "fetch-mirror-status" => fetch_mirror_status(),
+        "test-mirrors" => {
+            let urls: Vec<String> = args
+                .get(2)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.split(',').map(|u| u.trim().to_string()).collect())
+                .unwrap_or_default();
+            let timeout = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(60);
+            urls.iter()
+                .try_for_each(|url| validate_mirror_url(url))
+                .and_then(|_| validate_mirror_timeout(timeout))
+                .and_then(|_| test_mirrors(&urls, timeout))
+        }
+        "save-mirrorlist" => {
+            if args.len() < 3 {
+                eprintln!("Error: save-mirrorlist requires a JSON array of mirrors");
+                std::process::exit(1);
+            }
+            serde_json::from_str::<Vec<MirrorEntry>>(&args[2])
+                .map_err(|e| anyhow::anyhow!("Invalid JSON: {}", e))
+                .and_then(|mirrors| save_mirrorlist(&mirrors))
+        }
         "help" | "--help" | "-h" => {
             print_usage();
             Ok(())

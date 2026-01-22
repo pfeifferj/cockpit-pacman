@@ -826,3 +826,170 @@ export interface RebootStatus {
 export async function getRebootStatus(): Promise<RebootStatus> {
   return runBackend<RebootStatus>("reboot-status");
 }
+
+export interface MirrorEntry {
+  url: string;
+  enabled: boolean;
+  comment: string | null;
+}
+
+export interface MirrorListResponse {
+  mirrors: MirrorEntry[];
+  total: number;
+  enabled_count: number;
+  path: string;
+  last_modified: number | null;
+}
+
+export interface MirrorStatus {
+  url: string;
+  country: string | null;
+  country_code: string | null;
+  last_sync: string | null;
+  delay: number | null;
+  score: number | null;
+  completion_pct: number | null;
+  active: boolean;
+  ipv4: boolean;
+  ipv6: boolean;
+}
+
+export interface MirrorStatusResponse {
+  mirrors: MirrorStatus[];
+  total: number;
+  last_check: string | null;
+}
+
+export interface MirrorTestResult {
+  url: string;
+  success: boolean;
+  speed_bps: number | null;
+  latency_ms: number | null;
+  error: string | null;
+}
+
+export interface SaveMirrorlistResponse {
+  success: boolean;
+  backup_path: string | null;
+  message: string;
+}
+
+export interface StreamEventMirrorTest {
+  type: "mirror_test";
+  url: string;
+  current: number;
+  total: number;
+  result: MirrorTestResult;
+}
+
+export type MirrorStreamEvent = StreamEvent | StreamEventMirrorTest;
+
+export interface MirrorTestCallbacks {
+  onTestResult?: (result: MirrorTestResult, current: number, total: number) => void;
+  onData?: (data: string) => void;
+  onComplete: () => void;
+  onError: (error: string) => void;
+  timeout?: number;
+}
+
+export async function listMirrors(): Promise<MirrorListResponse> {
+  return runBackend<MirrorListResponse>("list-mirrors");
+}
+
+export async function fetchMirrorStatus(): Promise<MirrorStatusResponse> {
+  return runBackend<MirrorStatusResponse>("fetch-mirror-status");
+}
+
+export function testMirrors(
+  callbacks: MirrorTestCallbacks,
+  urls?: string[]
+): { cancel: () => void } {
+  let buffer = "";
+  let completionHandled = false;
+
+  const markComplete = (success: boolean, message?: string) => {
+    if (completionHandled) return;
+    completionHandled = true;
+    try {
+      if (success) {
+        callbacks.onComplete();
+      } else {
+        callbacks.onError(message || "Mirror testing failed");
+      }
+    } catch (callbackError) {
+      console.error("Callback error in markComplete:", callbackError);
+    }
+  };
+
+  const args: string[] = [];
+  if (urls && urls.length > 0) {
+    args.push(urls.join(","));
+  }
+  if (callbacks.timeout !== undefined) {
+    args.push(String(callbacks.timeout));
+  }
+
+  const proc = cockpit.spawn(
+    [BACKEND_PATH, "test-mirrors", ...args],
+    { superuser: "try", err: "out" }
+  );
+
+  proc.stream((data) => {
+    buffer += data;
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line) as MirrorStreamEvent;
+
+        if (event.type === "mirror_test") {
+          callbacks.onTestResult?.(event.result, event.current, event.total);
+          callbacks.onData?.(`[${event.current}/${event.total}] ${event.url}: ${event.result.success ? `${event.result.latency_ms}ms` : event.result.error}\n`);
+        } else if (event.type === "complete") {
+          markComplete(event.success, event.message);
+        } else if (event.type === "log") {
+          callbacks.onData?.(`[${event.level}] ${event.message}\n`);
+        }
+      } catch {
+        callbacks.onData?.(line + "\n");
+      }
+    }
+  });
+
+  proc.then(() => {
+    if (buffer.trim()) {
+      try {
+        const event = JSON.parse(buffer) as MirrorStreamEvent;
+        if (event.type === "complete") {
+          markComplete(event.success, event.message);
+          return;
+        }
+      } catch {
+        // Not valid JSON
+      }
+    }
+    if (!completionHandled) {
+      markComplete(false, "Backend process ended without sending completion status");
+    }
+  });
+
+  proc.catch((ex: unknown) => {
+    markComplete(false, extractErrorMessage(ex));
+  });
+
+  return {
+    cancel: () => proc.close("cancelled"),
+  };
+}
+
+export async function saveMirrorlist(mirrors: MirrorEntry[]): Promise<SaveMirrorlistResponse> {
+  return runBackend<SaveMirrorlistResponse>("save-mirrorlist", [JSON.stringify(mirrors)]);
+}
+
+export function formatSpeed(bytesPerSecond: number): string {
+  if (bytesPerSecond < 1024) return `${bytesPerSecond} B/s`;
+  if (bytesPerSecond < 1024 * 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KiB/s`;
+  return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MiB/s`;
+}
