@@ -693,6 +693,36 @@ export async function getHistory(params: HistoryParams = {}): Promise<LogRespons
   return runBackend<LogResponse>("history", [String(offset), String(limit), filter]);
 }
 
+export interface LogGroup {
+  id: string;
+  start_time: string;
+  end_time: string;
+  entries: LogEntry[];
+  upgraded_count: number;
+  installed_count: number;
+  removed_count: number;
+  downgraded_count: number;
+  reinstalled_count: number;
+}
+
+export interface GroupedLogResponse {
+  groups: LogGroup[];
+  total_groups: number;
+  total_upgraded: number;
+  total_installed: number;
+  total_removed: number;
+  total_other: number;
+}
+
+export async function getGroupedHistory(params: HistoryParams = {}): Promise<GroupedLogResponse> {
+  const { offset = 0, limit = 20, filter = "all" } = params;
+  return runBackend<GroupedLogResponse>("history-grouped", [
+    String(offset),
+    String(limit),
+    filter,
+  ]);
+}
+
 export interface CachedVersion {
   name: string;
   version: string;

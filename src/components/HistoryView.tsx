@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { PER_PAGE_OPTIONS } from "../constants";
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionToggle,
   Card,
   CardBody,
   CardTitle,
@@ -20,12 +23,13 @@ import {
   SelectOption,
 } from "@patternfly/react-core";
 import { HistoryIcon, ArrowUpIcon, ArrowDownIcon, PlusIcon, MinusIcon } from "@patternfly/react-icons";
-import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
+import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
   LogEntry,
-  LogResponse,
+  LogGroup,
+  GroupedLogResponse,
   HistoryFilterType,
-  getHistory,
+  getGroupedHistory,
   formatNumber,
 } from "../api";
 import { sanitizeErrorMessage } from "../utils";
@@ -48,27 +52,32 @@ const ACTION_ICONS: Record<string, React.ReactNode> = {
   reinstalled: <HistoryIcon />,
 };
 
+const PER_PAGE_OPTIONS = [
+  { title: "10", value: 10 },
+  { title: "20", value: 20 },
+  { title: "50", value: 50 },
+];
+
 export const HistoryView: React.FC = () => {
   const [state, setState] = useState<ViewState>("loading");
-  const [historyData, setHistoryData] = useState<LogResponse | null>(null);
+  const [groupedData, setGroupedData] = useState<GroupedLogResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(50);
+  const [perPage, setPerPage] = useState(20);
   const [filter, setFilter] = useState<HistoryFilterType>("all");
   const [filterOpen, setFilterOpen] = useState(false);
-  const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
-  const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   const loadHistory = useCallback(async () => {
     setState("loading");
     setError(null);
     try {
-      const response = await getHistory({
+      const response = await getGroupedHistory({
         offset: (page - 1) * perPage,
         limit: perPage,
         filter,
       });
-      setHistoryData(response);
+      setGroupedData(response);
       setState("ready");
     } catch (ex) {
       setState("error");
@@ -84,60 +93,41 @@ export const HistoryView: React.FC = () => {
     setFilter(value);
     setPage(1);
     setFilterOpen(false);
+    setExpandedGroups(new Set());
   };
 
   const handleSetPage = (_event: React.MouseEvent | React.KeyboardEvent | MouseEvent, newPage: number) => {
     setPage(newPage);
+    setExpandedGroups(new Set());
   };
 
   const handlePerPageSelect = (_event: React.MouseEvent | React.KeyboardEvent | MouseEvent, newPerPage: number) => {
     setPerPage(newPerPage);
     setPage(1);
+    setExpandedGroups(new Set());
   };
 
-  const sortableColumns = [0, 2, 3];
-
-  const getSortParams = (columnIndex: number): ThProps["sort"] | undefined => {
-    if (!sortableColumns.includes(columnIndex)) return undefined;
-    return {
-      sortBy: {
-        index: activeSortIndex ?? undefined,
-        direction: activeSortDirection,
-        defaultDirection: "asc",
-      },
-      onSort: (_event, index, direction) => {
-        setActiveSortIndex(index);
-        setActiveSortDirection(direction);
-      },
-      columnIndex,
-    };
-  };
-
-  const sortedEntries = React.useMemo(() => {
-    if (!historyData?.entries) return [];
-    return [...historyData.entries].sort((a, b) => {
-      if (activeSortIndex === null) return 0;
-      let comparison = 0;
-      switch (activeSortIndex) {
-        case 0:
-          comparison = a.package.localeCompare(b.package);
-          break;
-        case 2:
-          comparison = a.action.localeCompare(b.action);
-          break;
-        case 3:
-          comparison = a.timestamp.localeCompare(b.timestamp);
-          break;
-        default:
-          return 0;
+  const toggleGroup = (groupId: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
       }
-      return activeSortDirection === "asc" ? comparison : -comparison;
+      return next;
     });
-  }, [historyData, activeSortIndex, activeSortDirection]);
+  };
 
   const formatTimestamp = (timestamp: string): string => {
     try {
-      const date = new Date(timestamp.replace("+0000", "Z").replace(" ", "T"));
+      // Handle ISO 8601 timestamps with timezone offsets like +0100, -0500, +0000
+      // Convert compact offset (+0100) to colon format (+01:00) for better browser support
+      const normalized = timestamp.replace(/([+-])(\d{2})(\d{2})$/, "$1$2:$3");
+      const date = new Date(normalized);
+      if (isNaN(date.getTime())) {
+        return timestamp;
+      }
       return date.toLocaleString();
     } catch {
       return timestamp;
@@ -149,6 +139,46 @@ export const HistoryView: React.FC = () => {
       return `${entry.old_version} -> ${entry.new_version}`;
     }
     return entry.old_version || entry.new_version || "";
+  };
+
+  const renderGroupSummary = (group: LogGroup): React.ReactNode => {
+    const labels: React.ReactNode[] = [];
+    if (group.upgraded_count > 0) {
+      labels.push(
+        <Label key="upgraded" color="blue" isCompact>
+          {group.upgraded_count} upgraded
+        </Label>
+      );
+    }
+    if (group.installed_count > 0) {
+      labels.push(
+        <Label key="installed" color="green" isCompact>
+          {group.installed_count} installed
+        </Label>
+      );
+    }
+    if (group.removed_count > 0) {
+      labels.push(
+        <Label key="removed" color="red" isCompact>
+          {group.removed_count} removed
+        </Label>
+      );
+    }
+    if (group.downgraded_count > 0) {
+      labels.push(
+        <Label key="downgraded" color="orange" isCompact>
+          {group.downgraded_count} downgraded
+        </Label>
+      );
+    }
+    if (group.reinstalled_count > 0) {
+      labels.push(
+        <Label key="reinstalled" color="grey" isCompact>
+          {group.reinstalled_count} reinstalled
+        </Label>
+      );
+    }
+    return labels;
   };
 
   if (state === "loading") {
@@ -180,7 +210,7 @@ export const HistoryView: React.FC = () => {
     );
   }
 
-  if (!historyData?.entries.length && filter === "all") {
+  if (!groupedData?.groups.length && filter === "all") {
     return (
       <Card>
         <CardBody>
@@ -210,22 +240,30 @@ export const HistoryView: React.FC = () => {
             <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
               <FlexItem>
                 <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--info--default)" }}>{formatNumber(historyData?.total_upgraded || 0)}</div>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--info--default)" }}>{formatNumber(groupedData?.total_upgraded || 0)}</div>
                   <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Upgraded</div>
                 </div>
               </FlexItem>
               <FlexItem>
                 <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--success--default)" }}>{formatNumber(historyData?.total_installed || 0)}</div>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--success--default)" }}>{formatNumber(groupedData?.total_installed || 0)}</div>
                   <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Installed</div>
                 </div>
               </FlexItem>
               <FlexItem>
                 <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--danger--default)" }}>{formatNumber(historyData?.total_removed || 0)}</div>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--danger--default)" }}>{formatNumber(groupedData?.total_removed || 0)}</div>
                   <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Removed</div>
                 </div>
               </FlexItem>
+              {(groupedData?.total_other || 0) > 0 && (
+                <FlexItem>
+                  <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
+                    <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--warning--default)" }}>{formatNumber(groupedData?.total_other || 0)}</div>
+                    <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Other</div>
+                  </div>
+                </FlexItem>
+              )}
             </Flex>
           </FlexItem>
           <FlexItem>
@@ -252,7 +290,7 @@ export const HistoryView: React.FC = () => {
           </FlexItem>
         </Flex>
 
-        {!historyData?.entries.length ? (
+        {!groupedData?.groups.length ? (
           <EmptyState headingLevel="h3" titleText="No matching entries">
             <EmptyStateBody>
               No {filter} packages found in history.
@@ -260,38 +298,70 @@ export const HistoryView: React.FC = () => {
           </EmptyState>
         ) : (
           <>
-            <Table aria-label="Package history" variant="compact">
-              <Thead>
-                <Tr>
-                  <Th sort={getSortParams(0)}>Package</Th>
-                  <Th>Version</Th>
-                  <Th sort={getSortParams(2)}>Action</Th>
-                  <Th sort={getSortParams(3)}>Time</Th>
-                </Tr>
-              </Thead>
-              <Tbody>
-                {sortedEntries.map((entry: LogEntry, index: number) => (
-                  <Tr key={`${entry.timestamp}-${entry.package}-${index}`}>
-                    <Td dataLabel="Package">{entry.package}</Td>
-                    <Td dataLabel="Version">
-                      <code>{formatVersion(entry)}</code>
-                    </Td>
-                    <Td dataLabel="Action">
-                      <Label
-                        color={ACTION_COLORS[entry.action] || "grey"}
-                        icon={ACTION_ICONS[entry.action]}
-                      >
-                        {entry.action}
-                      </Label>
-                    </Td>
-                    <Td dataLabel="Time">{formatTimestamp(entry.timestamp)}</Td>
-                  </Tr>
-                ))}
-              </Tbody>
-            </Table>
+            <Accordion asDefinitionList={false}>
+              {groupedData.groups.map((group: LogGroup) => (
+                <AccordionItem key={group.id} isExpanded={expandedGroups.has(group.id)}>
+                  <AccordionToggle
+                    onClick={() => toggleGroup(group.id)}
+                    id={`${group.id}-toggle`}
+                  >
+                    <Flex
+                      justifyContent={{ default: "justifyContentSpaceBetween" }}
+                      alignItems={{ default: "alignItemsCenter" }}
+                      style={{ width: "100%" }}
+                    >
+                      <FlexItem>
+                        <span style={{ fontWeight: 500 }}>{formatTimestamp(group.start_time)}</span>
+                        {group.entries.length > 1 && (
+                          <span style={{ color: "var(--pf-t--global--text--color--subtle)", marginLeft: "0.5rem" }}>
+                            ({group.entries.length} packages)
+                          </span>
+                        )}
+                      </FlexItem>
+                      <FlexItem>
+                        <Flex spaceItems={{ default: "spaceItemsSm" }}>
+                          {renderGroupSummary(group)}
+                        </Flex>
+                      </FlexItem>
+                    </Flex>
+                  </AccordionToggle>
+                  <AccordionContent id={`${group.id}-content`} hidden={!expandedGroups.has(group.id)}>
+                    <Table aria-label={`Package history for ${group.id}`} variant="compact">
+                      <Thead>
+                        <Tr>
+                          <Th>Package</Th>
+                          <Th>Version</Th>
+                          <Th>Action</Th>
+                          <Th>Time</Th>
+                        </Tr>
+                      </Thead>
+                      <Tbody>
+                        {group.entries.map((entry: LogEntry, index: number) => (
+                          <Tr key={`${entry.timestamp}-${entry.package}-${index}`}>
+                            <Td dataLabel="Package">{entry.package}</Td>
+                            <Td dataLabel="Version">
+                              <code>{formatVersion(entry)}</code>
+                            </Td>
+                            <Td dataLabel="Action">
+                              <Label
+                                color={ACTION_COLORS[entry.action] || "grey"}
+                                icon={ACTION_ICONS[entry.action]}
+                              >
+                                {entry.action}
+                              </Label>
+                            </Td>
+                            <Td dataLabel="Time">{formatTimestamp(entry.timestamp)}</Td>
+                          </Tr>
+                        ))}
+                      </Tbody>
+                    </Table>
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
 
             <Pagination
-              itemCount={historyData?.total || 0}
+              itemCount={groupedData?.total_groups || 0}
               perPage={perPage}
               page={page}
               onSetPage={handleSetPage}

@@ -236,7 +236,7 @@ pub struct CacheInfo {
     pub path: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct LogEntry {
     pub timestamp: String,
     pub action: String,
@@ -249,6 +249,29 @@ pub struct LogEntry {
 pub struct LogResponse {
     pub entries: Vec<LogEntry>,
     pub total: usize,
+    pub total_upgraded: usize,
+    pub total_installed: usize,
+    pub total_removed: usize,
+    pub total_other: usize,
+}
+
+#[derive(Serialize, Clone)]
+pub struct LogGroup {
+    pub id: String,
+    pub start_time: String,
+    pub end_time: String,
+    pub entries: Vec<LogEntry>,
+    pub upgraded_count: usize,
+    pub installed_count: usize,
+    pub removed_count: usize,
+    pub downgraded_count: usize,
+    pub reinstalled_count: usize,
+}
+
+#[derive(Serialize)]
+pub struct GroupedLogResponse {
+    pub groups: Vec<LogGroup>,
+    pub total_groups: usize,
     pub total_upgraded: usize,
     pub total_installed: usize,
     pub total_removed: usize,

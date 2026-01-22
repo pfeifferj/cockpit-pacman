@@ -6,6 +6,8 @@ import type {
   PreflightResponse,
   SyncPackageDetails,
   RebootStatus,
+  GroupedLogResponse,
+  LogGroup,
 } from "../api";
 
 export const mockPackageListResponse: PackageListResponse = {
@@ -243,4 +245,94 @@ export const mockRebootStatusCriticalPackages: RebootStatus = {
   installed_kernel: "6.18.5.arch1-1",
   kernel_package: "linux",
   updated_packages: ["systemd", "linux-firmware"],
+};
+
+export const mockLogGroups: LogGroup[] = [
+  {
+    id: "group-0",
+    start_time: "2026-01-22T10:30:00+0000",
+    end_time: "2026-01-22T10:30:45+0000",
+    entries: [
+      {
+        timestamp: "2026-01-22T10:30:45+0000",
+        action: "upgraded",
+        package: "linux",
+        old_version: "6.18.4-arch1-1",
+        new_version: "6.18.5-arch1-1",
+      },
+      {
+        timestamp: "2026-01-22T10:30:30+0000",
+        action: "upgraded",
+        package: "linux-firmware",
+        old_version: "20250115.9fc05f5b-1",
+        new_version: "20260120.abc123-1",
+      },
+      {
+        timestamp: "2026-01-22T10:30:00+0000",
+        action: "upgraded",
+        package: "systemd",
+        old_version: "256.5-1",
+        new_version: "256.6-1",
+      },
+    ],
+    upgraded_count: 3,
+    installed_count: 0,
+    removed_count: 0,
+    downgraded_count: 0,
+    reinstalled_count: 0,
+  },
+  {
+    id: "group-1",
+    start_time: "2026-01-21T14:15:00+0000",
+    end_time: "2026-01-21T14:15:30+0000",
+    entries: [
+      {
+        timestamp: "2026-01-21T14:15:30+0000",
+        action: "installed",
+        package: "neovim",
+        old_version: null,
+        new_version: "0.10.0-1",
+      },
+      {
+        timestamp: "2026-01-21T14:15:00+0000",
+        action: "installed",
+        package: "tree-sitter",
+        old_version: null,
+        new_version: "0.22.6-1",
+      },
+    ],
+    upgraded_count: 0,
+    installed_count: 2,
+    removed_count: 0,
+    downgraded_count: 0,
+    reinstalled_count: 0,
+  },
+  {
+    id: "group-2",
+    start_time: "2026-01-20T09:00:00+0000",
+    end_time: "2026-01-20T09:00:00+0000",
+    entries: [
+      {
+        timestamp: "2026-01-20T09:00:00+0000",
+        action: "removed",
+        package: "deprecated-package",
+        old_version: "1.0.0-1",
+        new_version: null,
+      },
+    ],
+    upgraded_count: 0,
+    installed_count: 0,
+    removed_count: 1,
+    downgraded_count: 0,
+    reinstalled_count: 0,
+  },
+];
+
+export const mockGroupedLogResponse: GroupedLogResponse = {
+  groups: mockLogGroups,
+  total_groups: 3,
+  total_upgraded: 3,
+  total_installed: 2,
+  total_removed: 1,
+  total_other: 0,
 };
