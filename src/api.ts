@@ -781,3 +781,18 @@ export async function getScheduledRuns(params: ScheduledRunsParams = {}): Promis
   const { offset = 0, limit = 50 } = params;
   return runBackend<ScheduledRunsResponse>("list-scheduled-runs", [String(offset), String(limit)]);
 }
+
+export type RebootReason = "kernel_update" | "critical_packages" | "none";
+
+export interface RebootStatus {
+  requires_reboot: boolean;
+  reason: RebootReason;
+  running_kernel: string | null;
+  installed_kernel: string | null;
+  kernel_package: string | null;
+  updated_packages: string[];
+}
+
+export async function getRebootStatus(): Promise<RebootStatus> {
+  return runBackend<RebootStatus>("reboot-status");
+}

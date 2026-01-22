@@ -5,6 +5,7 @@ import type {
   SearchResult,
   PreflightResponse,
   SyncPackageDetails,
+  RebootStatus,
 } from "../api";
 
 export const mockPackageListResponse: PackageListResponse = {
@@ -215,4 +216,31 @@ export const mockSyncPackageDetails: SyncPackageDetails = {
   architecture: "x86_64",
   build_date: 1704067200,
   repository: "core",
+};
+
+export const mockRebootStatusNoReboot: RebootStatus = {
+  requires_reboot: false,
+  reason: "none",
+  running_kernel: "6.18.5-arch1-1",
+  installed_kernel: "6.18.5.arch1-1",
+  kernel_package: "linux",
+  updated_packages: [],
+};
+
+export const mockRebootStatusKernelUpdate: RebootStatus = {
+  requires_reboot: true,
+  reason: "kernel_update",
+  running_kernel: "6.18.4-arch1-1",
+  installed_kernel: "6.18.5.arch1-1",
+  kernel_package: "linux",
+  updated_packages: [],
+};
+
+export const mockRebootStatusCriticalPackages: RebootStatus = {
+  requires_reboot: true,
+  reason: "critical_packages",
+  running_kernel: "6.18.5-arch1-1",
+  installed_kernel: "6.18.5.arch1-1",
+  kernel_package: "linux",
+  updated_packages: ["systemd", "linux-firmware"],
 };

@@ -51,6 +51,7 @@ import {
   SyncPackageDetails,
   PreflightResponse,
   StreamEvent,
+  RebootStatus,
   checkUpdates,
   runUpgrade,
   syncDatabase,
@@ -59,6 +60,7 @@ import {
   formatSize,
   formatNumber,
   listIgnoredPackages,
+  getRebootStatus,
 } from "../api";
 
 import { PackageDetailsModal } from "./PackageDetailsModal";
@@ -115,6 +117,7 @@ export const UpdatesView: React.FC = () => {
   const [acknowledgedRemovals, setAcknowledgedRemovals] = useState(false);
   const [acknowledgedConflicts, setAcknowledgedConflicts] = useState(false);
   const [acknowledgedKeyImports, setAcknowledgedKeyImports] = useState(false);
+  const [rebootStatus, setRebootStatus] = useState<RebootStatus | null>(null);
 
   const { activeSortIndex, activeSortDirection, getSortParams } = useSortableTable({
     sortableColumns: [1, 2, 4, 5, 6], // name, repo, download, installed, net (offset by 1 for checkbox column)
@@ -248,6 +251,19 @@ export const UpdatesView: React.FC = () => {
   useEffect(() => {
     loadConfigIgnored();
   }, [loadConfigIgnored]);
+
+  const loadRebootStatus = useCallback(async () => {
+    try {
+      const status = await getRebootStatus();
+      setRebootStatus(status);
+    } catch {
+      setRebootStatus(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadRebootStatus();
+  }, [loadRebootStatus]);
 
   // Initialize selected packages when updates load, excluding ignored packages
   useEffect(() => {
@@ -383,6 +399,7 @@ export const UpdatesView: React.FC = () => {
         setState("success");
         setUpdates([]);
         cancelRef.current = null;
+        loadRebootStatus();
       },
       onError: (err) => {
         setState("error");
@@ -573,6 +590,25 @@ export const UpdatesView: React.FC = () => {
     return (
       <Card>
         <CardBody>
+          {rebootStatus?.requires_reboot && (
+            <Alert
+              variant="warning"
+              title="System reboot recommended"
+              className="pf-v6-u-mb-md"
+            >
+              {rebootStatus.reason === "kernel_update" ? (
+                <>
+                  Running kernel ({rebootStatus.running_kernel}) differs from installed kernel ({rebootStatus.installed_kernel}).
+                  Reboot to use the new kernel.
+                </>
+              ) : (
+                <>
+                  Critical system packages were updated since boot: {rebootStatus.updated_packages.join(", ")}.
+                  A reboot is recommended to apply these changes.
+                </>
+              )}
+            </Alert>
+          )}
           <EmptyState  headingLevel="h2" icon={CheckCircleIcon}  titleText="System Updated">
             <EmptyStateBody>
               All packages have been updated successfully.
@@ -601,6 +637,25 @@ export const UpdatesView: React.FC = () => {
     return (
       <Card>
         <CardBody>
+          {rebootStatus?.requires_reboot && (
+            <Alert
+              variant="warning"
+              title="System reboot recommended"
+              className="pf-v6-u-mb-md"
+            >
+              {rebootStatus.reason === "kernel_update" ? (
+                <>
+                  Running kernel ({rebootStatus.running_kernel}) differs from installed kernel ({rebootStatus.installed_kernel}).
+                  Reboot to use the new kernel.
+                </>
+              ) : (
+                <>
+                  Critical system packages were updated since boot: {rebootStatus.updated_packages.join(", ")}.
+                  A reboot is recommended to apply these changes.
+                </>
+              )}
+            </Alert>
+          )}
           {warnings.length > 0 && (
             <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
               <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">
@@ -632,6 +687,25 @@ export const UpdatesView: React.FC = () => {
   return (
     <Card>
       <CardBody>
+        {rebootStatus?.requires_reboot && (
+          <Alert
+            variant="warning"
+            title="System reboot recommended"
+            className="pf-v6-u-mb-md"
+          >
+            {rebootStatus.reason === "kernel_update" ? (
+              <>
+                Running kernel ({rebootStatus.running_kernel}) differs from installed kernel ({rebootStatus.installed_kernel}).
+                Reboot to use the new kernel.
+              </>
+            ) : (
+              <>
+                Critical system packages were updated since boot: {rebootStatus.updated_packages.join(", ")}.
+                A reboot is recommended to apply these changes.
+              </>
+            )}
+          </Alert>
+        )}
         {warnings.length > 0 && (
           <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
             <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">

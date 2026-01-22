@@ -5,6 +5,7 @@ pub mod keyring;
 pub mod log;
 pub mod mutation;
 pub mod query;
+pub mod reboot;
 pub mod scheduled;
 
 pub use cache::{clean_cache, get_cache_info};
@@ -16,4 +17,5 @@ pub use mutation::{preflight_upgrade, remove_orphans, run_upgrade, sync_database
 pub use query::{
     check_updates, list_installed, list_orphans, local_package_info, search, sync_package_info,
 };
+pub use reboot::get_reboot_status;
 pub use scheduled::{get_schedule_config, get_scheduled_runs, scheduled_run, set_schedule_config};
