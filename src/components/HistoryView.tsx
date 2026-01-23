@@ -238,7 +238,7 @@ export const HistoryView: React.FC = () => {
     return (
       <Card>
         <CardBody>
-          <Alert variant="danger" title="Error loading history">
+          <Alert variant="danger" title="Error loading history" isInline>
             {sanitizeErrorMessage(error)}
           </Alert>
           <div className="pf-v6-u-mt-md">

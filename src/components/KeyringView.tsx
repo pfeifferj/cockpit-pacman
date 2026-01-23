@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { MAX_LOG_SIZE_BYTES, LOG_CONTAINER_HEIGHT, PER_PAGE_OPTIONS } from "../constants";
+import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
+import { usePagination } from "../hooks/usePagination";
+import { useSortableTable } from "../hooks/useSortableTable";
 import {
   Card,
   CardBody,
@@ -30,7 +33,7 @@ import {
   Tooltip,
 } from "@patternfly/react-core";
 import { SyncAltIcon, KeyIcon } from "@patternfly/react-icons";
-import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
+import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
   KeyringKey,
   KeyringStatusResponse,
@@ -50,13 +53,15 @@ export const KeyringView: React.FC = () => {
   const [searchFilter, setSearchFilter] = useState("");
   const [trustFilter, setTrustFilter] = useState("all");
   const [trustSelectOpen, setTrustSelectOpen] = useState(false);
-  const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
-  const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(50);
   const cancelRef = useRef<(() => void) | null>(null);
-  const logContainerRef = useRef<HTMLDivElement | null>(null);
+  const logContainerRef = useAutoScrollLog(log);
+
+  const { page, perPage, onSetPage, onPerPageSelect } = usePagination();
+  const { activeSortIndex, activeSortDirection, getSortParams } = useSortableTable({
+    columns: { fingerprint: 0, uid: 1, trust: 2 },
+    defaultDirection: "asc",
+  });
 
   const loadKeyringStatus = useCallback(async () => {
     setState("loading");
@@ -83,11 +88,6 @@ export const KeyringView: React.FC = () => {
     };
   }, []);
 
-  useEffect(() => {
-    if (logContainerRef.current) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-    }
-  }, [log]);
 
   const handleRefreshKeys = () => {
     setState("refreshing");
@@ -164,23 +164,6 @@ export const KeyringView: React.FC = () => {
     return result;
   }, [keyringData, searchFilter, trustFilter]);
 
-  const sortableColumns = [0, 1, 2];
-
-  const getSortParams = (columnIndex: number): ThProps["sort"] | undefined => {
-    if (!sortableColumns.includes(columnIndex)) return undefined;
-    return {
-      sortBy: {
-        index: activeSortIndex ?? undefined,
-        direction: activeSortDirection,
-        defaultDirection: "asc",
-      },
-      onSort: (_event, index, direction) => {
-        setActiveSortIndex(index);
-        setActiveSortDirection(direction);
-      },
-      columnIndex,
-    };
-  };
 
   const sortedKeys = useMemo(() => {
     return [...filteredKeys].sort((a, b) => {
@@ -208,14 +191,6 @@ export const KeyringView: React.FC = () => {
     return sortedKeys.slice(start, start + perPage);
   }, [sortedKeys, page, perPage]);
 
-  const handleSetPage = (_event: React.MouseEvent | React.KeyboardEvent | MouseEvent, newPage: number) => {
-    setPage(newPage);
-  };
-
-  const handlePerPageSelect = (_event: React.MouseEvent | React.KeyboardEvent | MouseEvent, newPerPage: number) => {
-    setPerPage(newPerPage);
-    setPage(1);
-  };
 
   const getTrustDescription = (trust: string): string => {
     switch (trust.toLowerCase()) {
@@ -385,6 +360,7 @@ export const KeyringView: React.FC = () => {
                 value={searchFilter}
                 onChange={(_event: React.SyntheticEvent, value: string) => setSearchFilter(value)}
                 onClear={() => setSearchFilter("")}
+                aria-label="Filter keys"
               />
             </ToolbarItem>
             {trustLevels.length > 1 && (
@@ -458,8 +434,8 @@ export const KeyringView: React.FC = () => {
                   itemCount={sortedKeys.length}
                   page={page}
                   perPage={perPage}
-                  onSetPage={handleSetPage}
-                  onPerPageSelect={handlePerPageSelect}
+                  onSetPage={onSetPage}
+                  onPerPageSelect={onPerPageSelect}
                   perPageOptions={PER_PAGE_OPTIONS}
                   isCompact
                 />

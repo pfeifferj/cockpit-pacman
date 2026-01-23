@@ -4,7 +4,6 @@ import { useSortableTable } from "../hooks/useSortableTable";
 import {
   Card,
   CardBody,
-  Spinner,
   Alert,
   SearchInput,
   Toolbar,
@@ -24,12 +23,14 @@ import {
   ToggleGroupItem,
   Badge,
   Button,
+  Spinner,
 } from "@patternfly/react-core";
 import { SearchIcon } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import { SearchResult, SyncPackageDetails, searchPackages, getSyncPackageInfo, InstalledFilterType } from "../api";
 import { sanitizeSearchInput } from "../utils";
 import { PackageDetailsModal } from "./PackageDetailsModal";
+import { TableLoadingOverlay } from "./TableLoadingOverlay";
 import { PER_PAGE_OPTIONS, SEARCH_DEBOUNCE_MS } from "../constants";
 
 const MIN_SEARCH_LENGTH = 1;
@@ -390,20 +391,20 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
           );
         })()}
 
-        {loading ? (
-          <div className="pf-v6-u-p-xl pf-v6-u-text-align-center">
-            <Spinner /> Searching repositories...
-          </div>
-        ) : !hasSearched ? (
-          <EmptyState titleText={<Title headingLevel="h4" size="lg">
+        {!hasSearched ? (
+          <EmptyState titleText={<Title headingLevel="h3" size="lg">
               Search for packages
             </Title>} icon={SearchIcon}>
             <EmptyStateBody>
               Enter a search term to find packages available in the Arch Linux repositories.
             </EmptyStateBody>
           </EmptyState>
+        ) : loading && filteredResults.length === 0 ? (
+          <div className="pf-v6-u-p-xl pf-v6-u-text-align-center">
+            <Spinner /> Searching repositories...
+          </div>
         ) : filteredResults.length === 0 ? (
-          <EmptyState titleText={<Title headingLevel="h4" size="lg">
+          <EmptyState titleText={<Title headingLevel="h3" size="lg">
               No packages found
             </Title>} icon={SearchIcon}>
             <EmptyStateBody>
@@ -433,46 +434,48 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
                 </ToolbarItem>
               </ToolbarContent>
             </Toolbar>
-            <Table aria-label="Search results" variant="compact">
-              <Thead>
-                <Tr>
-                  <Th sort={getSortParams(0)}>Name</Th>
-                  <Th>Version</Th>
-                  <Th>Description</Th>
-                  <Th sort={getSortParams(3)}>Repository</Th>
-                  <Th sort={getSortParams(4)}>Status</Th>
-                </Tr>
-              </Thead>
-              <Tbody>
-                {filteredResults.map((pkg: SearchResult) => (
-                  <Tr
-                    key={`${pkg.repository}/${pkg.name}`}
-                    isClickable
-                    onRowClick={() => handleRowClick(pkg.name, pkg.repository)}
-                  >
-                    <Td dataLabel="Name">
-                      <Button variant="link" isInline className="pf-v6-u-p-0">
-                        {pkg.name}
-                      </Button>
-                    </Td>
-                    <Td dataLabel="Version">{pkg.version}</Td>
-                    <Td dataLabel="Description">{pkg.description || "-"}</Td>
-                    <Td dataLabel="Repository">
-                      <Label color="blue">{pkg.repository}</Label>
-                    </Td>
-                    <Td dataLabel="Status">
-                      {pkg.installed ? (
-                        <Label color="green">
-                          Installed{pkg.installed_version !== pkg.version ? ` (${pkg.installed_version})` : ""}
-                        </Label>
-                      ) : (
-                        <Label color="grey">Not installed</Label>
-                      )}
-                    </Td>
+            <TableLoadingOverlay loading={loading}>
+              <Table aria-label="Search results" variant="compact">
+                <Thead>
+                  <Tr>
+                    <Th sort={getSortParams(0)}>Name</Th>
+                    <Th>Version</Th>
+                    <Th>Description</Th>
+                    <Th sort={getSortParams(3)}>Repository</Th>
+                    <Th sort={getSortParams(4)}>Status</Th>
                   </Tr>
-                ))}
-              </Tbody>
-            </Table>
+                </Thead>
+                <Tbody>
+                  {filteredResults.map((pkg: SearchResult) => (
+                    <Tr
+                      key={`${pkg.repository}/${pkg.name}`}
+                      isClickable
+                      onRowClick={() => handleRowClick(pkg.name, pkg.repository)}
+                    >
+                      <Td dataLabel="Name">
+                        <Button variant="link" isInline className="pf-v6-u-p-0">
+                          {pkg.name}
+                        </Button>
+                      </Td>
+                      <Td dataLabel="Version">{pkg.version}</Td>
+                      <Td dataLabel="Description">{pkg.description || "-"}</Td>
+                      <Td dataLabel="Repository">
+                        <Label color="blue">{pkg.repository}</Label>
+                      </Td>
+                      <Td dataLabel="Status">
+                        {pkg.installed ? (
+                          <Label color="green">
+                            Installed{pkg.installed_version !== pkg.version ? ` (${pkg.installed_version})` : ""}
+                          </Label>
+                        ) : (
+                          <Label color="grey">Not installed</Label>
+                        )}
+                      </Td>
+                    </Tr>
+                  ))}
+                </Tbody>
+              </Table>
+            </TableLoadingOverlay>
             <Toolbar>
               <ToolbarContent>
                 <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>

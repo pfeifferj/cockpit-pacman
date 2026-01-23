@@ -17,9 +17,10 @@ export interface StatBoxProps {
   color?: StatColor;
   isLoading?: boolean;
   onClick?: () => void;
+  ariaLabel?: string;
 }
 
-export const StatBox: React.FC<StatBoxProps> = ({ value, label, color = "default", isLoading, onClick }) => (
+export const StatBox: React.FC<StatBoxProps> = ({ value, label, color = "default", isLoading, onClick, ariaLabel }) => (
   <div
     style={{
       textAlign: "center",
@@ -33,6 +34,7 @@ export const StatBox: React.FC<StatBoxProps> = ({ value, label, color = "default
     onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") onClick(); } : undefined}
     role={onClick ? "button" : undefined}
     tabIndex={onClick ? 0 : undefined}
+    aria-label={onClick ? ariaLabel : undefined}
   >
     <div style={{ fontSize: "1.5rem", fontWeight: 600, color: COLOR_MAP[color], minHeight: "2.25rem", display: "flex", alignItems: "center", justifyContent: "center" }}>
       {isLoading ? <Spinner size="md" /> : value}

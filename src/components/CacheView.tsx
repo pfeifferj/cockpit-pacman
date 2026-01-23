@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES } from "../constants";
+import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
+import { useSortableTable } from "../hooks/useSortableTable";
 import {
   Card,
   CardBody,
@@ -30,7 +32,7 @@ import {
 import { TrashIcon, CheckCircleIcon, FolderIcon } from "@patternfly/react-icons";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { StatBox } from "./StatBox";
-import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
+import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
   CacheInfo,
   CachePackage,
@@ -55,14 +57,17 @@ export const CacheView: React.FC = () => {
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [keepVersions, setKeepVersions] = useState(3);
-  const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
-  const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
   const [selectedPackage, setSelectedPackage] = useState<PackageDetails | SyncPackageDetails | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const cancelRef = useRef<(() => void) | null>(null);
-  const logContainerRef = useRef<HTMLDivElement | null>(null);
+  const logContainerRef = useAutoScrollLog(log);
   const isMountedRef = useRef(true);
+
+  const { activeSortIndex, activeSortDirection, getSortParams } = useSortableTable({
+    columns: { name: 0, version: 1, size: 2 },
+    defaultDirection: "asc",
+  });
 
   const loadCacheInfo = useCallback(async () => {
     setState("loading");
@@ -115,11 +120,6 @@ export const CacheView: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    if (logContainerRef.current) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-    }
-  }, [log]);
 
   const handleCleanCache = () => {
     setConfirmModalOpen(true);
@@ -161,23 +161,6 @@ export const CacheView: React.FC = () => {
     }
   };
 
-  const sortableColumns = [0, 1, 2];
-
-  const getSortParams = (columnIndex: number): ThProps["sort"] | undefined => {
-    if (!sortableColumns.includes(columnIndex)) return undefined;
-    return {
-      sortBy: {
-        index: activeSortIndex ?? undefined,
-        direction: activeSortDirection,
-        defaultDirection: "asc",
-      },
-      onSort: (_event, index, direction) => {
-        setActiveSortIndex(index);
-        setActiveSortDirection(direction);
-      },
-      columnIndex,
-    };
-  };
 
   const groupedPackages = React.useMemo(() => {
     if (!cacheData?.packages) return new Map<string, CachePackage[]>();
@@ -233,7 +216,7 @@ export const CacheView: React.FC = () => {
     return (
       <Card>
         <CardBody>
-          <Alert variant="danger" title="Error loading cache information">
+          <Alert variant="danger" title="Error loading cache information" isInline>
             {sanitizeErrorMessage(error)}
           </Alert>
           <div className="pf-v6-u-mt-md">

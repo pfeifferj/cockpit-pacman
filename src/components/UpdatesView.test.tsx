@@ -933,7 +933,7 @@ describe("UpdatesView", () => {
         expect(screen.getByText("aaa-package")).toBeInTheDocument();
       });
 
-      const repoToggle = screen.getByRole("button", { name: /All repositories/i });
+      const repoToggle = screen.getByRole("button", { name: /Filter by repository/i });
       await act(async () => {
         fireEvent.click(repoToggle);
       });

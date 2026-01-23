@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES } from "../constants";
 import { useSortableTable } from "../hooks/useSortableTable";
+import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
 import {
 	Card,
 	CardBody,
@@ -44,6 +45,8 @@ import {
 import {
   CheckCircleIcon,
   SyncAltIcon,
+  ArrowUpIcon,
+  ArrowDownIcon,
 } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
@@ -100,7 +103,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const cancelRef = useRef<(() => void) | null>(null);
-  const logContainerRef = useRef<HTMLDivElement | null>(null);
+  const logContainerRef = useAutoScrollLog(log);
   const [selectedPackage, setSelectedPackage] = useState<SyncPackageDetails | null>(null);
   const [packageLoading, setPackageLoading] = useState(false);
   const [searchFilter, setSearchFilter] = useState("");
@@ -337,12 +340,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
     };
   }, []);
 
-  // Auto-scroll log to bottom when new content is added
-  useEffect(() => {
-    if (logContainerRef.current) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-    }
-  }, [log]);
 
   const handleRefresh = async () => {
     setState("checking");
@@ -715,7 +712,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
           {warnings.length > 0 && (
             <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
               <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">
-                {warnings.map((w, i) => <li key={`${w}-${i}`}>{w}</li>)}
+                {warnings.map((w, i) => <li key={i}>{w}</li>)}
               </ul>
             </Alert>
           )}
@@ -764,7 +761,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
       {warnings.length > 0 && (
         <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
           <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">
-            {warnings.map((w, i) => <li key={`${w}-${i}`}>{w}</li>)}
+            {warnings.map((w, i) => <li key={i}>{w}</li>)}
           </ul>
         </Alert>
       )}
@@ -893,6 +890,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
                 value={searchFilter}
                 onChange={(_event: React.SyntheticEvent, value: string) => setSearchFilter(value)}
                 onClear={() => setSearchFilter("")}
+                aria-label="Filter updates"
               />
             </ToolbarItem>
             {repositories.length > 1 && (
@@ -910,6 +908,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
                       ref={toggleRef}
                       onClick={() => setRepoSelectOpen(!repoSelectOpen)}
                       isExpanded={repoSelectOpen}
+                      aria-label="Filter by repository"
                     >
                       {repoFilter === "all" ? "All repositories" : repoFilter}
                     </MenuToggle>
@@ -985,6 +984,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
                   <Td dataLabel="Download">{formatSize(update.download_size)}</Td>
                   <Td dataLabel="Installed Size">{formatSize(update.new_size)}</Td>
                   <Td dataLabel="Net" style={{ color: netSize > 0 ? "var(--pf-t--global--color--status--danger--default)" : netSize < 0 ? "var(--pf-t--global--color--status--success--default)" : undefined }}>
+                    {netSize > 0 && <ArrowUpIcon style={{ marginRight: "0.25rem" }} />}
+                    {netSize < 0 && <ArrowDownIcon style={{ marginRight: "0.25rem" }} />}
                     {netSize >= 0 ? "+" : ""}{formatSize(netSize)}
                   </Td>
                 </Tr>

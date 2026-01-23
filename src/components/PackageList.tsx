@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useDebouncedValue } from "../hooks/useDebounce";
 import { usePagination } from "../hooks/usePagination";
 import { useSortableTable } from "../hooks/useSortableTable";
+import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
 import {
   Card,
   CardBody,
@@ -93,7 +94,7 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphP
   const [orphanLog, setOrphanLog] = useState("");
   const [orphanLogExpanded, setOrphanLogExpanded] = useState(false);
   const orphanCancelRef = useRef<(() => void) | null>(null);
-  const logContainerRef = useRef<HTMLDivElement | null>(null);
+  const logContainerRef = useAutoScrollLog(orphanLog);
 
   const { activeSortIndex, activeSortDirection, getSortParams } = useSortableTable({
     sortableColumns: filter === "orphan" ? [0, 2, 3] : [0, 3, 4], // orphan: name, size, date; normal: name, size, reason
@@ -210,11 +211,6 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphP
     };
   }, []);
 
-  useEffect(() => {
-    if (logContainerRef.current) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-    }
-  }, [orphanLog]);
 
   const handleSearch = () => {
     manualSearchRef.current = true;
