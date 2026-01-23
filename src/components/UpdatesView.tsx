@@ -52,6 +52,7 @@ import {
   PreflightResponse,
   StreamEvent,
   RebootStatus,
+  KeyringStatusResponse,
   checkUpdates,
   runUpgrade,
   syncDatabase,
@@ -61,9 +62,13 @@ import {
   formatNumber,
   listIgnoredPackages,
   getRebootStatus,
+  listOrphans,
+  getCacheInfo,
+  getKeyringStatus,
 } from "../api";
 
 import { PackageDetailsModal } from "./PackageDetailsModal";
+import { StatBox } from "./StatBox";
 import { IgnoredPackagesModal } from "./IgnoredPackagesModal";
 import { ScheduleModal } from "./ScheduleModal";
 
@@ -115,16 +120,20 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
-  const [configIgnored, setConfigIgnored] = useState<string[]>([]);
+  const [configIgnored, setConfigIgnored] = useState<Set<string>>(new Set());
   const [ignoredModalOpen, setIgnoredModalOpen] = useState(false);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [acknowledgedRemovals, setAcknowledgedRemovals] = useState(false);
   const [acknowledgedConflicts, setAcknowledgedConflicts] = useState(false);
   const [acknowledgedKeyImports, setAcknowledgedKeyImports] = useState(false);
   const [rebootStatus, setRebootStatus] = useState<RebootStatus | null>(null);
+  const [orphanCount, setOrphanCount] = useState<number | null>(null);
+  const [cacheSize, setCacheSize] = useState<number | null>(null);
+  const [keyringStatus, setKeyringStatus] = useState<KeyringStatusResponse | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(true);
 
-  const { activeSortIndex, activeSortDirection, getSortParams } = useSortableTable({
-    sortableColumns: [1, 2, 4, 5, 6], // name, repo, download, installed, net (offset by 1 for checkbox column)
+  const { activeSortKey, activeSortDirection, getSortParams } = useSortableTable({
+    columns: { name: 1, repo: 2, download: 4, installed: 5, net: 6 },
     defaultDirection: "asc",
   });
 
@@ -151,24 +160,24 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
   }, [updates, searchFilter, repoFilter]);
 
   const sortedUpdates = useMemo(() => {
-    if (activeSortIndex === null) return filteredUpdates;
+    if (activeSortKey === null) return filteredUpdates;
 
     return [...filteredUpdates].sort((a, b) => {
       let comparison = 0;
-      switch (activeSortIndex) {
-        case 1: // name
+      switch (activeSortKey) {
+        case "name":
           comparison = a.name.localeCompare(b.name);
           break;
-        case 2: // repository
+        case "repo":
           comparison = a.repository.localeCompare(b.repository);
           break;
-        case 4: // download_size
+        case "download":
           comparison = a.download_size - b.download_size;
           break;
-        case 5: // new_size (installed size after upgrade)
+        case "installed":
           comparison = a.new_size - b.new_size;
           break;
-        case 6: // net_size (new - current)
+        case "net":
           comparison = (a.new_size - a.current_size) - (b.new_size - b.current_size);
           break;
         default:
@@ -176,7 +185,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
       }
       return activeSortDirection === "asc" ? comparison : -comparison;
     });
-  }, [filteredUpdates, activeSortIndex, activeSortDirection]);
+  }, [filteredUpdates, activeSortKey, activeSortDirection]);
 
   // Calculate ignored packages (unselected ones)
   const ignoredPackages = useMemo(() => {
@@ -246,9 +255,9 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
   const loadConfigIgnored = useCallback(async () => {
     try {
       const response = await listIgnoredPackages();
-      setConfigIgnored(response.packages);
-    } catch {
-      // Ignore errors loading ignored packages
+      setConfigIgnored(new Set(response.packages));
+    } catch (err) {
+      console.error("Failed to load ignored packages:", err);
     }
   }, []);
 
@@ -269,12 +278,55 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
     loadRebootStatus();
   }, [loadRebootStatus]);
 
-  // Initialize selected packages when updates load, excluding ignored packages
+  const loadSummary = useCallback(async () => {
+    setSummaryLoading(true);
+    const [orphans, cache, keyring] = await Promise.all([
+      listOrphans().catch(() => null),
+      getCacheInfo().catch(() => null),
+      getKeyringStatus().catch(() => null),
+    ]);
+    setOrphanCount(orphans?.orphans.length ?? null);
+    setCacheSize(cache?.total_size ?? null);
+    setKeyringStatus(keyring);
+    setSummaryLoading(false);
+  }, []);
+
   useEffect(() => {
+    loadSummary();
+  }, [loadSummary]);
+
+  // Track whether we've done initial selection
+  const hasInitializedSelection = useRef(false);
+
+  // Initialize selected packages when updates load, excluding ignored packages
+  // On subsequent loads, preserve user selections
+  useEffect(() => {
+    if (updates.length === 0) {
+      hasInitializedSelection.current = false;
+      return;
+    }
+
+    if (hasInitializedSelection.current) {
+      // Preserve selections, only remove packages that no longer exist
+      setSelectedPackages((prev) => {
+        const existingNames = new Set(updates.map((u) => u.name));
+        const next = new Set<string>();
+        for (const pkg of prev) {
+          if (existingNames.has(pkg) && !configIgnored.has(pkg)) {
+            next.add(pkg);
+          }
+        }
+        return next;
+      });
+      return;
+    }
+
+    // First load: select all non-ignored
     const nonIgnored = updates
-      .filter((u) => !configIgnored.includes(u.name))
+      .filter((u) => !configIgnored.has(u.name))
       .map((u) => u.name);
     setSelectedPackages(new Set(nonIgnored));
+    hasInitializedSelection.current = true;
   }, [updates, configIgnored]);
 
   useEffect(() => {
@@ -689,103 +741,151 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
   }
 
   return (
-    <Card>
-      <CardBody>
-        {rebootStatus?.requires_reboot && (
-          <Alert
-            variant="warning"
-            title="System reboot recommended"
-            className="pf-v6-u-mb-md"
-          >
-            {rebootStatus.reason === "kernel_update" ? (
-              <>
-                Running kernel ({rebootStatus.running_kernel}) differs from installed kernel ({rebootStatus.installed_kernel}).
-                Reboot to use the new kernel.
-              </>
-            ) : (
-              <>
-                Critical system packages were updated since boot: {rebootStatus.updated_packages.join(", ")}.
-                A reboot is recommended to apply these changes.
-              </>
-            )}
-          </Alert>
-        )}
-        {warnings.length > 0 && (
-          <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
-            <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">
-              {warnings.map((w, i) => <li key={`${w}-${i}`}>{w}</li>)}
-            </ul>
-          </Alert>
-        )}
-        {ignoredPackages.length > 0 && (
-          <Alert variant="warning" title="Partial upgrade" isInline className="pf-v6-u-mb-md">
-            Skipping {ignoredPackages.length} package{ignoredPackages.length !== 1 ? "s" : ""}. Partial upgrades are unsupported and may cause dependency issues.
-          </Alert>
-        )}
-        <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
-          <FlexItem>
-            <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">
-              {formatNumber(selectedPackages.size)} of {formatNumber(updates.length)} update{updates.length !== 1 ? "s" : ""} selected
-              {filteredUpdates.length !== updates.length && ` (${formatNumber(filteredUpdates.length)} shown)`}
-            </CardTitle>
-            <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
-              <FlexItem>
-                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--info--default)" }}>{formatSize(selectedDownloadSize)}</div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Download Size</div>
-                </div>
-              </FlexItem>
-              <FlexItem>
-                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600 }}>{formatSize(selectedNewSize)}</div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Installed Size</div>
-                </div>
-              </FlexItem>
-              <FlexItem>
-                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: selectedNetSize > 0 ? "var(--pf-t--global--color--status--danger--default)" : selectedNetSize < 0 ? "var(--pf-t--global--color--status--success--default)" : undefined }}>
-                    {selectedNetSize >= 0 ? "+" : ""}{formatSize(selectedNetSize)}
-                  </div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Net Size</div>
-                </div>
-              </FlexItem>
-            </Flex>
-          </FlexItem>
-          <FlexItem>
-            <Button
-              variant="secondary"
-              onClick={() => setScheduleModalOpen(true)}
-              className="pf-v6-u-mr-sm"
-            >
-              Manage Schedule
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => setIgnoredModalOpen(true)}
-              className="pf-v6-u-mr-sm"
-            >
-              Manage Ignored{configIgnored.length > 0 ? ` (${configIgnored.length})` : ""}
-            </Button>
-            <Button
-              variant="secondary"
-              icon={<SyncAltIcon />}
-              onClick={handleRefresh}
-              className="pf-v6-u-mr-sm"
-            >
-              Refresh
-            </Button>
-            <Button
-              variant="primary"
-              onClick={handleApplyUpdates}
-              isLoading={preflightLoading}
-              isDisabled={preflightLoading || selectedPackages.size === 0}
-            >
-              {preflightLoading ? "Checking..." : `Apply ${formatNumber(selectedPackages.size)} Update${selectedPackages.size !== 1 ? "s" : ""}`}
-            </Button>
-          </FlexItem>
-        </Flex>
+    <>
+      {rebootStatus?.requires_reboot && (
+        <Alert
+          variant="warning"
+          title="System reboot recommended"
+          className="pf-v6-u-mb-md"
+        >
+          {rebootStatus.reason === "kernel_update" ? (
+            <>
+              Running kernel ({rebootStatus.running_kernel}) differs from installed kernel ({rebootStatus.installed_kernel}).
+              Reboot to use the new kernel.
+            </>
+          ) : (
+            <>
+              Critical system packages were updated since boot: {rebootStatus.updated_packages.join(", ")}.
+              A reboot is recommended to apply these changes.
+            </>
+          )}
+        </Alert>
+      )}
+      {warnings.length > 0 && (
+        <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
+          <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">
+            {warnings.map((w, i) => <li key={`${w}-${i}`}>{w}</li>)}
+          </ul>
+        </Alert>
+      )}
+      {keyringStatus && !keyringStatus.master_key_initialized && (
+        <Alert variant="warning" title="Keyring not initialized" isInline className="pf-v6-u-mb-md">
+          The pacman keyring is not initialized. Package signature verification may fail.
+        </Alert>
+      )}
+      {keyringStatus?.warnings.map((w, i) => (
+        <Alert key={i} variant="warning" title={w} isInline className="pf-v6-u-mb-md" />
+      ))}
+      {ignoredPackages.length > 0 && (
+        <Alert variant="warning" title="Partial upgrade" isInline className="pf-v6-u-mb-md">
+          Skipping {ignoredPackages.length} package{ignoredPackages.length !== 1 ? "s" : ""}. Partial upgrades are unsupported and may cause dependency issues.
+        </Alert>
+      )}
 
-        <Toolbar className="pf-v6-u-px-0">
+      <Card className="pf-v6-u-mb-md">
+        <CardBody>
+          <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">System Overview</CardTitle>
+          <Flex spaceItems={{ default: "spaceItemsLg" }}>
+            <FlexItem>
+              <StatBox
+                label="Updates"
+                value={formatNumber(updates.length)}
+                color={updates.length > 0 ? "danger" : "success"}
+              />
+            </FlexItem>
+            <FlexItem>
+              <StatBox
+                label="Orphans"
+                value={orphanCount !== null ? formatNumber(orphanCount) : "-"}
+                color={orphanCount && orphanCount > 0 ? "warning" : "default"}
+                isLoading={summaryLoading}
+              />
+            </FlexItem>
+            <FlexItem>
+              <StatBox
+                label="Cache"
+                value={cacheSize !== null ? formatSize(cacheSize) : "-"}
+                isLoading={summaryLoading}
+              />
+            </FlexItem>
+            <FlexItem>
+              <StatBox
+                label="Keyring"
+                value={keyringStatus ? `${keyringStatus.total} keys` : "-"}
+                color={keyringStatus?.warnings.length ? "warning" : "default"}
+                isLoading={summaryLoading}
+              />
+            </FlexItem>
+          </Flex>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardBody>
+          <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
+            <FlexItem>
+              <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">
+                {formatNumber(selectedPackages.size)} of {formatNumber(updates.length)} update{updates.length !== 1 ? "s" : ""} selected
+                {filteredUpdates.length !== updates.length && ` (${formatNumber(filteredUpdates.length)} shown)`}
+              </CardTitle>
+              <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
+                <FlexItem>
+                  <StatBox
+                    label="Download Size"
+                    value={formatSize(selectedDownloadSize)}
+                    color="info"
+                  />
+                </FlexItem>
+                <FlexItem>
+                  <StatBox
+                    label="Installed Size"
+                    value={formatSize(selectedNewSize)}
+                  />
+                </FlexItem>
+                <FlexItem>
+                  <StatBox
+                    label="Net Size"
+                    value={`${selectedNetSize >= 0 ? "+" : ""}${formatSize(selectedNetSize)}`}
+                    color={selectedNetSize > 0 ? "danger" : selectedNetSize < 0 ? "success" : "default"}
+                  />
+                </FlexItem>
+              </Flex>
+            </FlexItem>
+            <FlexItem>
+              <Button
+                variant="secondary"
+                onClick={() => setScheduleModalOpen(true)}
+                className="pf-v6-u-mr-sm"
+              >
+                Manage Schedule
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => setIgnoredModalOpen(true)}
+                className="pf-v6-u-mr-sm"
+              >
+                Manage Ignored{configIgnored.size > 0 ? ` (${configIgnored.size})` : ""}
+              </Button>
+              <Button
+                variant="secondary"
+                icon={<SyncAltIcon />}
+                onClick={handleRefresh}
+                className="pf-v6-u-mr-sm"
+              >
+                Refresh
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleApplyUpdates}
+                isLoading={preflightLoading}
+                isDisabled={preflightLoading || selectedPackages.size === 0}
+              >
+                {preflightLoading ? "Checking..." : `Apply ${formatNumber(selectedPackages.size)} Update${selectedPackages.size !== 1 ? "s" : ""}`}
+              </Button>
+            </FlexItem>
+          </Flex>
+
+          <Toolbar className="pf-v6-u-px-0">
           <ToolbarContent>
             <ToolbarItem >
               <SearchInput
@@ -840,19 +940,19 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
                   aria-label="Select all updates"
                 />
               </Th>
-              <Th sort={getSortParams(1)}>Package</Th>
-              <Th sort={getSortParams(2)}>Repository</Th>
+              <Th sort={getSortParams("name")}>Package</Th>
+              <Th sort={getSortParams("repo")}>Repository</Th>
               <Th>Version</Th>
-              <Th sort={getSortParams(4)}>Download</Th>
-              <Th sort={getSortParams(5)}>Installed</Th>
-              <Th sort={getSortParams(6)}>Net</Th>
+              <Th sort={getSortParams("download")}>Download</Th>
+              <Th sort={getSortParams("installed")}>Installed</Th>
+              <Th sort={getSortParams("net")}>Net</Th>
             </Tr>
           </Thead>
           <Tbody>
             {sortedUpdates.map((update) => {
               const netSize = update.new_size - update.current_size;
               const isSelected = selectedPackages.has(update.name);
-              const isConfigIgnored = configIgnored.includes(update.name);
+              const isConfigIgnored = configIgnored.has(update.name);
               return (
                 <Tr
                   key={update.name}
@@ -892,7 +992,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
             })}
           </Tbody>
         </Table>
-      </CardBody>
+        </CardBody>
+      </Card>
 
       <PackageDetailsModal
         packageDetails={selectedPackage}
@@ -1040,6 +1141,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
         isOpen={scheduleModalOpen}
         onClose={() => setScheduleModalOpen(false)}
       />
-    </Card>
+    </>
   );
 };

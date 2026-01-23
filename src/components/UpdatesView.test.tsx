@@ -21,6 +21,9 @@ vi.mock("../api", async () => {
     getSyncPackageInfo: vi.fn(),
     listIgnoredPackages: vi.fn(),
     getRebootStatus: vi.fn(),
+    listOrphans: vi.fn(),
+    getCacheInfo: vi.fn(),
+    getKeyringStatus: vi.fn(),
   };
 });
 
@@ -31,6 +34,9 @@ const mockSyncDatabase = vi.mocked(api.syncDatabase);
 const mockGetSyncPackageInfo = vi.mocked(api.getSyncPackageInfo);
 const mockListIgnoredPackages = vi.mocked(api.listIgnoredPackages);
 const mockGetRebootStatus = vi.mocked(api.getRebootStatus);
+const mockListOrphans = vi.mocked(api.listOrphans);
+const mockGetCacheInfo = vi.mocked(api.getCacheInfo);
+const mockGetKeyringStatus = vi.mocked(api.getKeyringStatus);
 
 describe("UpdatesView", () => {
   beforeEach(() => {
@@ -46,6 +52,19 @@ describe("UpdatesView", () => {
       installed_kernel: null,
       kernel_package: null,
       updated_packages: [],
+    });
+    mockListOrphans.mockResolvedValue({ orphans: [], total_size: 0 });
+    mockGetCacheInfo.mockResolvedValue({
+      total_size: 1024 * 1024 * 1024,
+      package_count: 100,
+      packages: [],
+      path: "/var/cache/pacman/pkg",
+    });
+    mockGetKeyringStatus.mockResolvedValue({
+      keys: [],
+      total: 10,
+      master_key_initialized: true,
+      warnings: [],
     });
     mockRunUpgrade.mockReturnValue({ cancel: vi.fn() });
     mockSyncDatabase.mockImplementation((callbacks) => {
@@ -650,7 +669,9 @@ describe("UpdatesView", () => {
       });
       expect(screen.getByText("glibc")).toBeInTheDocument();
       expect(screen.getByText("systemd")).toBeInTheDocument();
-      expect(screen.getByText(/3 of 3 update/)).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText(/3 of 3 update/)).toBeInTheDocument();
+      });
     });
 
     it("tracks progress through multiple packages", async () => {
@@ -674,7 +695,9 @@ describe("UpdatesView", () => {
         expect(screen.getByText("linux")).toBeInTheDocument();
       });
 
-      const applyButton = screen.getByRole("button", { name: /Apply 3 Updates/i });
+      const applyButton = await waitFor(() => {
+        return screen.getByRole("button", { name: /Apply 3 Updates/i });
+      });
       await act(async () => {
         fireEvent.click(applyButton);
       });

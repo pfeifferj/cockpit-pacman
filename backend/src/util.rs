@@ -136,6 +136,28 @@ pub fn get_cache_dir() -> String {
     "/var/cache/pacman/pkg".to_string()
 }
 
+/// Iterate over package files in the pacman cache directory.
+/// Yields (DirEntry, filename, parsed_name, parsed_version) for each valid package file.
+pub fn iter_cache_packages(
+    cache_path: &std::path::Path,
+) -> impl Iterator<Item = (std::fs::DirEntry, String, String, String)> {
+    std::fs::read_dir(cache_path)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry_result| {
+            let entry = entry_result.ok()?;
+            let path = entry.path();
+            let ext = path.extension()?;
+            if ext != "zst" && ext != "xz" && ext != "gz" {
+                return None;
+            }
+            let filename = path.file_name()?.to_string_lossy().to_string();
+            let (name, version) = parse_package_filename(&filename)?;
+            Some((entry, filename, name, version))
+        })
+}
+
 /// Parse a pacman package filename into (name, version).
 /// Handles .pkg.tar.zst, .pkg.tar.xz, and .pkg.tar.gz extensions.
 /// Pacman filename format: {pkgname}-{pkgver}-{pkgrel}-{arch}.pkg.tar.{ext}
@@ -156,6 +178,47 @@ pub fn parse_package_filename(filename: &str) -> Option<(String, String)> {
     } else {
         None
     }
+}
+
+/// Handle transaction commit errors with proper cancellation/timeout detection.
+/// Returns Ok(true) if commit succeeded, Ok(false) if it was cancelled/timed out, Err on actual failure.
+pub fn handle_commit_error(
+    err_msg: &str,
+    was_cancelled_before: bool,
+    was_timed_out_before: bool,
+    timeout: &TimeoutGuard,
+    interrupted_message: &str,
+) -> Result<bool> {
+    let cancelled_during = !was_cancelled_before && is_cancelled();
+    let timed_out_during = !was_timed_out_before && timeout.is_timed_out();
+    let err_lower = err_msg.to_lowercase();
+    let error_indicates_interrupt = err_lower.contains("interrupt")
+        || err_lower.contains("cancel")
+        || err_lower.contains("signal")
+        || err_lower.contains("timeout");
+
+    if cancelled_during || error_indicates_interrupt {
+        emit_event(&StreamEvent::Complete {
+            success: false,
+            message: Some(interrupted_message.to_string()),
+        });
+        return Ok(false);
+    } else if timed_out_during {
+        emit_event(&StreamEvent::Complete {
+            success: false,
+            message: Some(format!(
+                "Operation timed out after {} seconds",
+                timeout.timeout_secs()
+            )),
+        });
+        return Ok(false);
+    }
+
+    emit_event(&StreamEvent::Complete {
+        success: false,
+        message: Some(format!("Failed to commit transaction: {}", err_msg)),
+    });
+    Err(anyhow::anyhow!("Failed to commit transaction: {}", err_msg))
 }
 
 #[macro_export]

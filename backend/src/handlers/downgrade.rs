@@ -11,7 +11,7 @@ use crate::alpm::get_handle;
 use crate::models::{CachedVersion, DowngradeResponse, StreamEvent};
 use crate::util::{
     DEFAULT_MUTATION_TIMEOUT_SECS, emit_event, emit_json, get_cache_dir, is_cancelled,
-    parse_package_filename, setup_signal_handler,
+    iter_cache_packages, parse_package_filename, setup_signal_handler,
 };
 use crate::validation::{validate_package_name, validate_version};
 
@@ -28,53 +28,30 @@ pub fn list_downgrades(package_name: Option<&str>) -> Result<()> {
         return emit_json(&response);
     }
 
-    let entries = fs::read_dir(cache_path)
-        .with_context(|| format!("Failed to read cache directory: {}", cache_dir))?;
-
     let mut packages: Vec<CachedVersion> = Vec::new();
 
-    for entry_result in entries {
-        let entry = match entry_result {
-            Ok(e) => e,
-            Err(e) => {
-                eprintln!("Warning: Failed to read directory entry: {}", e);
-                continue;
-            }
-        };
-        let path = entry.path();
-        if path
-            .extension()
-            .is_some_and(|ext| ext == "zst" || ext == "xz" || ext == "gz")
+    for (entry, filename, name, version) in iter_cache_packages(cache_path) {
+        if let Some(filter_name) = package_name
+            && name != filter_name
         {
-            let filename = path
-                .file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default();
+            continue;
+        }
 
-            if let Some((name, version)) = parse_package_filename(&filename) {
-                if let Some(filter_name) = package_name
-                    && name != filter_name
-                {
-                    continue;
-                }
+        let installed_version = get_installed_version(&alpm, &name);
+        let is_older = installed_version
+            .as_ref()
+            .map(|iv| is_version_older(&version, iv))
+            .unwrap_or(false);
 
-                let installed_version = get_installed_version(&alpm, &name);
-                let is_older = installed_version
-                    .as_ref()
-                    .map(|iv| is_version_older(&version, iv))
-                    .unwrap_or(false);
-
-                if let Ok(metadata) = entry.metadata() {
-                    packages.push(CachedVersion {
-                        name,
-                        version,
-                        filename,
-                        size: metadata.len() as i64,
-                        installed_version,
-                        is_older,
-                    });
-                }
-            }
+        if let Ok(metadata) = entry.metadata() {
+            packages.push(CachedVersion {
+                name,
+                version,
+                filename,
+                size: metadata.len() as i64,
+                installed_version,
+                is_older,
+            });
         }
     }
 

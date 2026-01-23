@@ -29,6 +29,7 @@ import {
 } from "@patternfly/react-core";
 import { TrashIcon, CheckCircleIcon, FolderIcon } from "@patternfly/react-icons";
 import { PackageDetailsModal } from "./PackageDetailsModal";
+import { StatBox } from "./StatBox";
 import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
 import {
   CacheInfo,
@@ -352,28 +353,29 @@ export const CacheView: React.FC = () => {
             </Flex>
             <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
               <FlexItem>
-                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600 }}>{formatSize(cacheData.total_size)}</div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Total Size</div>
-                </div>
+                <StatBox
+                  label="Total Size"
+                  value={formatSize(cacheData.total_size)}
+                />
               </FlexItem>
               <FlexItem>
-                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600 }}>{formatNumber(cacheData.package_count)}</div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Cached Files</div>
-                </div>
+                <StatBox
+                  label="Cached Files"
+                  value={formatNumber(cacheData.package_count)}
+                />
               </FlexItem>
               <FlexItem>
-                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600 }}>{formatNumber(uniquePackageCount)}</div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Unique Packages</div>
-                </div>
+                <StatBox
+                  label="Unique Packages"
+                  value={formatNumber(uniquePackageCount)}
+                />
               </FlexItem>
               <FlexItem>
-                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: multiVersionPackages > 0 ? "var(--pf-t--global--color--status--info--default)" : undefined }}>{formatNumber(multiVersionPackages)}</div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Multi-Version</div>
-                </div>
+                <StatBox
+                  label="Multi-Version"
+                  value={formatNumber(multiVersionPackages)}
+                  color={multiVersionPackages > 0 ? "info" : "default"}
+                />
               </FlexItem>
             </Flex>
           </FlexItem>

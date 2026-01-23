@@ -102,16 +102,19 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
             </DescriptionListDescription>
           </DescriptionListGroup>
 
-          {sanitizeUrl(packageDetails.url) && (
-            <DescriptionListGroup>
-              <DescriptionListTerm>URL</DescriptionListTerm>
-              <DescriptionListDescription>
-                <a href={sanitizeUrl(packageDetails.url)!} target="_blank" rel="noopener noreferrer">
-                  {packageDetails.url}
-                </a>
-              </DescriptionListDescription>
-            </DescriptionListGroup>
-          )}
+          {(() => {
+            const safeUrl = sanitizeUrl(packageDetails.url);
+            return safeUrl ? (
+              <DescriptionListGroup>
+                <DescriptionListTerm>URL</DescriptionListTerm>
+                <DescriptionListDescription>
+                  <a href={safeUrl} target="_blank" rel="noopener noreferrer">
+                    {safeUrl}
+                  </a>
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+            ) : null;
+          })()}
 
           {packageDetails.repository && ["core", "extra", "multilib"].includes(packageDetails.repository) && (
             <DescriptionListGroup>

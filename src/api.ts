@@ -254,27 +254,24 @@ async function runBackend<T>(command: string, args: string[] = []): Promise<T> {
     { superuser: "try", err: "message" }
   );
 
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-  let settled = false;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
 
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      spawnPromise.close("timeout");
-      reject(new BackendError(
-        `Backend operation timed out after ${BACKEND_TIMEOUT_MS / 1000}s`,
-        "timeout"
-      ));
-    }, BACKEND_TIMEOUT_MS);
+  // Handle abort signal by closing the spawn process
+  controller.signal.addEventListener("abort", () => {
+    spawnPromise.close("timeout");
   });
 
   let output: string;
   try {
-    output = await Promise.race([spawnPromise, timeoutPromise]);
-    settled = true;
+    output = await spawnPromise;
   } catch (ex) {
-    settled = true;
+    if (controller.signal.aborted) {
+      throw new BackendError(
+        `Backend operation timed out after ${BACKEND_TIMEOUT_MS / 1000}s`,
+        "timeout"
+      );
+    }
     if (ex instanceof BackendError) {
       throw ex;
     }
@@ -282,9 +279,7 @@ async function runBackend<T>(command: string, args: string[] = []): Promise<T> {
     const code = parseErrorCode(message);
     throw new BackendError(`Backend command '${command}' failed: ${message}`, code);
   } finally {
-    if (timeoutId !== null) {
-      clearTimeout(timeoutId);
-    }
+    clearTimeout(timeoutId);
   }
 
   if (!output || output.trim() === "") {
@@ -491,6 +486,8 @@ function runStreamingBackend(
           callbacks.onData?.(`${event.event}${event.package ? `: ${event.package}` : ""}\n`);
         } else if (event.type === "complete") {
           markComplete(event.success, event.message);
+        } else {
+          console.warn("Unknown StreamEvent type:", (event as { type: string }).type);
         }
       } catch {
         // Not valid JSON, treat as raw output

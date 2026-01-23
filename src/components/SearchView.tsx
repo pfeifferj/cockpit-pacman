@@ -57,6 +57,7 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMountedRef = useRef(true);
   const currentQueryRef = useRef(currentQuery);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const { activeSortIndex, activeSortDirection, setActiveSortIndex, setActiveSortDirection } = useSortableTable({
     sortableColumns: [0, 3, 4], // name, repository, status
@@ -67,6 +68,7 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
+      abortControllerRef.current?.abort();
     };
   }, []);
 
@@ -102,12 +104,19 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
       clearTimeout(debounceRef.current);
     }
 
+    // Abort any in-flight request
+    abortControllerRef.current?.abort();
+
     const query = sanitizeSearchInput(searchInput);
     if (query.length < MIN_SEARCH_LENGTH) {
       return;
     }
 
     debounceRef.current = setTimeout(async () => {
+      // Create new AbortController for this request
+      abortControllerRef.current = new AbortController();
+      const currentController = abortControllerRef.current;
+
       // Use refs to get current values, avoiding stale closure
       if (query !== currentQueryRef.current) {
         if (!isMountedRef.current) return;
@@ -126,6 +135,8 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
             limit: perPageRef.current,
             installed: "all",
           });
+          // Check if this request was aborted
+          if (currentController.signal.aborted) return;
           if (!isMountedRef.current) return;
           setResults(response.results);
           setTotal(response.total);
@@ -133,6 +144,8 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
           setTotalNotInstalled(response.total_not_installed);
           setRepositories(response.repositories);
         } catch (ex) {
+          // Ignore errors from aborted requests
+          if (currentController.signal.aborted) return;
           if (!isMountedRef.current) return;
           setError(ex instanceof Error ? ex.message : String(ex));
           setResults([]);
@@ -141,7 +154,8 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
           setTotalNotInstalled(0);
           setRepositories([]);
         } finally {
-          if (isMountedRef.current) {
+          // Only update loading state if not aborted
+          if (!currentController.signal.aborted && isMountedRef.current) {
             setLoading(false);
           }
         }
@@ -152,6 +166,7 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
       }
+      abortControllerRef.current?.abort();
     };
   }, [searchInput, setActiveSortIndex, setPage, setTotal]);
 

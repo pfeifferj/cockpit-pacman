@@ -39,6 +39,7 @@ import {
   FlexItem,
 } from "@patternfly/react-core";
 import { TrashIcon, CheckCircleIcon, TopologyIcon } from "@patternfly/react-icons";
+import { StatBox } from "./StatBox";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import { DependencyView } from "./DependencyView";
 import {
@@ -425,10 +426,11 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphP
           <FlexItem>
             <Flex spaceItems={{ default: "spaceItemsLg" }}>
               <FlexItem>
-                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--success--default)" }}>{formatSize(orphanData.total_size)}</div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Space to Free</div>
-                </div>
+                <StatBox
+                  label="Space to Free"
+                  value={formatSize(orphanData.total_size)}
+                  color="success"
+                />
               </FlexItem>
             </Flex>
           </FlexItem>

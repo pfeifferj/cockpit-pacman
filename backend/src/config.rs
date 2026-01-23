@@ -79,19 +79,31 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn load() -> Result<Self> {
+        use std::io::Read;
+
         let path = Path::new(CONFIG_PATH);
-        if !path.exists() {
-            return Ok(Self::default());
-        }
 
-        let file = File::open(path)
-            .with_context(|| format!("Failed to open config from {}", CONFIG_PATH))?;
+        // Open without existence check - let File::open fail with NotFound
+        let file = match File::open(path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Self::default());
+            }
+            Err(e) => {
+                return Err(e)
+                    .with_context(|| format!("Failed to open config from {}", CONFIG_PATH));
+            }
+        };
 
-        // Acquire shared lock for reading
+        // Lock BEFORE reading
         file.lock_shared()
             .with_context(|| format!("Failed to acquire read lock on {}", CONFIG_PATH))?;
 
-        let content = fs::read_to_string(path)
+        // Read from locked file handle (not path) to avoid TOCTOU race
+        let mut content = String::new();
+        let mut reader = std::io::BufReader::new(&file);
+        reader
+            .read_to_string(&mut content)
             .with_context(|| format!("Failed to read config from {}", CONFIG_PATH))?;
 
         // Lock is automatically released when file is dropped

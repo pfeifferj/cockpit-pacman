@@ -11,8 +11,9 @@ use cockpit_pacman_backend::handlers::{
 };
 use cockpit_pacman_backend::models::MirrorEntry;
 use cockpit_pacman_backend::validation::{
-    validate_depth, validate_direction, validate_keep_versions, validate_mirror_timeout,
-    validate_mirror_url, validate_package_name, validate_pagination, validate_search_query,
+    validate_depth, validate_direction, validate_json_payload_size, validate_keep_versions,
+    validate_mirror_timeout, validate_mirror_url, validate_package_name, validate_pagination,
+    validate_search_query,
 };
 
 fn print_usage() {
@@ -301,8 +302,11 @@ fn main() {
                 eprintln!("Error: save-mirrorlist requires a JSON array of mirrors");
                 std::process::exit(1);
             }
-            serde_json::from_str::<Vec<MirrorEntry>>(&args[2])
-                .map_err(|e| anyhow::anyhow!("Invalid JSON: {}", e))
+            validate_json_payload_size(&args[2])
+                .and_then(|_| {
+                    serde_json::from_str::<Vec<MirrorEntry>>(&args[2])
+                        .map_err(|e| anyhow::anyhow!("Invalid JSON: {}", e))
+                })
                 .and_then(|mirrors| save_mirrorlist(&mirrors))
         }
         "dependency-tree" => {

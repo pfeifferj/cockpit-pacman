@@ -24,6 +24,7 @@ import {
   SelectOption,
 } from "@patternfly/react-core";
 import { PackageDetailsModal } from "./PackageDetailsModal";
+import { StatBox } from "./StatBox";
 import { HistoryIcon, ArrowUpIcon, ArrowDownIcon, PlusIcon, MinusIcon } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
@@ -279,29 +280,33 @@ export const HistoryView: React.FC = () => {
             <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">Package History</CardTitle>
             <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
               <FlexItem>
-                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--info--default)" }}>{formatNumber(groupedData?.total_upgraded || 0)}</div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Upgraded</div>
-                </div>
+                <StatBox
+                  label="Upgraded"
+                  value={formatNumber(groupedData?.total_upgraded || 0)}
+                  color="info"
+                />
               </FlexItem>
               <FlexItem>
-                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--success--default)" }}>{formatNumber(groupedData?.total_installed || 0)}</div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Installed</div>
-                </div>
+                <StatBox
+                  label="Installed"
+                  value={formatNumber(groupedData?.total_installed || 0)}
+                  color="success"
+                />
               </FlexItem>
               <FlexItem>
-                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--danger--default)" }}>{formatNumber(groupedData?.total_removed || 0)}</div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Removed</div>
-                </div>
+                <StatBox
+                  label="Removed"
+                  value={formatNumber(groupedData?.total_removed || 0)}
+                  color="danger"
+                />
               </FlexItem>
               {(groupedData?.total_other || 0) > 0 && (
                 <FlexItem>
-                  <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                    <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--warning--default)" }}>{formatNumber(groupedData?.total_other || 0)}</div>
-                    <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Other</div>
-                  </div>
+                  <StatBox
+                    label="Other"
+                    value={formatNumber(groupedData?.total_other || 0)}
+                    color="warning"
+                  />
                 </FlexItem>
               )}
             </Flex>

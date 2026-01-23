@@ -33,7 +33,7 @@ pub fn get_dependency_tree(name: &str, depth: u32, direction: &str) -> Result<()
             } else {
                 None
             };
-            let repo = repo_map.get(pkg.name()).cloned().or_else(|| {
+            let repo = repo_map.get(pkg.name()).map(|s| s.to_string()).or_else(|| {
                 handle
                     .syncdbs()
                     .iter()
@@ -187,7 +187,7 @@ pub fn get_dependency_tree(name: &str, depth: u32, direction: &str) -> Result<()
 fn add_dependency(
     handle: &alpm::Alpm,
     localdb: &alpm::Db,
-    repo_map: &std::sync::Arc<std::collections::HashMap<String, String>>,
+    repo_map: &std::sync::Arc<std::collections::HashMap<String, std::sync::Arc<str>>>,
     dep_name: &str,
     source_name: &str,
     edge_type: &str,
@@ -213,7 +213,7 @@ fn add_dependency(
             } else {
                 None
             };
-            let repo = repo_map.get(pkg.name()).cloned().or_else(|| {
+            let repo = repo_map.get(pkg.name()).map(|s| s.to_string()).or_else(|| {
                 handle
                     .syncdbs()
                     .iter()

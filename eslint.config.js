@@ -32,6 +32,7 @@ export default [
         HTMLInputElement: "readonly",
         Element: "readonly",
         URL: "readonly",
+        AbortController: "readonly",
       },
     },
     plugins: {

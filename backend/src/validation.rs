@@ -165,3 +165,16 @@ pub fn validate_direction(direction: &str) -> Result<()> {
         ),
     }
 }
+
+const MAX_JSON_PAYLOAD_BYTES: usize = 1024 * 1024; // 1 MiB
+
+pub fn validate_json_payload_size(payload: &str) -> Result<()> {
+    if payload.len() > MAX_JSON_PAYLOAD_BYTES {
+        anyhow::bail!(
+            "JSON payload too large ({} bytes, max {})",
+            payload.len(),
+            MAX_JSON_PAYLOAD_BYTES
+        );
+    }
+    Ok(())
+}

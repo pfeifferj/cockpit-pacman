@@ -1,10 +1,9 @@
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 use std::process::Command;
 
 use crate::models::{CacheInfo, CachePackage, StreamEvent};
-use crate::util::{emit_event, emit_json, get_cache_dir, parse_package_filename};
+use crate::util::{emit_event, emit_json, get_cache_dir, iter_cache_packages};
 
 pub fn get_cache_info() -> Result<()> {
     let cache_dir = get_cache_dir();
@@ -23,39 +22,16 @@ pub fn get_cache_info() -> Result<()> {
     let mut packages: Vec<CachePackage> = Vec::new();
     let mut total_size: i64 = 0;
 
-    let entries = fs::read_dir(cache_path)
-        .with_context(|| format!("Failed to read cache directory: {}", cache_dir))?;
-
-    for entry_result in entries {
-        let entry = match entry_result {
-            Ok(e) => e,
-            Err(e) => {
-                eprintln!("Warning: Failed to read directory entry: {}", e);
-                continue;
-            }
-        };
-        let path = entry.path();
-        if path
-            .extension()
-            .is_some_and(|ext| ext == "zst" || ext == "xz" || ext == "gz")
-            && let Ok(metadata) = entry.metadata()
-        {
+    for (entry, filename, name, version) in iter_cache_packages(cache_path) {
+        if let Ok(metadata) = entry.metadata() {
             let size = metadata.len() as i64;
             total_size += size;
-
-            let filename = path
-                .file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default();
-
-            if let Some((name, version)) = parse_package_filename(&filename) {
-                packages.push(CachePackage {
-                    name,
-                    version,
-                    filename,
-                    size,
-                });
-            }
+            packages.push(CachePackage {
+                name,
+                version,
+                filename,
+                size,
+            });
         }
     }
 

@@ -354,15 +354,16 @@ export const KeyringView: React.FC = () => {
   }
 
   return (
-    <Card>
-      <CardBody>
-        {keyringData?.warnings.map((warning, i) => (
-          <Alert key={`${warning}-${i}`} variant="warning" title="Warning" className="pf-v6-u-mb-md">
-            {warning}
-          </Alert>
-        ))}
+    <>
+      {keyringData?.warnings.map((warning, i) => (
+        <Alert key={`${warning}-${i}`} variant="warning" title="Warning" className="pf-v6-u-mb-md">
+          {warning}
+        </Alert>
+      ))}
 
-        <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsCenter" }}>
+      <Card>
+        <CardBody>
+          <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsCenter" }}>
           <FlexItem>
             <CardTitle className="pf-v6-u-m-0">
               {keyringData?.total ?? 0} key{(keyringData?.total ?? 0) !== 1 ? "s" : ""} in keyring
@@ -476,7 +477,8 @@ export const KeyringView: React.FC = () => {
             </EmptyStateBody>
           </EmptyState>
         )}
-      </CardBody>
-    </Card>
+        </CardBody>
+      </Card>
+    </>
   );
 };

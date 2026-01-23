@@ -49,7 +49,7 @@ pub fn list_installed(
     let (mut filtered, repo_set, total_explicit, total_dependency) = localdb.pkgs().iter().fold(
         (Vec::new(), HashSet::<String>::new(), 0usize, 0usize),
         |(mut filtered, mut repo_set, mut total_explicit, mut total_dependency), pkg| {
-            let repo = repo_map.get(pkg.name()).cloned();
+            let repo = repo_map.get(pkg.name()).map(|s| s.to_string());
             repo_set.insert(repo.as_deref().unwrap_or("user").to_string());
 
             if let Some(ref query) = search_lower {
@@ -355,7 +355,7 @@ pub fn list_orphans() -> Result<()> {
             description: pkg.desc().map(|s| s.to_string()),
             installed_size: pkg.isize(),
             install_date: pkg.install_date(),
-            repository: repo_map.get(pkg.name()).cloned(),
+            repository: repo_map.get(pkg.name()).map(|s| s.to_string()),
         })
         .collect();
 

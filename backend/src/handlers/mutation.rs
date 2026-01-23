@@ -12,7 +12,8 @@ use crate::models::{
 };
 use crate::util::{
     CheckResult, DEFAULT_MUTATION_TIMEOUT_SECS, TimeoutGuard, check_cancel,
-    emit_cancellation_complete, emit_event, emit_json, is_cancelled, setup_signal_handler,
+    emit_cancellation_complete, emit_event, emit_json, handle_commit_error, is_cancelled,
+    setup_signal_handler,
 };
 
 pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
@@ -348,36 +349,14 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
     let was_timed_out_before = timeout.is_timed_out();
     let commit_err: Option<String> = tx.commit().err().map(|e| e.to_string());
     if let Some(err_msg) = commit_err {
-        let cancelled_during = !was_cancelled_before && is_cancelled();
-        let timed_out_during = !was_timed_out_before && timeout.is_timed_out();
-        let err_lower = err_msg.to_lowercase();
-        let error_indicates_interrupt = err_lower.contains("interrupt")
-            || err_lower.contains("cancel")
-            || err_lower.contains("signal")
-            || err_lower.contains("timeout");
-
-        if cancelled_during || error_indicates_interrupt {
-            emit_event(&StreamEvent::Complete {
-                success: false,
-                message: Some(
-                    "Operation interrupted - system may be in inconsistent state".to_string(),
-                ),
-            });
-        } else if timed_out_during {
-            emit_event(&StreamEvent::Complete {
-                success: false,
-                message: Some(format!(
-                    "Operation timed out after {} seconds - system may be in inconsistent state",
-                    timeout.timeout_secs()
-                )),
-            });
-        } else {
-            emit_event(&StreamEvent::Complete {
-                success: false,
-                message: Some(format!("Failed to commit transaction: {}", err_msg)),
-            });
-        }
-        return Err(anyhow::anyhow!("Failed to commit transaction: {}", err_msg));
+        return handle_commit_error(
+            &err_msg,
+            was_cancelled_before,
+            was_timed_out_before,
+            &timeout,
+            "Operation interrupted - system may be in inconsistent state",
+        )
+        .map(|_| ());
     }
 
     emit_event(&StreamEvent::Complete {
@@ -507,35 +486,15 @@ pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
     let was_timed_out_before = timeout.is_timed_out();
     let commit_err: Option<String> = handle.trans_commit().err().map(|e| e.to_string());
     if let Some(err_msg) = commit_err {
-        let cancelled_during = !was_cancelled_before && is_cancelled();
-        let timed_out_during = !was_timed_out_before && timeout.is_timed_out();
-        let err_lower = err_msg.to_lowercase();
-        let error_indicates_interrupt = err_lower.contains("interrupt")
-            || err_lower.contains("cancel")
-            || err_lower.contains("signal")
-            || err_lower.contains("timeout");
-
-        if cancelled_during || error_indicates_interrupt {
-            emit_event(&StreamEvent::Complete {
-                success: false,
-                message: Some("Operation interrupted".to_string()),
-            });
-        } else if timed_out_during {
-            emit_event(&StreamEvent::Complete {
-                success: false,
-                message: Some(format!(
-                    "Operation timed out after {} seconds",
-                    timeout.timeout_secs()
-                )),
-            });
-        } else {
-            emit_event(&StreamEvent::Complete {
-                success: false,
-                message: Some(format!("Failed to commit transaction: {}", err_msg)),
-            });
-        }
         let _ = handle.trans_release();
-        return Err(anyhow::anyhow!("Failed to commit transaction: {}", err_msg));
+        return handle_commit_error(
+            &err_msg,
+            was_cancelled_before,
+            was_timed_out_before,
+            &timeout,
+            "Operation interrupted",
+        )
+        .map(|_| ());
     }
 
     let _ = handle.trans_release();
