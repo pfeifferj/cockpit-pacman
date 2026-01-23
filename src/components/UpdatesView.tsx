@@ -688,52 +688,54 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
 
   if (state === "uptodate") {
     return (
-      <Card>
-        <CardBody>
-          {rebootStatus?.requires_reboot && (
-            <Alert
-              variant="warning"
-              title="System reboot recommended"
-              className="pf-v6-u-mb-md"
-            >
-              {rebootStatus.reason === "kernel_update" ? (
-                <>
-                  Running kernel ({rebootStatus.running_kernel}) differs from installed kernel ({rebootStatus.installed_kernel}).
-                  Reboot to use the new kernel.
-                </>
-              ) : (
-                <>
-                  Critical system packages were updated since boot: {rebootStatus.updated_packages.join(", ")}.
-                  A reboot is recommended to apply these changes.
-                </>
-              )}
-            </Alert>
-          )}
-          {warnings.length > 0 && (
-            <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
-              <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">
-                {warnings.map((w, i) => <li key={i}>{w}</li>)}
-              </ul>
-            </Alert>
-          )}
-          <EmptyState  headingLevel="h2" icon={CheckCircleIcon}  titleText="System is up to date">
-            <EmptyStateBody>
-              All installed packages are at their latest versions.
-            </EmptyStateBody>
-            <EmptyStateFooter>
-              <EmptyStateActions>
-                <Button
-                  variant="secondary"
-                  icon={<SyncAltIcon />}
-                  onClick={handleRefresh}
-                >
-                  Refresh
-                </Button>
-              </EmptyStateActions>
-            </EmptyStateFooter>
-          </EmptyState>
-        </CardBody>
-      </Card>
+      <>
+        {rebootStatus?.requires_reboot && (
+          <Alert
+            variant="warning"
+            title="System reboot recommended"
+            className="pf-v6-u-mb-md"
+          >
+            {rebootStatus.reason === "kernel_update" ? (
+              <>
+                Running kernel ({rebootStatus.running_kernel}) differs from installed kernel ({rebootStatus.installed_kernel}).
+                Reboot to use the new kernel.
+              </>
+            ) : (
+              <>
+                Critical system packages were updated since boot: {rebootStatus.updated_packages.join(", ")}.
+                A reboot is recommended to apply these changes.
+              </>
+            )}
+          </Alert>
+        )}
+        {warnings.length > 0 && (
+          <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
+            <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">
+              {warnings.map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+          </Alert>
+        )}
+        <Card>
+          <CardBody>
+            <EmptyState  headingLevel="h2" icon={CheckCircleIcon}  titleText="System is up to date">
+              <EmptyStateBody>
+                All installed packages are at their latest versions.
+              </EmptyStateBody>
+              <EmptyStateFooter>
+                <EmptyStateActions>
+                  <Button
+                    variant="secondary"
+                    icon={<SyncAltIcon />}
+                    onClick={handleRefresh}
+                  >
+                    Refresh
+                  </Button>
+                </EmptyStateActions>
+              </EmptyStateFooter>
+            </EmptyState>
+          </CardBody>
+        </Card>
+      </>
     );
   }
 
