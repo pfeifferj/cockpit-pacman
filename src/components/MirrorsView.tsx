@@ -163,6 +163,7 @@ export const MirrorsView: React.FC = () => {
   const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
   const cancelRef = useRef<(() => void) | null>(null);
   const logContainerRef = useRef<HTMLDivElement | null>(null);
+  const initialStatusFetchedRef = useRef(false);
 
   const applyStatusToMirrors = useCallback((mirrorList: MirrorEntry[], status: MirrorStatusResponse): MirrorWithStatus[] => {
     const statusByUrl = new Map(status.mirrors.map(s => [normalizeMirrorUrl(s.url), s]));
@@ -212,6 +213,14 @@ export const MirrorsView: React.FC = () => {
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
     }
   }, [log]);
+
+  useEffect(() => {
+    if (state === "ready" && !statusData && !initialStatusFetchedRef.current) {
+      initialStatusFetchedRef.current = true;
+      handleFetchStatus(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, statusData]);
 
   const handleFetchStatus = async (forceRefresh = false) => {
     if (!forceRefresh) {
