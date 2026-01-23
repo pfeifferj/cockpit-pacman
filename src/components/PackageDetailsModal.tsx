@@ -18,7 +18,7 @@ import {
 	EmptyState,
 	EmptyStateBody,
 } from '@patternfly/react-core';
-import { OutlinedQuestionCircleIcon, ArrowDownIcon, ExclamationCircleIcon } from "@patternfly/react-icons";
+import { OutlinedQuestionCircleIcon, ArrowDownIcon, ExclamationCircleIcon, TopologyIcon } from "@patternfly/react-icons";
 import { PackageDetails, SyncPackageDetails, formatSize, formatDate } from "../api";
 import { sanitizeUrl } from "../utils";
 import { DowngradeModal } from "./DowngradeModal";
@@ -34,6 +34,7 @@ interface PackageDetailsModalProps {
   isLoading: boolean;
   onClose: () => void;
   error?: string | null;
+  onViewDependencies?: (packageName: string) => void;
 }
 
 export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
@@ -41,6 +42,7 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
   isLoading,
   onClose,
   error,
+  onViewDependencies,
 }) => {
   const [downgradeModalOpen, setDowngradeModalOpen] = useState(false);
   const isOpen = packageDetails !== null || isLoading || !!error;
@@ -236,15 +238,29 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
           </DescriptionList>
         ) : null}
       </ModalBody>
-      {isInstalled && packageDetails && (
+      {packageDetails && (
         <ModalFooter>
-          <Button
-            variant="secondary"
-            icon={<ArrowDownIcon />}
-            onClick={() => setDowngradeModalOpen(true)}
-          >
-            Downgrade
-          </Button>
+          {onViewDependencies && (
+            <Button
+              variant="secondary"
+              icon={<TopologyIcon />}
+              onClick={() => {
+                onViewDependencies(packageDetails.name);
+                onClose();
+              }}
+            >
+              View Dependencies
+            </Button>
+          )}
+          {isInstalled && (
+            <Button
+              variant="secondary"
+              icon={<ArrowDownIcon />}
+              onClick={() => setDowngradeModalOpen(true)}
+            >
+              Downgrade
+            </Button>
+          )}
         </ModalFooter>
       )}
     </Modal>

@@ -199,33 +199,13 @@ fn add_dependency(
     queue: &mut VecDeque<(String, u32)>,
     warnings: &mut Vec<String>,
 ) {
-    let (edge_source, edge_target) = match edge_type {
-        "required_by" | "optional_for" => (dep_name.to_string(), source_name.to_string()),
-        _ => (source_name.to_string(), dep_name.to_string()),
-    };
-
-    let edge_key = (edge_source.clone(), edge_target.clone());
-    if !edge_set.contains(&edge_key) {
-        edge_set.insert(edge_key);
-        edges.push(DependencyEdge {
-            source: edge_source,
-            target: edge_target,
-            edge_type: edge_type.to_string(),
-        });
-    }
-
-    if visited.contains(dep_name) {
-        return;
-    }
-
-    visited.insert(dep_name.to_string());
-
+    // Use find_satisfier to resolve provides (e.g., libcurl.so -> curl)
     let dep_pkg = localdb
-        .pkg(dep_name)
-        .ok()
-        .or_else(|| handle.syncdbs().iter().find_map(|db| db.pkg(dep_name).ok()));
+        .pkgs()
+        .find_satisfier(dep_name)
+        .or_else(|| handle.syncdbs().find_satisfier(dep_name));
 
-    let (version, installed, reason, repository) = match &dep_pkg {
+    let (resolved_name, version, installed, reason, repository) = match &dep_pkg {
         Some(pkg) => {
             let is_installed = localdb.pkg(pkg.name()).is_ok();
             let reason = if is_installed {
@@ -240,19 +220,47 @@ fn add_dependency(
                     .find(|db| db.pkg(pkg.name()).is_ok())
                     .map(|db| db.name().to_string())
             });
-            (pkg.version().to_string(), is_installed, reason, repo)
+            (
+                pkg.name().to_string(),
+                pkg.version().to_string(),
+                is_installed,
+                reason,
+                repo,
+            )
         }
         None => {
             if !warnings.iter().any(|w| w.contains(dep_name)) {
                 warnings.push(format!("Package '{}' not found in databases", dep_name));
             }
-            ("unknown".to_string(), false, None, None)
+            return;
         }
     };
 
+    // Use resolved package name for edges and deduplication
+    let (edge_source, edge_target) = match edge_type {
+        "required_by" | "optional_for" => (resolved_name.clone(), source_name.to_string()),
+        _ => (source_name.to_string(), resolved_name.clone()),
+    };
+
+    let edge_key = (edge_source.clone(), edge_target.clone());
+    if !edge_set.contains(&edge_key) {
+        edge_set.insert(edge_key);
+        edges.push(DependencyEdge {
+            source: edge_source,
+            target: edge_target,
+            edge_type: edge_type.to_string(),
+        });
+    }
+
+    if visited.contains(&resolved_name) {
+        return;
+    }
+
+    visited.insert(resolved_name.clone());
+
     nodes.push(DependencyNode {
-        id: dep_name.to_string(),
-        name: dep_name.to_string(),
+        id: resolved_name.clone(),
+        name: resolved_name.clone(),
         version,
         depth: new_depth,
         installed,
@@ -260,5 +268,5 @@ fn add_dependency(
         repository,
     });
 
-    queue.push_back((dep_name.to_string(), new_depth));
+    queue.push_back((resolved_name, new_depth));
 }

@@ -17,6 +17,12 @@ import { ErrorBoundary } from "./ErrorBoundary";
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string | number>(0);
+  const [graphPackage, setGraphPackage] = useState<string | undefined>(undefined);
+
+  const handleViewDependencies = (packageName: string) => {
+    setGraphPackage(packageName);
+    setActiveTab(1); // Switch to Installed Packages tab
+  };
 
   return (
     <Page className="no-masthead-sidebar pf-m-no-sidebar">
@@ -27,17 +33,17 @@ export const App: React.FC = () => {
         >
           <Tab eventKey={0} title={<TabTitleText>Updates</TabTitleText>}>
             <ErrorBoundary fallbackTitle="Error loading updates">
-              <UpdatesView />
+              <UpdatesView onViewDependencies={handleViewDependencies} />
             </ErrorBoundary>
           </Tab>
           <Tab eventKey={1} title={<TabTitleText>Installed Packages</TabTitleText>}>
             <ErrorBoundary fallbackTitle="Error loading packages">
-              <PackageList />
+              <PackageList graphPackage={graphPackage} onGraphPackageChange={setGraphPackage} />
             </ErrorBoundary>
           </Tab>
           <Tab eventKey={2} title={<TabTitleText>Search Packages</TabTitleText>}>
             <ErrorBoundary fallbackTitle="Error loading search">
-              <SearchView />
+              <SearchView onViewDependencies={handleViewDependencies} />
             </ErrorBoundary>
           </Tab>
           <Tab eventKey={3} title={<TabTitleText>History</TabTitleText>}>

@@ -62,7 +62,12 @@ import { PER_PAGE_OPTIONS, SEARCH_DEBOUNCE_MS, LOG_CONTAINER_HEIGHT, MAX_LOG_SIZ
 
 type OrphanViewState = "ready" | "removing" | "success";
 
-export const PackageList: React.FC = () => {
+interface PackageListProps {
+  graphPackage?: string;
+  onGraphPackageChange?: (packageName: string | undefined) => void;
+}
+
+export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphPackageChange }) => {
   const [packages, setPackages] = useState<Package[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -101,6 +106,13 @@ export const PackageList: React.FC = () => {
       isMountedRef.current = false;
     };
   }, []);
+
+  // Switch to graph view when graphPackage is set from outside
+  useEffect(() => {
+    if (graphPackage) {
+      setFilter("graph");
+    }
+  }, [graphPackage]);
 
   const debouncedSearchInput = useDebouncedValue(
     sanitizeSearchInput(searchInput),
@@ -621,7 +633,7 @@ export const PackageList: React.FC = () => {
         </Toolbar>
 
         {filter === "graph" ? (
-          <DependencyView />
+          <DependencyView initialPackage={graphPackage} />
         ) : filter === "orphan" ? (
           loading ? (
             <div className="pf-v6-u-p-xl pf-v6-u-text-align-center">
@@ -656,6 +668,10 @@ export const PackageList: React.FC = () => {
           packageDetails={selectedPackage}
           isLoading={detailsLoading}
           onClose={() => setSelectedPackage(null)}
+          onViewDependencies={(packageName) => {
+            onGraphPackageChange?.(packageName);
+            setFilter("graph");
+          }}
         />
 
         <Modal

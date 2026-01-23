@@ -34,7 +34,11 @@ import { PER_PAGE_OPTIONS, SEARCH_DEBOUNCE_MS } from "../constants";
 
 const MIN_SEARCH_LENGTH = 1;
 
-export const SearchView: React.FC = () => {
+interface SearchViewProps {
+  onViewDependencies?: (packageName: string) => void;
+}
+
+export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) => {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -476,6 +480,7 @@ export const SearchView: React.FC = () => {
           packageDetails={selectedPackage}
           isLoading={detailsLoading}
           onClose={() => setSelectedPackage(null)}
+          onViewDependencies={onViewDependencies}
         />
       </CardBody>
     </Card>

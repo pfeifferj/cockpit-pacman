@@ -84,7 +84,11 @@ type ViewState =
   | "success"
   | "error";
 
-export const UpdatesView: React.FC = () => {
+interface UpdatesViewProps {
+  onViewDependencies?: (packageName: string) => void;
+}
+
+export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) => {
   const [state, setState] = useState<ViewState>("loading");
   const [updates, setUpdates] = useState<UpdateInfo[]>([]);
   const [log, setLog] = useState("");
@@ -894,6 +898,7 @@ export const UpdatesView: React.FC = () => {
         packageDetails={selectedPackage}
         isLoading={packageLoading}
         onClose={handleCloseModal}
+        onViewDependencies={onViewDependencies}
       />
 
       <Modal

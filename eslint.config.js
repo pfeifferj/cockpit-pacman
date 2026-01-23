@@ -26,6 +26,7 @@ export default [
         Promise: "readonly",
         cockpit: "readonly",
         MutationObserver: "readonly",
+        ResizeObserver: "readonly",
         MouseEvent: "readonly",
         HTMLDivElement: "readonly",
         HTMLInputElement: "readonly",

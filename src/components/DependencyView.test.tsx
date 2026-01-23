@@ -10,6 +10,7 @@ vi.mock("../api", async () => {
     ...actual,
     getDependencyTree: vi.fn(),
     getPackageInfo: vi.fn(),
+    searchPackages: vi.fn(),
   };
 });
 
@@ -21,6 +22,7 @@ vi.mock("../hooks/useForceGraph", () => ({
 }));
 
 const mockGetDependencyTree = vi.mocked(api.getDependencyTree);
+const mockSearchPackages = vi.mocked(api.searchPackages);
 
 const mockDependencyTreeResponse: api.DependencyTreeResponse = {
   nodes: [
@@ -62,13 +64,12 @@ const mockDependencyTreeResponse: api.DependencyTreeResponse = {
 };
 
 const triggerSearch = async (searchValue: string) => {
-  const searchInput = screen.getByPlaceholderText("Enter package name...");
+  const searchInput = screen.getByPlaceholderText("Search packages...");
   await act(async () => {
     fireEvent.change(searchInput, { target: { value: searchValue } });
   });
-  const searchButton = screen.getByLabelText("Search");
   await act(async () => {
-    fireEvent.click(searchButton);
+    fireEvent.keyDown(searchInput, { key: "Enter", code: "Enter" });
   });
 };
 
@@ -76,6 +77,7 @@ describe("DependencyView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetDependencyTree.mockResolvedValue(mockDependencyTreeResponse);
+    mockSearchPackages.mockResolvedValue({ results: [], total: 0, total_installed: 0, total_not_installed: 0, repositories: [] });
   });
 
   afterEach(() => {
@@ -89,7 +91,7 @@ describe("DependencyView", () => {
 
   it("renders search input", async () => {
     render(<DependencyView />);
-    expect(screen.getByPlaceholderText("Enter package name...")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Search packages...")).toBeInTheDocument();
   });
 
   it("renders depth slider", async () => {
@@ -221,7 +223,7 @@ describe("DependencyView", () => {
       expect(screen.getByText("3 nodes")).toBeInTheDocument();
     });
 
-    const clearButton = screen.getByLabelText("Reset");
+    const clearButton = screen.getByLabelText("Clear input");
     await act(async () => {
       fireEvent.click(clearButton);
     });

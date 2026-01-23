@@ -4,7 +4,6 @@ import {
   CardBody,
   Spinner,
   Alert,
-  SearchInput,
   Toolbar,
   ToolbarContent,
   ToolbarItem,
@@ -20,8 +19,16 @@ import {
   Flex,
   FlexItem,
   Label,
+  Select,
+  SelectOption,
+  SelectList,
+  MenuToggle,
+  MenuToggleElement,
+  TextInputGroup,
+  TextInputGroupMain,
+  TextInputGroupUtilities,
 } from "@patternfly/react-core";
-import { TopologyIcon, SyncAltIcon } from "@patternfly/react-icons";
+import { TopologyIcon, SyncAltIcon, TimesIcon } from "@patternfly/react-icons";
 import {
   DependencyNode,
   DependencyEdge,
@@ -29,10 +36,14 @@ import {
   getDependencyTree,
   getPackageInfo,
   PackageDetails,
+  searchPackages,
+  SearchResult,
 } from "../api";
 import { sanitizeSearchInput } from "../utils";
 import { useForceGraph, ForceGraphNode } from "../hooks/useForceGraph";
+import { useDebouncedValue } from "../hooks/useDebounce";
 import { PackageDetailsModal } from "./PackageDetailsModal";
+import { SEARCH_DEBOUNCE_MS } from "../constants";
 
 const GRAPH_HEIGHT = 600;
 
@@ -77,14 +88,18 @@ const Legend: React.FC = () => (
   </Flex>
 );
 
-export const DependencyView: React.FC = () => {
+interface DependencyViewProps {
+  initialPackage?: string;
+}
+
+export const DependencyView: React.FC<DependencyViewProps> = ({ initialPackage }) => {
   const [nodes, setNodes] = useState<DependencyNode[]>([]);
   const [edges, setEdges] = useState<DependencyEdge[]>([]);
   const [rootId, setRootId] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [searchInput, setSearchInput] = useState("");
+  const [searchInput, setSearchInput] = useState(initialPackage ?? "");
   const [hasSearched, setHasSearched] = useState(false);
   const [depth, setDepth] = useState(3);
   const [direction, setDirection] = useState<DependencyDirection>("forward");
@@ -93,6 +108,14 @@ export const DependencyView: React.FC = () => {
   const [graphWidth, setGraphWidth] = useState(800);
   const containerRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true);
+  const initialLoadRef = useRef<string | null>(null);
+
+  // Typeahead state
+  const [typeaheadOpen, setTypeaheadOpen] = useState(false);
+  const [suggestions, setSuggestions] = useState<SearchResult[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const textInputRef = useRef<HTMLInputElement | null>(null);
+  const debouncedSearch = useDebouncedValue(searchInput, SEARCH_DEBOUNCE_MS);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -101,16 +124,63 @@ export const DependencyView: React.FC = () => {
     };
   }, []);
 
+  // Auto-load initial package when it changes
   useEffect(() => {
+    if (initialPackage && initialPackage !== initialLoadRef.current) {
+      initialLoadRef.current = initialPackage;
+      setSearchInput(initialPackage);
+      fetchDependencyTree(initialPackage, depth, direction);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPackage]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
     const updateWidth = () => {
       if (containerRef.current) {
         setGraphWidth(containerRef.current.offsetWidth);
       }
     };
-    updateWidth();
-    window.addEventListener("resize", updateWidth);
-    return () => window.removeEventListener("resize", updateWidth);
-  }, []);
+
+    const resizeObserver = new ResizeObserver(updateWidth);
+    resizeObserver.observe(container);
+
+    return () => resizeObserver.disconnect();
+  }, [nodes.length]);
+
+  // Fetch suggestions when search input changes
+  useEffect(() => {
+    if (!debouncedSearch || debouncedSearch.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+
+    const fetchSuggestions = async () => {
+      setLoadingSuggestions(true);
+      try {
+        const response = await searchPackages({
+          query: debouncedSearch,
+          limit: 15,
+          installed: "all",
+        });
+        if (isMountedRef.current) {
+          setSuggestions(response.results);
+        }
+      } catch {
+        if (isMountedRef.current) {
+          setSuggestions([]);
+        }
+      } finally {
+        if (isMountedRef.current) {
+          setLoadingSuggestions(false);
+        }
+      }
+    };
+
+    fetchSuggestions();
+  }, [debouncedSearch]);
 
   const handleNodeClick = useCallback(async (node: ForceGraphNode) => {
     if (!node.installed) return;
@@ -175,17 +245,32 @@ export const DependencyView: React.FC = () => {
       setError("Please enter a package name");
       return;
     }
+    setTypeaheadOpen(false);
     fetchDependencyTree(query, depth, direction);
   };
 
   const handleSearchClear = () => {
     setSearchInput("");
+    setSuggestions([]);
     setNodes([]);
     setEdges([]);
     setRootId("");
     setError(null);
     setWarnings([]);
     setHasSearched(false);
+    textInputRef.current?.focus();
+  };
+
+  const handleTypeaheadSelect = (
+    _event: React.MouseEvent<Element, MouseEvent> | undefined,
+    value: string | number | undefined
+  ) => {
+    if (typeof value === "string") {
+      setSearchInput(value);
+      setTypeaheadOpen(false);
+      setSuggestions([]);
+      fetchDependencyTree(value, depth, direction);
+    }
   };
 
   const handleDepthChange = (_event: SliderOnChangeEvent, value: number) => {
@@ -207,15 +292,84 @@ export const DependencyView: React.FC = () => {
       <CardBody>
         <Toolbar>
           <ToolbarContent>
-            <ToolbarItem>
-              <SearchInput
-                placeholder="Enter package name..."
-                value={searchInput}
-                onChange={(_event, value) => setSearchInput(value)}
-                onClear={handleSearchClear}
-                onSearch={handleSearch}
-                aria-label="Package name"
-              />
+            <ToolbarItem style={{ minWidth: 300 }}>
+              <Select
+                id="dependency-package-search"
+                isOpen={typeaheadOpen && (suggestions.length > 0 || loadingSuggestions)}
+                selected={searchInput}
+                onSelect={handleTypeaheadSelect}
+                onOpenChange={setTypeaheadOpen}
+                toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+                  <MenuToggle
+                    ref={toggleRef}
+                    variant="typeahead"
+                    onClick={() => setTypeaheadOpen(!typeaheadOpen)}
+                    isExpanded={typeaheadOpen}
+                    isFullWidth
+                  >
+                    <TextInputGroup isPlain>
+                      <TextInputGroupMain
+                        value={searchInput}
+                        onClick={() => suggestions.length > 0 && setTypeaheadOpen(true)}
+                        onChange={(_event, value) => {
+                          setSearchInput(value);
+                          if (value.length >= 2 && !typeaheadOpen) {
+                            setTypeaheadOpen(true);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            handleSearch();
+                          }
+                        }}
+                        autoComplete="off"
+                        innerRef={textInputRef}
+                        placeholder="Search packages..."
+                        role="combobox"
+                        isExpanded={typeaheadOpen}
+                        aria-controls="dependency-package-search"
+                      />
+                      {searchInput && (
+                        <TextInputGroupUtilities>
+                          <Button
+                            variant="plain"
+                            onClick={handleSearchClear}
+                            aria-label="Clear input"
+                          >
+                            <TimesIcon />
+                          </Button>
+                        </TextInputGroupUtilities>
+                      )}
+                    </TextInputGroup>
+                  </MenuToggle>
+                )}
+              >
+                <SelectList>
+                  {loadingSuggestions ? (
+                    <SelectOption isDisabled>
+                      <Spinner size="sm" /> Searching...
+                    </SelectOption>
+                  ) : (
+                    suggestions.map((pkg) => (
+                      <SelectOption key={pkg.name} value={pkg.name}>
+                        <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} style={{ width: "100%" }}>
+                          <FlexItem>
+                            <span style={{ fontWeight: 500 }}>{pkg.name}</span>
+                            {pkg.installed && (
+                              <Label color="green" isCompact style={{ marginLeft: 8 }}>installed</Label>
+                            )}
+                          </FlexItem>
+                          <FlexItem>
+                            <span style={{ color: "var(--pf-t--global--text--color--subtle)", fontSize: "0.875rem" }}>
+                              {pkg.repository}
+                            </span>
+                          </FlexItem>
+                        </Flex>
+                      </SelectOption>
+                    ))
+                  )}
+                </SelectList>
+              </Select>
             </ToolbarItem>
             <ToolbarGroup>
               <ToolbarItem>
@@ -341,6 +495,7 @@ export const DependencyView: React.FC = () => {
             <div
               ref={containerRef}
               style={{
+                width: "100%",
                 border: "1px solid var(--pf-t--global--border--color--default)",
                 borderRadius: "var(--pf-t--global--border--radius--small)",
                 overflow: "hidden",
