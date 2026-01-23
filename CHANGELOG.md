@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0] - 2026-01-23
+
+### Added
+- Mirror management tab for viewing, testing, and saving mirrors (5825ee9)
+- Dependency graph visualization in Installed Packages tab (b618384, 32f333d)
+- Scheduled unattended upgrades via systemd timer (c1432fe)
+- Reboot indicator after kernel or critical package updates (e35edff)
+- History entries grouped by upgrade runs with accordion UI (fe3b998)
+- Clickable rows for package details in more views (9f62de5)
+- Auto-fetch mirror status on load when cache is empty (cd04ce5)
+
+### Fixed
+- Race conditions and memory leaks in frontend/backend (b27f260)
+- Provides packages not resolved in dependency graph (8268af7)
+
 ## [0.2.0] - 2026-01-18
 
 ### Added
