@@ -6,25 +6,53 @@ A Cockpit plugin for Arch Linux package management using direct alpm.rs integrat
 
 ## Features
 
-![View and search installed packages](docs/img/installed.png)
-View and search installed packages, filter by install reason (explicit/dependency) and repository
-
-![View package information](docs/img/details.png)
-View package information
-
 ![Check for and apply system updates](docs/img/updates.png)
-Check for and apply system updates
+Check for updates with system overview, reboot notifications, and scheduled upgrades
 
-![Search for available packages in repos](docs/img/search.png)
-Search for available packages in repos
+![View and search installed packages](docs/img/installed.png)
+Browse installed packages with filtering by install reason and repository
+
+<details>
+<summary>More screenshots</summary>
+
+![Package details](docs/img/details.png)
+View package details with dependencies, metadata, and downgrade options
+
+![Dependency graph](docs/img/graph.png)
+Visualize package dependency relationships
+
+![Search packages](docs/img/search.png)
+Search available packages across repositories with install status
+
+![History](docs/img/history.png)
+Browse package history grouped by upgrade runs
+
+![Cache](docs/img/cache.png)
+Manage package cache with configurable cleanup
+
+![Keyring](docs/img/keyring.png)
+View and manage pacman keyring
+
+![Mirrors](docs/img/mirrors.png)
+Test and configure pacman mirrors
+
+</details>
 
 ## Prerequisites
 
-- [Cockpit](https://cockpit-project.org/) must be installed and running:
-  ```bash
-  sudo pacman -S cockpit
-  sudo systemctl enable --now cockpit.socket
-  ```
+[Cockpit](https://cockpit-project.org/) must be installed and running:
+```bash
+sudo pacman -S cockpit
+sudo systemctl enable --now cockpit.socket
+```
+
+### Optional dependencies
+
+The plugin is self-contained for most functionality. Cache cleanup requires `paccache` from `pacman-contrib`:
+
+```bash
+sudo pacman -S pacman-contrib
+```
 
 ## Installation
 
