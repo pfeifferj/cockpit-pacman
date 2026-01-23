@@ -7,7 +7,7 @@ use crate::models::{
     OrphanPackage, OrphanResponse, Package, PackageDetails, PackageListResponse, SearchResponse,
     SearchResult, SyncPackageDetails, UpdatesResponse,
 };
-use crate::util::sort_with_direction;
+use crate::util::{emit_json, sort_with_direction};
 
 pub fn list_installed(
     offset: usize,
@@ -91,15 +91,7 @@ pub fn list_installed(
             a.isize().cmp(&b.isize())
         }),
         Some("reason") => sort_with_direction(&mut filtered, ascending, |(a, _), (b, _)| {
-            let reason_a = match a.reason() {
-                alpm::PackageReason::Explicit => "explicit",
-                alpm::PackageReason::Depend => "dependency",
-            };
-            let reason_b = match b.reason() {
-                alpm::PackageReason::Explicit => "explicit",
-                alpm::PackageReason::Depend => "dependency",
-            };
-            reason_a.cmp(reason_b)
+            reason_to_string(a.reason()).cmp(reason_to_string(b.reason()))
         }),
         _ => {}
     }
@@ -133,8 +125,7 @@ pub fn list_installed(
         warnings: Vec::new(),
     };
 
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+    emit_json(&response)
 }
 
 pub fn check_updates() -> Result<()> {
@@ -145,8 +136,7 @@ pub fn check_updates() -> Result<()> {
         updates,
         warnings: Vec::new(),
     };
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+    emit_json(&response)
 }
 
 pub fn local_package_info(name: &str) -> Result<()> {
@@ -201,8 +191,7 @@ pub fn local_package_info(name: &str) -> Result<()> {
         repository,
     };
 
-    println!("{}", serde_json::to_string(&details)?);
-    Ok(())
+    emit_json(&details)
 }
 
 pub fn search(
@@ -285,8 +274,7 @@ pub fn search(
         total_not_installed,
         repositories,
     };
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+    emit_json(&response)
 }
 
 pub fn sync_package_info(name: &str, repo: Option<&str>) -> Result<()> {
@@ -345,8 +333,7 @@ pub fn sync_package_info(name: &str, repo: Option<&str>) -> Result<()> {
         repository,
     };
 
-    println!("{}", serde_json::to_string(&details)?);
-    Ok(())
+    emit_json(&details)
 }
 
 pub fn list_orphans() -> Result<()> {
@@ -379,6 +366,5 @@ pub fn list_orphans() -> Result<()> {
         total_size,
     };
 
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+    emit_json(&response)
 }

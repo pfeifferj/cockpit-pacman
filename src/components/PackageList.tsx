@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useDebouncedValue } from "../hooks/useDebounce";
+import { usePagination } from "../hooks/usePagination";
 import { useSortableTable } from "../hooks/useSortableTable";
 import {
   Card,
@@ -71,9 +72,7 @@ export const PackageList: React.FC = () => {
   const [selectedPackage, setSelectedPackage] = useState<PackageDetails | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
 
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(50);
-  const [total, setTotal] = useState(0);
+  const { page, perPage, total, setPage, setTotal, onSetPage, onPerPageSelect } = usePagination();
   const [totalExplicit, setTotalExplicit] = useState(0);
   const [totalDependency, setTotalDependency] = useState(0);
   const [repositories, setRepositories] = useState<string[]>([]);
@@ -117,7 +116,7 @@ export const PackageList: React.FC = () => {
       setSearchValue(debouncedSearchInput);
       setPage(1);
     }
-  }, [debouncedSearchInput, searchValue]);
+  }, [debouncedSearchInput, searchValue, setPage]);
 
   // Map column index to backend sort field
   const getSortField = (index: number | null): string => {
@@ -180,7 +179,7 @@ export const PackageList: React.FC = () => {
         setLoading(false);
       }
     }
-  }, [page, perPage, searchValue, filter, repoFilter, activeSortIndex, activeSortDirection]);
+  }, [page, perPage, searchValue, filter, repoFilter, activeSortIndex, activeSortDirection, setTotal]);
 
   useEffect(() => {
     loadPackages();
@@ -237,15 +236,6 @@ export const PackageList: React.FC = () => {
         setDetailsLoading(false);
       }
     }
-  };
-
-  const handleSetPage = (_event: React.MouseEvent | React.KeyboardEvent | MouseEvent, newPage: number) => {
-    setPage(newPage);
-  };
-
-  const handlePerPageSelect = (_event: React.MouseEvent | React.KeyboardEvent | MouseEvent, newPerPage: number) => {
-    setPerPage(newPerPage);
-    setPage(1);
   };
 
   const handleRemoveOrphans = () => {
@@ -619,8 +609,8 @@ export const PackageList: React.FC = () => {
                     itemCount={total}
                     perPage={perPage}
                     page={page}
-                    onSetPage={handleSetPage}
-                    onPerPageSelect={handlePerPageSelect}
+                    onSetPage={onSetPage}
+                    onPerPageSelect={onPerPageSelect}
                     perPageOptions={PER_PAGE_OPTIONS}
                     isCompact
                   />
@@ -652,8 +642,8 @@ export const PackageList: React.FC = () => {
                   itemCount={total}
                   perPage={perPage}
                   page={page}
-                  onSetPage={handleSetPage}
-                  onPerPageSelect={handlePerPageSelect}
+                  onSetPage={onSetPage}
+                  onPerPageSelect={onPerPageSelect}
                   perPageOptions={PER_PAGE_OPTIONS}
                   isCompact
                 />

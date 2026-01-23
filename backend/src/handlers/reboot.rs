@@ -4,6 +4,7 @@ use std::process::Command;
 
 use crate::alpm::get_handle;
 use crate::models::RebootStatus;
+use crate::util::emit_json;
 
 const CRITICAL_PACKAGES: &[&str] = &["systemd", "linux-firmware", "amd-ucode", "intel-ucode"];
 
@@ -136,8 +137,7 @@ pub fn get_reboot_status() -> Result<()> {
         }
     }
 
-    println!("{}", serde_json::to_string(&status)?);
-    Ok(())
+    emit_json(&status)
 }
 
 #[cfg(test)]

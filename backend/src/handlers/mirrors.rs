@@ -10,7 +10,7 @@ use crate::models::{
     MirrorEntry, MirrorListResponse, MirrorStatus, MirrorStatusResponse, MirrorTestResult,
     SaveMirrorlistResponse, StreamEvent,
 };
-use crate::util::{TimeoutGuard, emit_event, setup_signal_handler};
+use crate::util::{TimeoutGuard, emit_event, emit_json, setup_signal_handler};
 use crate::validation::validate_mirror_url;
 
 const MIRRORLIST_PATH: &str = "/etc/pacman.d/mirrorlist";
@@ -89,8 +89,7 @@ pub fn list_mirrors() -> Result<()> {
         last_modified,
     };
 
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+    emit_json(&response)
 }
 
 fn parse_server_line(line: &str) -> Option<String> {
@@ -156,8 +155,7 @@ pub fn fetch_mirror_status() -> Result<()> {
         last_check: api_status.last_check,
     };
 
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+    emit_json(&response)
 }
 
 pub fn test_mirrors(urls: &[String], timeout_secs: u64) -> Result<()> {
@@ -315,8 +313,7 @@ pub fn save_mirrorlist(mirrors: &[MirrorEntry]) -> Result<()> {
         message: format!("Saved {} mirrors to {}", mirrors.len(), MIRRORLIST_PATH),
     };
 
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+    emit_json(&response)
 }
 
 fn cleanup_old_backups() -> Result<()> {

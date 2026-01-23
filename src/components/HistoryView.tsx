@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { usePagination } from "../hooks/usePagination";
 import {
   Accordion,
   AccordionContent,
@@ -67,8 +68,7 @@ export const HistoryView: React.FC = () => {
   const [state, setState] = useState<ViewState>("loading");
   const [groupedData, setGroupedData] = useState<GroupedLogResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(20);
+  const { page, perPage, offset, setPage, setPerPage } = usePagination({ defaultPerPage: 20 });
   const [filter, setFilter] = useState<HistoryFilterType>("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -82,7 +82,7 @@ export const HistoryView: React.FC = () => {
     setError(null);
     try {
       const response = await getGroupedHistory({
-        offset: (page - 1) * perPage,
+        offset,
         limit: perPage,
         filter,
       });
@@ -92,7 +92,7 @@ export const HistoryView: React.FC = () => {
       setState("error");
       setError(ex instanceof Error ? ex.message : String(ex));
     }
-  }, [page, perPage, filter]);
+  }, [offset, perPage, filter]);
 
   useEffect(() => {
     loadHistory();

@@ -5,7 +5,7 @@ use pacman_key::{
 
 use crate::alpm::validity_to_string;
 use crate::models::{KeyringKey, KeyringStatusResponse, StreamEvent};
-use crate::util::{emit_event, is_cancelled, setup_signal_handler};
+use crate::util::{emit_event, emit_json, is_cancelled, setup_signal_handler};
 
 pub fn keyring_status() -> Result<()> {
     let rt = tokio::runtime::Runtime::new().context("Failed to create tokio runtime")?;
@@ -81,8 +81,7 @@ pub fn keyring_status() -> Result<()> {
             warnings,
         };
 
-        println!("{}", serde_json::to_string(&response)?);
-        Ok(())
+        emit_json(&response)
     })
 }
 

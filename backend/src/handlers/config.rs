@@ -1,12 +1,12 @@
 use anyhow::Result;
 
 use crate::config::{AppConfig, IgnoreOperationResponse, IgnoredPackagesResponse};
+use crate::util::emit_json;
 
 pub fn list_ignored() -> Result<()> {
     let config = AppConfig::load()?;
     let response = IgnoredPackagesResponse::from(&config);
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+    emit_json(&response)
 }
 
 pub fn add_ignored(package: &str) -> Result<()> {
@@ -27,8 +27,7 @@ pub fn add_ignored(package: &str) -> Result<()> {
         },
     };
 
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+    emit_json(&response)
 }
 
 pub fn remove_ignored(package: &str) -> Result<()> {
@@ -49,6 +48,5 @@ pub fn remove_ignored(package: &str) -> Result<()> {
         },
     };
 
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+    emit_json(&response)
 }

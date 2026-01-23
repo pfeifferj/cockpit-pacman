@@ -12,7 +12,7 @@ use crate::models::{
 };
 use crate::util::{
     CheckResult, DEFAULT_MUTATION_TIMEOUT_SECS, TimeoutGuard, check_cancel,
-    emit_cancellation_complete, emit_event, is_cancelled, setup_signal_handler,
+    emit_cancellation_complete, emit_event, emit_json, is_cancelled, setup_signal_handler,
 };
 
 pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
@@ -79,8 +79,7 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
                 error: Some(format!("{}", e)),
                 ..Default::default()
             };
-            println!("{}", serde_json::to_string(&response)?);
-            return Ok(());
+            return emit_json(&response);
         }
     };
 
@@ -89,8 +88,7 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
             error: Some(format!("Failed to prepare system upgrade: {}", e)),
             ..Default::default()
         };
-        println!("{}", serde_json::to_string(&response)?);
-        return Ok(());
+        return emit_json(&response);
     }
 
     let prepare_success = tx.prepare().is_ok();
@@ -109,8 +107,7 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
             import_keys: s.import_keys.clone(),
             ..Default::default()
         };
-        println!("{}", serde_json::to_string(&response)?);
-        return Ok(());
+        return emit_json(&response);
     }
 
     if packages_to_upgrade == 0 {
@@ -118,8 +115,7 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
             success: true,
             ..Default::default()
         };
-        println!("{}", serde_json::to_string(&response)?);
-        return Ok(());
+        return emit_json(&response);
     }
 
     let s = state.borrow();
@@ -134,8 +130,7 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
         packages_to_upgrade,
         total_download_size,
     };
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+    emit_json(&response)
 }
 
 pub fn sync_database(force: bool, timeout_secs: Option<u64>) -> Result<()> {

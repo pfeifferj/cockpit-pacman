@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
+import { usePagination } from "../hooks/usePagination";
 import { useSortableTable } from "../hooks/useSortableTable";
 import {
   Card,
@@ -45,9 +46,7 @@ export const SearchView: React.FC = () => {
   const [installedFilter, setInstalledFilter] = useState<InstalledFilterType>("all");
   const [selectedPackage, setSelectedPackage] = useState<SyncPackageDetails | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(50);
-  const [total, setTotal] = useState(0);
+  const { page, perPage, total, setPage, setPerPage, setTotal } = usePagination();
   const [totalInstalled, setTotalInstalled] = useState(0);
   const [totalNotInstalled, setTotalNotInstalled] = useState(0);
   const [repositories, setRepositories] = useState<string[]>([]);
@@ -150,7 +149,7 @@ export const SearchView: React.FC = () => {
         clearTimeout(debounceRef.current);
       }
     };
-  }, [searchInput, setActiveSortIndex]);
+  }, [searchInput, setActiveSortIndex, setPage, setTotal]);
 
   const filteredResults = useMemo(() => {
     if (repoFilter === "all") return results;

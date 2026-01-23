@@ -10,8 +10,8 @@ use std::time::Instant;
 use crate::alpm::get_handle;
 use crate::models::{CachedVersion, DowngradeResponse, StreamEvent};
 use crate::util::{
-    DEFAULT_MUTATION_TIMEOUT_SECS, emit_event, get_cache_dir, is_cancelled, parse_package_filename,
-    setup_signal_handler,
+    DEFAULT_MUTATION_TIMEOUT_SECS, emit_event, emit_json, get_cache_dir, is_cancelled,
+    parse_package_filename, setup_signal_handler,
 };
 use crate::validation::{validate_package_name, validate_version};
 
@@ -25,8 +25,7 @@ pub fn list_downgrades(package_name: Option<&str>) -> Result<()> {
             packages: vec![],
             total: 0,
         };
-        println!("{}", serde_json::to_string(&response)?);
-        return Ok(());
+        return emit_json(&response);
     }
 
     let entries = fs::read_dir(cache_path)
@@ -88,8 +87,7 @@ pub fn list_downgrades(package_name: Option<&str>) -> Result<()> {
     let total = packages.len();
     let response = DowngradeResponse { packages, total };
 
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+    emit_json(&response)
 }
 
 pub fn downgrade_package(name: &str, version: &str, timeout: Option<u64>) -> Result<()> {

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::models::{CacheInfo, CachePackage, StreamEvent};
-use crate::util::{emit_event, get_cache_dir, parse_package_filename};
+use crate::util::{emit_event, emit_json, get_cache_dir, parse_package_filename};
 
 pub fn get_cache_info() -> Result<()> {
     let cache_dir = get_cache_dir();
@@ -17,8 +17,7 @@ pub fn get_cache_info() -> Result<()> {
             packages: vec![],
             path: cache_dir,
         };
-        println!("{}", serde_json::to_string(&info)?);
-        return Ok(());
+        return emit_json(&info);
     }
 
     let mut packages: Vec<CachePackage> = Vec::new();
@@ -73,8 +72,7 @@ pub fn get_cache_info() -> Result<()> {
         path: cache_dir,
     };
 
-    println!("{}", serde_json::to_string(&info)?);
-    Ok(())
+    emit_json(&info)
 }
 
 pub fn clean_cache(keep_versions: u32) -> Result<()> {

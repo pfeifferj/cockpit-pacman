@@ -13,7 +13,7 @@ use crate::alpm::{
 };
 use crate::config::{AppConfig, ScheduleConfigResponse, ScheduleMode, ScheduleSetResponse};
 use crate::models::{ScheduledRunEntry, ScheduledRunsResponse};
-use crate::util::{CheckResult, TimeoutGuard, check_cancel, setup_signal_handler};
+use crate::util::{CheckResult, TimeoutGuard, check_cancel, emit_json, setup_signal_handler};
 use crate::validation::{validate_max_packages, validate_schedule};
 
 const LOG_DIR: &str = "/var/log/cockpit-pacman";
@@ -106,8 +106,7 @@ use std::os::unix::fs::PermissionsExt;
 pub fn get_schedule_config() -> Result<()> {
     let config = AppConfig::load()?;
     let response = ScheduleConfigResponse::from_config(&config.schedule);
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+    emit_json(&response)
 }
 
 pub fn set_schedule_config(
@@ -150,8 +149,7 @@ pub fn set_schedule_config(
             "Schedule disabled".to_string()
         },
     };
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+    emit_json(&response)
 }
 
 pub fn get_scheduled_runs(offset: usize, limit: usize) -> Result<()> {
@@ -184,8 +182,7 @@ pub fn get_scheduled_runs(offset: usize, limit: usize) -> Result<()> {
         runs: paginated,
         total,
     };
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+    emit_json(&response)
 }
 
 pub fn scheduled_run() -> Result<()> {

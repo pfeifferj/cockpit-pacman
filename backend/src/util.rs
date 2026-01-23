@@ -1,3 +1,5 @@
+use anyhow::Result;
+use serde::Serialize;
 use std::cmp::Ordering;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
@@ -68,6 +70,11 @@ pub fn emit_event(event: &StreamEvent) {
         println!("{}", json);
         let _ = io::stdout().flush();
     }
+}
+
+pub fn emit_json<T: Serialize>(response: &T) -> Result<()> {
+    println!("{}", serde_json::to_string(response)?);
+    Ok(())
 }
 
 pub fn sort_with_direction<T, F>(items: &mut [T], ascending: bool, cmp_fn: F)

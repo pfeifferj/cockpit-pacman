@@ -4,6 +4,7 @@ use std::collections::{HashSet, VecDeque};
 use crate::alpm::{get_handle, reason_to_string};
 use crate::db::get_repo_map;
 use crate::models::{DependencyEdge, DependencyNode, DependencyTreeResponse};
+use crate::util::emit_json;
 
 const MAX_NODES: usize = 500;
 
@@ -179,8 +180,7 @@ pub fn get_dependency_tree(name: &str, depth: u32, direction: &str) -> Result<()
         warnings,
     };
 
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+    emit_json(&response)
 }
 
 #[allow(clippy::too_many_arguments)]

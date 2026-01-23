@@ -3,6 +3,7 @@ use chrono::NaiveDateTime;
 use pacman_log::{Action, LogReader};
 
 use crate::models::{GroupedLogResponse, LogEntry, LogGroup, LogResponse};
+use crate::util::emit_json;
 
 const GROUP_THRESHOLD_SECS: i64 = 60;
 
@@ -90,8 +91,7 @@ pub fn get_history(offset: usize, limit: usize, filter: Option<&str>) -> Result<
         total_other: stats.total_other,
     };
 
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+    emit_json(&response)
 }
 
 fn parse_timestamp(ts: &str) -> Option<NaiveDateTime> {
@@ -178,8 +178,7 @@ pub fn get_grouped_history(offset: usize, limit: usize, filter: Option<&str>) ->
         total_other: stats.total_other,
     };
 
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+    emit_json(&response)
 }
 
 #[cfg(test)]
