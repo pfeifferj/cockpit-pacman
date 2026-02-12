@@ -829,6 +829,21 @@ mod integration {
     }
 
     #[test]
+    fn test_system_hookdir_present() {
+        let handle = get_handle().expect("Failed to get handle");
+        let hookdirs: Vec<&str> = handle.hookdirs().iter().collect();
+
+        assert!(
+            hookdirs
+                .iter()
+                .any(|d| d.contains("usr/share/libalpm/hooks")),
+            "System hookdir /usr/share/libalpm/hooks/ missing from hookdirs: {:?}. \
+             Without it, post-transaction hooks (mkinitcpio, depmod, systemd) will not run.",
+            hookdirs
+        );
+    }
+
+    #[test]
     fn test_package_has_expected_fields() {
         let handle = get_handle().expect("Failed to get handle");
         let localdb = handle.localdb();
