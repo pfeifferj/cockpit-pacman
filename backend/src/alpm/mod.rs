@@ -14,7 +14,18 @@ use crate::models::UpdateInfo;
 
 pub fn get_handle() -> Result<Alpm> {
     let conf = Config::new().context("Failed to parse pacman.conf")?;
-    alpm_with_conf(&conf).context("Failed to initialize alpm handle")
+    let mut handle = alpm_with_conf(&conf).context("Failed to initialize alpm handle")?;
+
+    // Workaround: alpm_utils uses set_hookdirs() which replaces the system hookdir
+    // (/usr/share/libalpm/hooks/) that alpm_initialize() sets by default. Pacman
+    // avoids this by using add_hookdir() instead. Re-add the system hookdir so
+    // post-transaction hooks (mkinitcpio, depmod, systemd, etc.) are found.
+    // https://github.com/archlinux/alpm.rs/issues/65
+    handle
+        .add_hookdir("/usr/share/libalpm/hooks/")
+        .context("Failed to add system hookdir")?;
+
+    Ok(handle)
 }
 
 /// Find all packages with available updates by comparing local versions to sync databases.
