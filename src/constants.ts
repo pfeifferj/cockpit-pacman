@@ -13,3 +13,5 @@ export const STREAMING_TIMEOUT_SECS = 300;
 export const MAX_LOG_SIZE_BYTES = 100000;
 
 export const LOG_CONTAINER_HEIGHT = "300px";
+
+export const NEWS_LOOKBACK_DAYS = 30;

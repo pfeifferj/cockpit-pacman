@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES } from "../constants";
+import { LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES, NEWS_LOOKBACK_DAYS } from "../constants";
 import { useSortableTable } from "../hooks/useSortableTable";
 import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
 import {
@@ -56,6 +56,7 @@ import {
   StreamEvent,
   RebootStatus,
   KeyringStatusResponse,
+  NewsItem,
   checkUpdates,
   runUpgrade,
   syncDatabase,
@@ -68,8 +69,10 @@ import {
   listOrphans,
   getCacheInfo,
   getKeyringStatus,
+  fetchNews,
 } from "../api";
 
+import { sanitizeUrl } from "../utils";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { StatBox } from "./StatBox";
 import { IgnoredPackagesModal } from "./IgnoredPackagesModal";
@@ -134,6 +137,15 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
   const [cacheSize, setCacheSize] = useState<number | null>(null);
   const [keyringStatus, setKeyringStatus] = useState<KeyringStatusResponse | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
+  const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
+  const [dismissedNews, setDismissedNews] = useState<Set<string>>(() => {
+    try {
+      const stored = window.localStorage.getItem("cockpit-pacman-dismissed-news");
+      return stored ? new Set(JSON.parse(stored) as string[]) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
 
   const { activeSortKey, activeSortDirection, getSortParams } = useSortableTable({
     columns: { name: 1, repo: 2, download: 4, installed: 5, net: 6 },
@@ -213,6 +225,22 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
     );
   }, [preflightData, acknowledgedRemovals, acknowledgedConflicts, acknowledgedKeyImports]);
 
+  const visibleNews = useMemo(
+    () => newsItems.filter((item) => !dismissedNews.has(item.link)),
+    [newsItems, dismissedNews]
+  );
+
+  const dismissNewsItem = useCallback((link: string) => {
+    setDismissedNews((prev) => {
+      const next = new Set(prev);
+      next.add(link);
+      try {
+        window.localStorage.setItem("cockpit-pacman-dismissed-news", JSON.stringify([...next]));
+      } catch { /* localStorage unavailable */ }
+      return next;
+    });
+  }, []);
+
   const togglePackageSelection = (pkgName: string) => {
     setSelectedPackages((prev) => {
       const next = new Set(prev);
@@ -283,14 +311,16 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
 
   const loadSummary = useCallback(async () => {
     setSummaryLoading(true);
-    const [orphans, cache, keyring] = await Promise.all([
+    const [orphans, cache, keyring, news] = await Promise.all([
       listOrphans().catch(() => null),
       getCacheInfo().catch(() => null),
       getKeyringStatus().catch(() => null),
+      fetchNews(NEWS_LOOKBACK_DAYS).catch(() => null),
     ]);
     setOrphanCount(orphans?.orphans.length ?? null);
     setCacheSize(cache?.total_size ?? null);
     setKeyringStatus(keyring);
+    setNewsItems(news?.items ?? []);
     setSummaryLoading(false);
   }, []);
 
@@ -501,6 +531,23 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
   const selectedCurrentSize = selectedUpdates.reduce((sum, u) => sum + u.current_size, 0);
   const selectedNewSize = selectedUpdates.reduce((sum, u) => sum + u.new_size, 0);
   const selectedNetSize = selectedNewSize - selectedCurrentSize;
+
+  const newsAlerts = visibleNews.map((item) => (
+    <Alert
+      key={item.link}
+      variant="info"
+      title={item.title}
+      actionClose={<AlertActionCloseButton onClose={() => dismissNewsItem(item.link)} />}
+      className="pf-v6-u-mb-md"
+    >
+      <Content component={ContentVariants.p}>{item.summary}</Content>
+      <Content component={ContentVariants.p}>
+        <small>{new Date(item.published).toLocaleDateString()}</small>
+        {" -- "}
+        <a href={sanitizeUrl(item.link) ?? "#"} target="_blank" rel="noopener noreferrer">Read more on archlinux.org</a>
+      </Content>
+    </Alert>
+  ));
 
   if (state === "loading" || state === "checking") {
     return (
@@ -715,6 +762,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
             </ul>
           </Alert>
         )}
+        {newsAlerts}
         <Card>
           <CardBody>
             <EmptyState  headingLevel="h2" icon={CheckCircleIcon}  titleText="System is up to date">
@@ -767,6 +815,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
           </ul>
         </Alert>
       )}
+      {newsAlerts}
       {keyringStatus && !keyringStatus.master_key_initialized && (
         <Alert variant="warning" title="Keyring not initialized" isInline className="pf-v6-u-mb-md">
           The pacman keyring is not initialized. Package signature verification may fail.

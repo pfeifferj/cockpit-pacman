@@ -6,6 +6,7 @@ pub mod keyring;
 pub mod log;
 pub mod mirrors;
 pub mod mutation;
+pub mod news;
 pub mod query;
 pub mod reboot;
 pub mod scheduled;
@@ -18,6 +19,7 @@ pub use keyring::{init_keyring, keyring_status, refresh_keyring};
 pub use log::{get_grouped_history, get_history};
 pub use mirrors::{fetch_mirror_status, list_mirrors, save_mirrorlist, test_mirrors};
 pub use mutation::{preflight_upgrade, remove_orphans, run_upgrade, sync_database};
+pub use news::fetch_news;
 pub use query::{
     check_updates, list_installed, list_orphans, local_package_info, search, sync_package_info,
 };

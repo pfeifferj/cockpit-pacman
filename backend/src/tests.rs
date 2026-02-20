@@ -1,5 +1,6 @@
 use crate::models::{
-    Package, PackageDetails, PackageListResponse, SearchResult, UpdateInfo, UpdatesResponse,
+    NewsItem, NewsResponse, Package, PackageDetails, PackageListResponse, SearchResult, UpdateInfo,
+    UpdatesResponse,
 };
 use crate::util::parse_package_filename;
 use crate::validation::{
@@ -780,6 +781,142 @@ fn test_check_result_variants() {
 
     let result = check_cancel(&timeout);
     assert!(matches!(result, CheckResult::Continue));
+}
+
+// --- News serialization tests ---
+
+#[test]
+fn test_news_item_serialization() {
+    let item = NewsItem {
+        title: "grub 2.12 requires manual intervention".to_string(),
+        link: "https://archlinux.org/news/grub-212/".to_string(),
+        published: "2025-06-01T00:00:00+00:00".to_string(),
+        summary: "Users of grub need to reinstall grub after upgrading.".to_string(),
+    };
+
+    let json = serde_json::to_string(&item).unwrap();
+    assert!(json.contains("\"title\":\"grub 2.12 requires manual intervention\""));
+    assert!(json.contains("\"link\":\"https://archlinux.org/news/grub-212/\""));
+    assert!(json.contains("\"published\":\"2025-06-01T00:00:00+00:00\""));
+    assert!(json.contains("\"summary\":\"Users of grub need to reinstall grub after upgrading.\""));
+}
+
+#[test]
+fn test_news_response_serialization_empty() {
+    let response = NewsResponse { items: vec![] };
+    let json = serde_json::to_string(&response).unwrap();
+    assert_eq!(json, "{\"items\":[]}");
+}
+
+#[test]
+fn test_news_response_serialization_with_items() {
+    let response = NewsResponse {
+        items: vec![
+            NewsItem {
+                title: "Title A".to_string(),
+                link: "https://archlinux.org/news/a/".to_string(),
+                published: "2025-06-01T00:00:00+00:00".to_string(),
+                summary: "Summary A".to_string(),
+            },
+            NewsItem {
+                title: "Title B".to_string(),
+                link: "https://archlinux.org/news/b/".to_string(),
+                published: "2025-05-31T00:00:00+00:00".to_string(),
+                summary: "Summary B".to_string(),
+            },
+        ],
+    };
+
+    let json = serde_json::to_string(&response).unwrap();
+    assert!(json.contains("\"title\":\"Title A\""));
+    assert!(json.contains("\"title\":\"Title B\""));
+}
+
+// --- strip_html_and_truncate tests ---
+
+#[test]
+fn test_strip_html_basic() {
+    use crate::handlers::news::strip_html_and_truncate;
+
+    assert_eq!(
+        strip_html_and_truncate("<p>Hello world</p>", 300),
+        "Hello world"
+    );
+}
+
+#[test]
+fn test_strip_html_nested_tags() {
+    use crate::handlers::news::strip_html_and_truncate;
+
+    assert_eq!(
+        strip_html_and_truncate("<div><p>Nested <strong>content</strong></p></div>", 300),
+        "Nested content"
+    );
+}
+
+#[test]
+fn test_strip_html_entity_decoding() {
+    use crate::handlers::news::strip_html_and_truncate;
+
+    assert_eq!(strip_html_and_truncate("A &amp; B", 300), "A & B");
+    assert_eq!(strip_html_and_truncate("&lt;tag&gt;", 300), "<tag>");
+    assert_eq!(
+        strip_html_and_truncate("&quot;quoted&quot;", 300),
+        "\"quoted\""
+    );
+    assert_eq!(strip_html_and_truncate("it&#39;s", 300), "it's");
+    assert_eq!(strip_html_and_truncate("a&nbsp;b", 300), "a b");
+    assert_eq!(
+        strip_html_and_truncate("&#8217;smart&#8217;", 300),
+        "\u{2019}smart\u{2019}"
+    );
+    assert_eq!(strip_html_and_truncate("&#x2014;dash", 300), "\u{2014}dash");
+}
+
+#[test]
+fn test_strip_html_whitespace_collapse() {
+    use crate::handlers::news::strip_html_and_truncate;
+
+    assert_eq!(
+        strip_html_and_truncate("hello   world   foo", 300),
+        "hello world foo"
+    );
+    assert_eq!(
+        strip_html_and_truncate("<p>hello</p>  <p>world</p>", 300),
+        "hello world"
+    );
+}
+
+#[test]
+fn test_strip_html_truncation_at_word_boundary() {
+    use crate::handlers::news::strip_html_and_truncate;
+
+    let long_text = "The quick brown fox jumps over the lazy dog and then runs away";
+    let result = strip_html_and_truncate(long_text, 30);
+    assert!(result.ends_with("..."));
+    assert!(result.len() <= 34); // 30 + "..."
+    assert!(!result.contains("  "));
+}
+
+#[test]
+fn test_strip_html_no_truncation_when_short() {
+    use crate::handlers::news::strip_html_and_truncate;
+
+    assert_eq!(strip_html_and_truncate("Short text", 300), "Short text");
+}
+
+#[test]
+fn test_strip_html_empty_input() {
+    use crate::handlers::news::strip_html_and_truncate;
+
+    assert_eq!(strip_html_and_truncate("", 300), "");
+}
+
+#[test]
+fn test_strip_html_only_tags() {
+    use crate::handlers::news::strip_html_and_truncate;
+
+    assert_eq!(strip_html_and_truncate("<br/><hr/>", 300), "");
 }
 
 // --- Integration tests (require live pacman system) ---

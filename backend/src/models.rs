@@ -1,6 +1,19 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
+pub struct NewsItem {
+    pub title: String,
+    pub link: String,
+    pub published: String,
+    pub summary: String,
+}
+
+#[derive(Serialize)]
+pub struct NewsResponse {
+    pub items: Vec<NewsItem>,
+}
+
+#[derive(Serialize)]
 pub struct Package {
     pub name: String,
     pub version: String,

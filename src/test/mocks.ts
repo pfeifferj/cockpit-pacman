@@ -9,6 +9,7 @@ import type {
   GroupedLogResponse,
   LogGroup,
   DependencyTreeResponse,
+  NewsResponse,
 } from "../api";
 
 export const mockPackageListResponse: PackageListResponse = {
@@ -336,6 +337,27 @@ export const mockGroupedLogResponse: GroupedLogResponse = {
   total_installed: 2,
   total_removed: 1,
   total_other: 0,
+};
+
+export const mockNewsResponse: NewsResponse = {
+  items: [
+    {
+      title: "grub 2:2.12-3 requires manual intervention",
+      link: "https://archlinux.org/news/grub-2212-3/",
+      published: "2026-02-01T00:00:00+00:00",
+      summary: "Users of grub need to reinstall grub after upgrading to resolve boot issues.",
+    },
+    {
+      title: "OpenSSL 3.4 update",
+      link: "https://archlinux.org/news/openssl-34/",
+      published: "2026-01-15T00:00:00+00:00",
+      summary: "OpenSSL has been updated to 3.4. Users may need to rebuild custom modules.",
+    },
+  ],
+};
+
+export const mockNewsResponseEmpty: NewsResponse = {
+  items: [],
 };
 
 export const mockDependencyTreeResponse: DependencyTreeResponse = {
