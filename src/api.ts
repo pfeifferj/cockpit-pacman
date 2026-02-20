@@ -1015,6 +1015,21 @@ export interface DependencyTreeResponse {
   warnings: string[];
 }
 
+export interface NewsItem {
+  title: string;
+  link: string;
+  published: string;
+  summary: string;
+}
+
+export interface NewsResponse {
+  items: NewsItem[];
+}
+
+export async function fetchNews(days: number = 30): Promise<NewsResponse> {
+  return runBackend<NewsResponse>("fetch-news", [String(days)]);
+}
+
 export type DependencyDirection = "forward" | "reverse" | "both";
 
 export interface DependencyTreeParams {

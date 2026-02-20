@@ -1,7 +1,7 @@
 use std::env;
 
 use cockpit_pacman_backend::handlers::{
-    add_ignored, check_updates, clean_cache, downgrade_package, fetch_mirror_status,
+    add_ignored, check_updates, clean_cache, downgrade_package, fetch_mirror_status, fetch_news,
     get_cache_info, get_dependency_tree, get_grouped_history, get_history, get_reboot_status,
     get_schedule_config, get_scheduled_runs, init_keyring, keyring_status, list_downgrades,
     list_ignored, list_installed, list_mirrors, list_orphans, local_package_info,
@@ -96,6 +96,8 @@ fn print_usage() {
     eprintln!("                         Get dependency tree for a package");
     eprintln!("                         depth: 1-10 (default: 3)");
     eprintln!("                         direction: forward|reverse|both (default: forward)");
+    eprintln!("  fetch-news [days]      Fetch recent Arch Linux news items");
+    eprintln!("                         days: lookback period (default: 30)");
 }
 
 fn main() {
@@ -324,6 +326,10 @@ fn main() {
                 .and_then(|_| validate_depth(depth))
                 .and_then(|_| validate_direction(direction))
                 .and_then(|_| get_dependency_tree(&args[2], depth, direction))
+        }
+        "fetch-news" => {
+            let days = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(30u32);
+            fetch_news(days)
         }
         "help" | "--help" | "-h" => {
             print_usage();

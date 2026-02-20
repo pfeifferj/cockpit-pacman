@@ -19,6 +19,7 @@ fs2 = "0.4"
 pacman-key = "0.1.2"
 pacman-log = "0.1.0"
 tokio = { version = "1", features = ["rt-multi-thread"] }
+rss = "2"
 ureq = "3"
 
 [profile.release]

@@ -8,6 +8,8 @@ import {
   mockPreflightWithConflicts,
   mockPreflightWithKeys,
   mockSyncPackageDetails,
+  mockNewsResponse,
+  mockNewsResponseEmpty,
 } from "../test/mocks";
 
 vi.mock("../api", async () => {
@@ -24,6 +26,7 @@ vi.mock("../api", async () => {
     listOrphans: vi.fn(),
     getCacheInfo: vi.fn(),
     getKeyringStatus: vi.fn(),
+    fetchNews: vi.fn(),
   };
 });
 
@@ -37,10 +40,12 @@ const mockGetRebootStatus = vi.mocked(api.getRebootStatus);
 const mockListOrphans = vi.mocked(api.listOrphans);
 const mockGetCacheInfo = vi.mocked(api.getCacheInfo);
 const mockGetKeyringStatus = vi.mocked(api.getKeyringStatus);
+const mockFetchNews = vi.mocked(api.fetchNews);
 
 describe("UpdatesView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     mockCheckUpdates.mockResolvedValue(mockUpdatesResponse);
     mockPreflightUpgrade.mockResolvedValue(mockPreflightResponse);
     mockGetSyncPackageInfo.mockResolvedValue(mockSyncPackageDetails);
@@ -66,6 +71,7 @@ describe("UpdatesView", () => {
       master_key_initialized: true,
       warnings: [],
     });
+    mockFetchNews.mockResolvedValue(mockNewsResponseEmpty);
     mockRunUpgrade.mockReturnValue({ cancel: vi.fn() });
     mockSyncDatabase.mockImplementation((callbacks) => {
       setTimeout(() => callbacks.onComplete(), 0);
@@ -947,6 +953,73 @@ describe("UpdatesView", () => {
         expect(screen.queryByText("aaa-package")).not.toBeInTheDocument();
       });
       expect(screen.getByText("zzz-package")).toBeInTheDocument();
+    });
+  });
+
+  describe("News Feed", () => {
+    it("displays news items when returned", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
+      mockFetchNews.mockResolvedValue(mockNewsResponse);
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("System is up to date")).toBeInTheDocument();
+      });
+      expect(screen.getByText("grub 2:2.12-3 requires manual intervention")).toBeInTheDocument();
+      expect(screen.getByText("OpenSSL 3.4 update")).toBeInTheDocument();
+    });
+
+    it("shows nothing when empty response", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
+      mockFetchNews.mockResolvedValue(mockNewsResponseEmpty);
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("System is up to date")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("Read more on archlinux.org")).not.toBeInTheDocument();
+    });
+
+    it("shows nothing when fetch fails", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
+      mockFetchNews.mockRejectedValue(new Error("Network error"));
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("System is up to date")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("Read more on archlinux.org")).not.toBeInTheDocument();
+    });
+
+    it("dismiss hides the specific item", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
+      mockFetchNews.mockResolvedValue(mockNewsResponse);
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("grub 2:2.12-3 requires manual intervention")).toBeInTheDocument();
+      });
+
+      const closeButtons = screen.getAllByRole("button").filter(
+        (btn) => btn.getAttribute("aria-label")?.includes("grub")
+      );
+      expect(closeButtons.length).toBeGreaterThan(0);
+      await act(async () => {
+        fireEvent.click(closeButtons[0]);
+      });
+
+      expect(screen.queryByText("grub 2:2.12-3 requires manual intervention")).not.toBeInTheDocument();
+      expect(screen.getByText("OpenSSL 3.4 update")).toBeInTheDocument();
+    });
+
+    it("news visible alongside updates in available state", async () => {
+      mockFetchNews.mockResolvedValue(mockNewsResponse);
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+      expect(screen.getByText("grub 2:2.12-3 requires manual intervention")).toBeInTheDocument();
     });
   });
 
