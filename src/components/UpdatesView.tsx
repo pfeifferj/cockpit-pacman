@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES, NEWS_LOOKBACK_DAYS } from "../constants";
+import { ARCH_STATUS_URL, LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES, NEWS_LOOKBACK_DAYS } from "../constants";
 import { useSortableTable } from "../hooks/useSortableTable";
 import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
 import {
@@ -138,6 +138,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
   const [keyringStatus, setKeyringStatus] = useState<KeyringStatusResponse | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
+  const [newsError, setNewsError] = useState(false);
   const [dismissedNews, setDismissedNews] = useState<Set<string>>(() => {
     try {
       const stored = window.localStorage.getItem("cockpit-pacman-dismissed-news");
@@ -268,6 +269,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
     setState("checking");
     setError(null);
     setWarnings([]);
+    setNewsError(false);
     try {
       const response = await checkUpdates();
       setUpdates(response.updates);
@@ -311,16 +313,25 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
 
   const loadSummary = useCallback(async () => {
     setSummaryLoading(true);
-    const [orphans, cache, keyring, news] = await Promise.all([
+    type NewsResult = { ok: true; items: NewsItem[] } | { ok: false };
+    const [orphans, cache, keyring, newsResult] = await Promise.all([
       listOrphans().catch(() => null),
       getCacheInfo().catch(() => null),
       getKeyringStatus().catch(() => null),
-      fetchNews(NEWS_LOOKBACK_DAYS).catch(() => null),
+      fetchNews(NEWS_LOOKBACK_DAYS)
+        .then((r): NewsResult => ({ ok: true, items: r.items }))
+        .catch((): NewsResult => ({ ok: false })),
     ]);
     setOrphanCount(orphans?.orphans.length ?? null);
     setCacheSize(cache?.total_size ?? null);
     setKeyringStatus(keyring);
-    setNewsItems(news?.items ?? []);
+    if (newsResult.ok) {
+      setNewsError(false);
+      setNewsItems(newsResult.items);
+    } else {
+      setNewsError(true);
+      setNewsItems([]);
+    }
     setSummaryLoading(false);
   }, []);
 
@@ -549,6 +560,19 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
     </Alert>
   ));
 
+  const newsErrorAlert = newsError ? (
+    <Alert
+      variant="warning"
+      title="Unable to fetch Arch Linux news"
+      actionClose={<AlertActionCloseButton onClose={() => setNewsError(false)} />}
+      className="pf-v6-u-mb-md"
+    >
+      Could not retrieve the latest news from archlinux.org. Check your network connection or visit the{" "}
+      <a href={ARCH_STATUS_URL} target="_blank" rel="noopener noreferrer">Arch Linux status page</a>
+      {" "}for service updates.
+    </Alert>
+  ) : null;
+
   if (state === "loading" || state === "checking") {
     return (
       <Card>
@@ -565,6 +589,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
 
   if (state === "error") {
     const isLockError = error?.toLowerCase().includes("unable to lock database");
+    const isNetworkError = error ? /failed to retrieve|unable to connect|could not resolve|timed\s+out|timeout|dns|connection refused/i.test(error) : false;
     return (
       <Card>
         <CardBody>
@@ -576,6 +601,13 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
             {isLockError
               ? "Another package manager operation is in progress. This could be a system upgrade, package installation, or database sync. Please wait for it to complete before checking for updates."
               : error}
+            {isNetworkError && !isLockError && (
+              <Content component={ContentVariants.p} className="pf-v6-u-mt-sm">
+                Check your network connection or visit the{" "}
+                <a href={ARCH_STATUS_URL} target="_blank" rel="noopener noreferrer">Arch Linux status page</a>
+                {" "}for service updates.
+              </Content>
+            )}
           </Alert>
           <div className="pf-v6-u-mt-md">
             <Button variant="primary" onClick={loadUpdates}>
@@ -762,6 +794,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
             </ul>
           </Alert>
         )}
+        {newsErrorAlert}
         {newsAlerts}
         <Card>
           <CardBody>
@@ -815,6 +848,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
           </ul>
         </Alert>
       )}
+      {newsErrorAlert}
       {newsAlerts}
       {keyringStatus && !keyringStatus.master_key_initialized && (
         <Alert variant="warning" title="Keyring not initialized" isInline className="pf-v6-u-mb-md">
