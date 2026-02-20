@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.1] - 2026-02-20
+
+### Added
+- Arch Linux news feed in the Updates tab
+- Network error detection with link to Arch Linux status page
+
+### Fixed
+- System hooks not running after upgrades due to alpm_utils overwriting hookdir
+- Alerts positioned outside card in up-to-date view
+
 ## [0.3.0] - 2026-01-23
 
 ### Added
