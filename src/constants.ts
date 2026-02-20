@@ -15,3 +15,5 @@ export const MAX_LOG_SIZE_BYTES = 100000;
 export const LOG_CONTAINER_HEIGHT = "300px";
 
 export const NEWS_LOOKBACK_DAYS = 30;
+
+export const ARCH_STATUS_URL = "https://status.archlinux.org/";

@@ -11,7 +11,7 @@ const MAX_RSS_BYTES: u64 = 512 * 1024;
 
 pub fn fetch_news(days: u32) -> Result<()> {
     let days = days.min(365);
-    let items = fetch_news_items(days).unwrap_or_default();
+    let items = fetch_news_items(days)?;
     emit_json(&NewsResponse { items })
 }
 

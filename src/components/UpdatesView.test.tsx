@@ -532,6 +532,27 @@ describe("UpdatesView", () => {
       });
     });
 
+    it("shows status page link for network errors", async () => {
+      mockCheckUpdates.mockRejectedValue(new Error("failed to retrieve some files"));
+      render(<UpdatesView />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/failed to retrieve some files/)).toBeInTheDocument();
+      });
+      expect(screen.getByText("Arch Linux status page")).toBeInTheDocument();
+      expect(screen.getByText(/Check your network connection/)).toBeInTheDocument();
+    });
+
+    it("does not show status page link for non-network errors", async () => {
+      mockCheckUpdates.mockRejectedValue(new Error("corrupted database"));
+      render(<UpdatesView />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/corrupted database/)).toBeInTheDocument();
+      });
+      expect(screen.queryByText("Arch Linux status page")).not.toBeInTheDocument();
+    });
+
     it("displays preflight error", async () => {
       mockPreflightUpgrade.mockResolvedValue({
         success: false,
@@ -980,7 +1001,7 @@ describe("UpdatesView", () => {
       expect(screen.queryByText("Read more on archlinux.org")).not.toBeInTheDocument();
     });
 
-    it("shows nothing when fetch fails", async () => {
+    it("shows warning alert when fetch fails", async () => {
       mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
       mockFetchNews.mockRejectedValue(new Error("Network error"));
 
@@ -989,6 +1010,35 @@ describe("UpdatesView", () => {
         expect(screen.getByText("System is up to date")).toBeInTheDocument();
       });
       expect(screen.queryByText("Read more on archlinux.org")).not.toBeInTheDocument();
+      expect(screen.getByText("Unable to fetch Arch Linux news")).toBeInTheDocument();
+      expect(screen.getByText(/Check your network connection/)).toBeInTheDocument();
+    });
+
+    it("dismissing news error alert removes it", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
+      mockFetchNews.mockRejectedValue(new Error("Network error"));
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("Unable to fetch Arch Linux news")).toBeInTheDocument();
+      });
+
+      const closeButton = screen.getByRole("button", { name: /Unable to fetch Arch Linux news/ });
+      await act(async () => {
+        fireEvent.click(closeButton);
+      });
+
+      expect(screen.queryByText("Unable to fetch Arch Linux news")).not.toBeInTheDocument();
+    });
+
+    it("shows news error alert alongside updates in available state", async () => {
+      mockFetchNews.mockRejectedValue(new Error("Network error"));
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+      expect(screen.getByText("Unable to fetch Arch Linux news")).toBeInTheDocument();
     });
 
     it("dismiss hides the specific item", async () => {
