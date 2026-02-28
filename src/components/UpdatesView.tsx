@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { ARCH_STATUS_URL, LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES, NEWS_LOOKBACK_DAYS } from "../constants";
-import { useSortableTable } from "../hooks/useSortableTable";
 import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
+import { usePackageDetails } from "../hooks/usePackageDetails";
+import { useSortableTable } from "../hooks/useSortableTable";
 import {
 	Card,
 	CardBody,
@@ -51,7 +52,6 @@ import {
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
   UpdateInfo,
-  SyncPackageDetails,
   PreflightResponse,
   StreamEvent,
   RebootStatus,
@@ -60,7 +60,6 @@ import {
   checkUpdates,
   runUpgrade,
   syncDatabase,
-  getSyncPackageInfo,
   preflightUpgrade,
   formatSize,
   formatNumber,
@@ -107,8 +106,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
   const [warnings, setWarnings] = useState<string[]>([]);
   const cancelRef = useRef<(() => void) | null>(null);
   const logContainerRef = useAutoScrollLog(log);
-  const [selectedPackage, setSelectedPackage] = useState<SyncPackageDetails | null>(null);
-  const [packageLoading, setPackageLoading] = useState(false);
+  const { selectedPackage, detailsLoading: packageLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
   const [searchFilter, setSearchFilter] = useState("");
   const [repoFilter, setRepoFilter] = useState("all");
   const [repoSelectOpen, setRepoSelectOpen] = useState(false);
@@ -521,20 +519,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
     setIsCancelling(false);
   };
 
-  const handlePackageClick = async (pkgName: string) => {
-    setPackageLoading(true);
-    try {
-      const details = await getSyncPackageInfo(pkgName);
-      setSelectedPackage(details);
-    } catch (ex) {
-      console.error("Failed to load package details:", ex);
-    } finally {
-      setPackageLoading(false);
-    }
-  };
-
-  const handleCloseModal = () => {
-    setSelectedPackage(null);
+  const handlePackageClick = (pkgName: string) => {
+    fetchDetails(pkgName, { strategy: "sync" });
   };
 
   // Summary totals based on selected packages
@@ -1084,7 +1070,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
       <PackageDetailsModal
         packageDetails={selectedPackage}
         isLoading={packageLoading}
-        onClose={handleCloseModal}
+        onClose={clearDetails}
+        error={detailsError}
         onViewDependencies={onViewDependencies}
       />
 

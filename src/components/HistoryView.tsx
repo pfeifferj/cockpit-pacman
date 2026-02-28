@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { usePackageDetails } from "../hooks/usePackageDetails";
 import { usePagination } from "../hooks/usePagination";
 import {
   Accordion,
@@ -32,11 +33,7 @@ import {
   LogGroup,
   GroupedLogResponse,
   HistoryFilterType,
-  PackageDetails,
-  SyncPackageDetails,
   getGroupedHistory,
-  getPackageInfo,
-  getSyncPackageInfo,
   formatNumber,
 } from "../api";
 import { sanitizeErrorMessage } from "../utils";
@@ -73,9 +70,7 @@ export const HistoryView: React.FC = () => {
   const [filter, setFilter] = useState<HistoryFilterType>("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const [selectedPackage, setSelectedPackage] = useState<PackageDetails | SyncPackageDetails | null>(null);
-  const [detailsLoading, setDetailsLoading] = useState(false);
-  const [detailsError, setDetailsError] = useState<string | null>(null);
+  const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
   const isMountedRef = useRef(true);
 
   const loadHistory = useCallback(async () => {
@@ -105,29 +100,8 @@ export const HistoryView: React.FC = () => {
     };
   }, []);
 
-  const handleRowClick = async (pkgName: string) => {
-    setDetailsLoading(true);
-    setDetailsError(null);
-    setSelectedPackage(null);
-    try {
-      const details = await getPackageInfo(pkgName);
-      if (!isMountedRef.current) return;
-      setSelectedPackage(details);
-    } catch {
-      if (!isMountedRef.current) return;
-      try {
-        const syncDetails = await getSyncPackageInfo(pkgName);
-        if (!isMountedRef.current) return;
-        setSelectedPackage(syncDetails);
-      } catch {
-        if (!isMountedRef.current) return;
-        setDetailsError(`Package "${pkgName}" is not installed and not available in any configured repository.`);
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setDetailsLoading(false);
-      }
-    }
+  const handleRowClick = (pkgName: string) => {
+    fetchDetails(pkgName, { strategy: "local-then-sync" });
   };
 
   const handleFilterChange = (value: HistoryFilterType) => {
@@ -424,10 +398,7 @@ export const HistoryView: React.FC = () => {
         <PackageDetailsModal
           packageDetails={selectedPackage}
           isLoading={detailsLoading}
-          onClose={() => {
-            setSelectedPackage(null);
-            setDetailsError(null);
-          }}
+          onClose={clearDetails}
           error={detailsError}
         />
       </CardBody>

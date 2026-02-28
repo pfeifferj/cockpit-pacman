@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useDebouncedValue } from "../hooks/useDebounce";
+import { usePackageDetails } from "../hooks/usePackageDetails";
 import { usePagination } from "../hooks/usePagination";
 import { useSortableTable } from "../hooks/useSortableTable";
 import {
@@ -28,12 +29,10 @@ import { DependencyView } from "./DependencyView";
 import { OrphansView } from "./OrphansView";
 import {
   Package,
-  PackageDetails,
   PackageListResponse,
   FilterType,
   listInstalled,
   listOrphans,
-  getPackageInfo,
   formatSize,
   formatNumber,
 } from "../api";
@@ -53,8 +52,7 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphP
   const [searchValue, setSearchValue] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [filter, setFilter] = useState<FilterType>("all");
-  const [selectedPackage, setSelectedPackage] = useState<PackageDetails | null>(null);
-  const [detailsLoading, setDetailsLoading] = useState(false);
+  const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
 
   const { page, perPage, total, setPage, setTotal, onSetPage, onPerPageSelect } = usePagination();
   const [totalExplicit, setTotalExplicit] = useState(0);
@@ -183,20 +181,8 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphP
     setPage(1);
   };
 
-  const handleRowClick = async (pkgName: string) => {
-    setDetailsLoading(true);
-    try {
-      const details = await getPackageInfo(pkgName);
-      if (!isMountedRef.current) return;
-      setSelectedPackage(details);
-    } catch (ex) {
-      if (!isMountedRef.current) return;
-      setError(ex instanceof Error ? ex.message : String(ex));
-    } finally {
-      if (isMountedRef.current) {
-        setDetailsLoading(false);
-      }
-    }
+  const handleRowClick = (pkgName: string) => {
+    fetchDetails(pkgName);
   };
 
   if (error && packages.length === 0 && filter !== "orphan") {
@@ -402,7 +388,8 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphP
           <PackageDetailsModal
             packageDetails={selectedPackage}
             isLoading={detailsLoading}
-            onClose={() => setSelectedPackage(null)}
+            onClose={clearDetails}
+            error={detailsError}
             onViewDependencies={(packageName) => {
               onGraphPackageChange?.(packageName);
               setFilter("graph");

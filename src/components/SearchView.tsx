@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
+import { usePackageDetails } from "../hooks/usePackageDetails";
 import { usePagination } from "../hooks/usePagination";
 import { useSortableTable } from "../hooks/useSortableTable";
 import {
@@ -27,7 +28,7 @@ import {
 } from "@patternfly/react-core";
 import { SearchIcon } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
-import { SearchResult, SyncPackageDetails, searchPackages, getSyncPackageInfo, InstalledFilterType } from "../api";
+import { SearchResult, searchPackages, InstalledFilterType } from "../api";
 import { sanitizeSearchInput } from "../utils";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { TableLoadingOverlay } from "./TableLoadingOverlay";
@@ -49,8 +50,7 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
   const [repoFilter, setRepoFilter] = useState("all");
   const [repoSelectOpen, setRepoSelectOpen] = useState(false);
   const [installedFilter, setInstalledFilter] = useState<InstalledFilterType>("all");
-  const [selectedPackage, setSelectedPackage] = useState<SyncPackageDetails | null>(null);
-  const [detailsLoading, setDetailsLoading] = useState(false);
+  const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
   const { page, perPage, total, setPage, setPerPage, setTotal } = usePagination();
   const [totalInstalled, setTotalInstalled] = useState(0);
   const [totalNotInstalled, setTotalNotInstalled] = useState(0);
@@ -288,20 +288,8 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
     }
   };
 
-  const handleRowClick = async (pkgName: string, repo: string) => {
-    setDetailsLoading(true);
-    try {
-      const details = await getSyncPackageInfo(pkgName, repo);
-      if (!isMountedRef.current) return;
-      setSelectedPackage(details);
-    } catch (ex) {
-      if (!isMountedRef.current) return;
-      setError(ex instanceof Error ? ex.message : String(ex));
-    } finally {
-      if (isMountedRef.current) {
-        setDetailsLoading(false);
-      }
-    }
+  const handleRowClick = (pkgName: string, repo: string) => {
+    fetchDetails(pkgName, { strategy: "sync", repo });
   };
 
   return (
@@ -497,7 +485,8 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
         <PackageDetailsModal
           packageDetails={selectedPackage}
           isLoading={detailsLoading}
-          onClose={() => setSelectedPackage(null)}
+          onClose={clearDetails}
+          error={detailsError}
           onViewDependencies={onViewDependencies}
         />
       </CardBody>

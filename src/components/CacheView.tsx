@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES } from "../constants";
 import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
+import { usePackageDetails } from "../hooks/usePackageDetails";
 import { useSortableTable } from "../hooks/useSortableTable";
 import {
   Card,
@@ -36,12 +37,8 @@ import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
   CacheInfo,
   CachePackage,
-  PackageDetails,
-  SyncPackageDetails,
   getCacheInfo,
   cleanCache,
-  getPackageInfo,
-  getSyncPackageInfo,
   formatSize,
   formatNumber,
 } from "../api";
@@ -57,9 +54,7 @@ export const CacheView: React.FC = () => {
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [keepVersions, setKeepVersions] = useState(3);
-  const [selectedPackage, setSelectedPackage] = useState<PackageDetails | SyncPackageDetails | null>(null);
-  const [detailsLoading, setDetailsLoading] = useState(false);
-  const [detailsError, setDetailsError] = useState<string | null>(null);
+  const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
   const cancelRef = useRef<(() => void) | null>(null);
   const logContainerRef = useAutoScrollLog(log);
   const isMountedRef = useRef(true);
@@ -95,29 +90,8 @@ export const CacheView: React.FC = () => {
     };
   }, []);
 
-  const handleRowClick = async (pkgName: string) => {
-    setDetailsLoading(true);
-    setDetailsError(null);
-    setSelectedPackage(null);
-    try {
-      const details = await getPackageInfo(pkgName);
-      if (!isMountedRef.current) return;
-      setSelectedPackage(details);
-    } catch {
-      if (!isMountedRef.current) return;
-      try {
-        const syncDetails = await getSyncPackageInfo(pkgName);
-        if (!isMountedRef.current) return;
-        setSelectedPackage(syncDetails);
-      } catch {
-        if (!isMountedRef.current) return;
-        setDetailsError(`Package "${pkgName}" is not installed and not available in any configured repository.`);
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setDetailsLoading(false);
-      }
-    }
+  const handleRowClick = (pkgName: string) => {
+    fetchDetails(pkgName, { strategy: "local-then-sync" });
   };
 
 
@@ -446,10 +420,7 @@ export const CacheView: React.FC = () => {
       <PackageDetailsModal
         packageDetails={selectedPackage}
         isLoading={detailsLoading}
-        onClose={() => {
-          setSelectedPackage(null);
-          setDetailsError(null);
-        }}
+        onClose={clearDetails}
         error={detailsError}
       />
     </Card>

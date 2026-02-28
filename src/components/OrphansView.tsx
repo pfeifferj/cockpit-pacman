@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
+import { usePackageDetails } from "../hooks/usePackageDetails";
 import { useSortableTable } from "../hooks/useSortableTable";
 import {
   Button,
@@ -31,10 +32,8 @@ import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
   OrphanPackage,
   OrphanResponse,
-  PackageDetails,
   listOrphans,
   removeOrphans,
-  getPackageInfo,
   formatSize,
   formatDate,
 } from "../api";
@@ -54,8 +53,7 @@ export const OrphansView: React.FC = () => {
   const isMountedRef = useRef(true);
   const logContainerRef = useAutoScrollLog(log);
 
-  const [selectedPackage, setSelectedPackage] = useState<PackageDetails | null>(null);
-  const [detailsLoading, setDetailsLoading] = useState(false);
+  const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
 
   const { activeSortIndex, activeSortDirection, getSortParams } = useSortableTable({
     sortableColumns: [0, 2, 3],
@@ -96,20 +94,8 @@ export const OrphansView: React.FC = () => {
     loadOrphans();
   }, [loadOrphans]);
 
-  const handleRowClick = async (pkgName: string) => {
-    setDetailsLoading(true);
-    try {
-      const details = await getPackageInfo(pkgName);
-      if (!isMountedRef.current) return;
-      setSelectedPackage(details);
-    } catch (ex) {
-      if (!isMountedRef.current) return;
-      setError(ex instanceof Error ? ex.message : String(ex));
-    } finally {
-      if (isMountedRef.current) {
-        setDetailsLoading(false);
-      }
-    }
+  const handleRowClick = (pkgName: string) => {
+    fetchDetails(pkgName);
   };
 
   const startRemoval = () => {
@@ -352,7 +338,8 @@ export const OrphansView: React.FC = () => {
       <PackageDetailsModal
         packageDetails={selectedPackage}
         isLoading={detailsLoading}
-        onClose={() => setSelectedPackage(null)}
+        onClose={clearDetails}
+        error={detailsError}
       />
 
       <Modal

@@ -884,8 +884,9 @@ export function testMirrors(
   urls?: string[]
 ): { cancel: () => void } {
   const args: string[] = [];
-  if (urls && urls.length > 0) {
-    args.push(urls.join(","));
+  args.push(urls && urls.length > 0 ? urls.join(",") : "");
+  if (callbacks.timeout !== undefined) {
+    args.push(String(callbacks.timeout));
   }
 
   return runStreamingBackend("test-mirrors", args, {
