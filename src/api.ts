@@ -196,27 +196,6 @@ export class BackendError extends Error {
     return new BackendError(err.message, err.code, err.details);
   }
 
-  static isTimeout(err: unknown): boolean {
-    return err instanceof BackendError && err.code === "timeout";
-  }
-
-  static isDatabaseLocked(err: unknown): boolean {
-    if (err instanceof BackendError) {
-      return err.code === "database_locked";
-    }
-    if (err instanceof Error) {
-      return err.message.toLowerCase().includes("unable to lock database");
-    }
-    return false;
-  }
-
-  static isNetworkError(err: unknown): boolean {
-    return err instanceof BackendError && err.code === "network_error";
-  }
-
-  static isCancelled(err: unknown): boolean {
-    return err instanceof BackendError && err.code === "cancelled";
-  }
 }
 
 function parseErrorCode(message: string): ErrorCode {
@@ -983,12 +962,6 @@ export function testMirrors(
 
 export async function saveMirrorlist(mirrors: MirrorEntry[]): Promise<SaveMirrorlistResponse> {
   return runBackend<SaveMirrorlistResponse>("save-mirrorlist", [JSON.stringify(mirrors)]);
-}
-
-export function formatSpeed(bytesPerSecond: number): string {
-  if (bytesPerSecond < 1024) return `${bytesPerSecond} B/s`;
-  if (bytesPerSecond < 1024 * 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KiB/s`;
-  return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MiB/s`;
 }
 
 export interface DependencyNode {
