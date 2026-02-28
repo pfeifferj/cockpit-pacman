@@ -391,6 +391,10 @@ export interface UpgradeCallbacks {
   onError: (error: string) => void;
   /** Timeout in seconds for the operation (default: 300) */
   timeout?: number;
+  /** Superuser mode for cockpit.spawn (default: "require") */
+  superuser?: "try" | "require";
+  /** Called for each parsed JSON event before default handling. Return true to skip default processing. */
+  onRawEvent?: (event: Record<string, unknown>) => boolean;
 }
 
 function extractErrorMessage(ex: unknown): string {
@@ -434,22 +438,24 @@ function runStreamingBackend(
 
   const proc = cockpit.spawn(
     [BACKEND_PATH, command, ...args],
-    { superuser: "require", err: "out" }
+    { superuser: callbacks.superuser || "require", err: "out" }
   );
 
   proc.stream((data) => {
     buffer += data;
-    // Process complete JSON lines
     const lines = buffer.split("\n");
-    buffer = lines.pop() || ""; // Keep incomplete line in buffer
+    buffer = lines.pop() || "";
 
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
-        const event = JSON.parse(line) as StreamEvent;
+        const parsed = JSON.parse(line) as Record<string, unknown>;
+
+        if (callbacks.onRawEvent?.(parsed)) continue;
+
+        const event = parsed as unknown as StreamEvent;
         callbacks.onEvent?.(event);
 
-        // Also provide raw data callback for backward compatibility
         if (event.type === "log") {
           callbacks.onData?.(`[${event.level}] ${event.message}\n`);
         } else if (event.type === "progress") {
@@ -469,7 +475,6 @@ function runStreamingBackend(
           console.warn("Unknown StreamEvent type:", (event as { type: string }).type);
         }
       } catch {
-        // Not valid JSON, treat as raw output
         callbacks.onData?.(line + "\n");
       }
     }
@@ -858,8 +863,6 @@ export interface StreamEventMirrorTest {
   result: MirrorTestResult;
 }
 
-export type MirrorStreamEvent = StreamEvent | StreamEventMirrorTest;
-
 export interface MirrorTestCallbacks {
   onTestResult?: (result: MirrorTestResult, current: number, total: number) => void;
   onData?: (data: string) => void;
@@ -880,84 +883,27 @@ export function testMirrors(
   callbacks: MirrorTestCallbacks,
   urls?: string[]
 ): { cancel: () => void } {
-  let buffer = "";
-  let completionHandled = false;
-
-  const markComplete = (success: boolean, message?: string) => {
-    if (completionHandled) return;
-    completionHandled = true;
-    try {
-      if (success) {
-        callbacks.onComplete();
-      } else {
-        callbacks.onError(message || "Mirror testing failed");
-      }
-    } catch (callbackError) {
-      console.error("Callback error in markComplete:", callbackError);
-    }
-  };
-
   const args: string[] = [];
   if (urls && urls.length > 0) {
     args.push(urls.join(","));
   }
-  if (callbacks.timeout !== undefined) {
-    args.push(String(callbacks.timeout));
-  }
 
-  const proc = cockpit.spawn(
-    [BACKEND_PATH, "test-mirrors", ...args],
-    { superuser: "try", err: "out" }
-  );
-
-  proc.stream((data) => {
-    buffer += data;
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line) as MirrorStreamEvent;
-
-        if (event.type === "mirror_test") {
-          callbacks.onTestResult?.(event.result, event.current, event.total);
-          callbacks.onData?.(`[${event.current}/${event.total}] ${event.url}: ${event.result.success ? `${event.result.latency_ms}ms` : event.result.error}\n`);
-        } else if (event.type === "complete") {
-          markComplete(event.success, event.message);
-        } else if (event.type === "log") {
-          callbacks.onData?.(`[${event.level}] ${event.message}\n`);
-        }
-      } catch {
-        callbacks.onData?.(line + "\n");
+  return runStreamingBackend("test-mirrors", args, {
+    onData: callbacks.onData,
+    onComplete: callbacks.onComplete,
+    onError: callbacks.onError,
+    timeout: callbacks.timeout,
+    superuser: "try",
+    onRawEvent: (event) => {
+      if (event.type === "mirror_test") {
+        const e = event as unknown as StreamEventMirrorTest;
+        callbacks.onTestResult?.(e.result, e.current, e.total);
+        callbacks.onData?.(`[${e.current}/${e.total}] ${e.url}: ${e.result.success ? `${e.result.latency_ms}ms` : e.result.error}\n`);
+        return true;
       }
-    }
+      return false;
+    },
   });
-
-  proc.then(() => {
-    if (buffer.trim()) {
-      try {
-        const event = JSON.parse(buffer) as MirrorStreamEvent;
-        if (event.type === "complete") {
-          markComplete(event.success, event.message);
-          return;
-        }
-      } catch {
-        // Not valid JSON
-      }
-    }
-    if (!completionHandled) {
-      markComplete(false, "Backend process ended without sending completion status");
-    }
-  });
-
-  proc.catch((ex: unknown) => {
-    markComplete(false, extractErrorMessage(ex));
-  });
-
-  return {
-    cancel: () => proc.close("cancelled"),
-  };
 }
 
 export async function saveMirrorlist(mirrors: MirrorEntry[]): Promise<SaveMirrorlistResponse> {
