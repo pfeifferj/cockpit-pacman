@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.2] - 2026-02-28
+
+### Fixed
+- Dependency graph max depth warning only shown when slider is at maximum
+
 ## [0.3.1] - 2026-02-20
 
 ### Added
