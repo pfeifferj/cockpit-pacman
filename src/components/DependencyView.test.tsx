@@ -159,7 +159,7 @@ describe("DependencyView", () => {
     });
   });
 
-  it("displays warnings when max depth reached", async () => {
+  it("does not display max depth warning when depth is below slider max", async () => {
     mockGetDependencyTree.mockResolvedValue({
       ...mockDependencyTreeResponse,
       max_depth_reached: true,
@@ -170,8 +170,9 @@ describe("DependencyView", () => {
     await triggerSearch("linux");
 
     await waitFor(() => {
-      expect(screen.getByText(/Maximum depth reached/)).toBeInTheDocument();
+      expect(screen.getByText("3 nodes")).toBeInTheDocument();
     });
+    expect(screen.queryByText(/Maximum depth reached/)).not.toBeInTheDocument();
   });
 
   it("renders SVG graph container", async () => {

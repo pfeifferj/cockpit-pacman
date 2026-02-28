@@ -223,7 +223,7 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ initialPackage }
       setEdges(response.edges);
       setRootId(response.root);
       setWarnings(response.warnings);
-      if (response.max_depth_reached) {
+      if (response.max_depth_reached && depthVal >= 5) {
         setWarnings((prev) => [...prev, "Maximum depth reached. Some dependencies may not be shown."]);
       }
     } catch (ex) {
