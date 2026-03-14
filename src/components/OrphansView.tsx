@@ -340,6 +340,7 @@ export const OrphansView: React.FC = () => {
         isLoading={detailsLoading}
         onClose={clearDetails}
         error={detailsError}
+        onPackageRemoved={loadOrphans}
       />
 
       <Modal

@@ -18,10 +18,11 @@ import {
 	EmptyState,
 	EmptyStateBody,
 } from '@patternfly/react-core';
-import { OutlinedQuestionCircleIcon, ArrowDownIcon, ExclamationCircleIcon, TopologyIcon } from "@patternfly/react-icons";
+import { OutlinedQuestionCircleIcon, ArrowDownIcon, ExclamationCircleIcon, TopologyIcon, TrashIcon } from "@patternfly/react-icons";
 import { PackageDetails, SyncPackageDetails, formatSize, formatDate } from "../api";
 import { sanitizeUrl } from "../utils";
 import { DowngradeModal } from "./DowngradeModal";
+import { UninstallModal } from "./UninstallModal";
 
 type PackageInfo = PackageDetails | SyncPackageDetails;
 
@@ -35,6 +36,7 @@ interface PackageDetailsModalProps {
   onClose: () => void;
   error?: string | null;
   onViewDependencies?: (packageName: string) => void;
+  onPackageRemoved?: () => void;
 }
 
 export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
@@ -43,13 +45,25 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
   onClose,
   error,
   onViewDependencies,
+  onPackageRemoved,
 }) => {
   const [downgradeModalOpen, setDowngradeModalOpen] = useState(false);
+  const [uninstallTarget, setUninstallTarget] = useState<{ name: string; version: string } | null>(null);
   const isOpen = packageDetails !== null || isLoading || !!error;
   const isInstalled = packageDetails && isInstalledPackage(packageDetails);
 
   const handleDowngradeClose = () => {
     setDowngradeModalOpen(false);
+  };
+
+  const handleUninstall = () => {
+    if (!packageDetails) return;
+    setUninstallTarget({ name: packageDetails.name, version: packageDetails.version });
+    onClose();
+  };
+
+  const handleUninstallClose = () => {
+    setUninstallTarget(null);
   };
 
   return (
@@ -256,13 +270,22 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
             </Button>
           )}
           {isInstalled && (
-            <Button
-              variant="secondary"
-              icon={<ArrowDownIcon />}
-              onClick={() => setDowngradeModalOpen(true)}
-            >
-              Downgrade
-            </Button>
+            <>
+              <Button
+                variant="secondary"
+                icon={<ArrowDownIcon />}
+                onClick={() => setDowngradeModalOpen(true)}
+              >
+                Downgrade
+              </Button>
+              <Button
+                variant="danger"
+                icon={<TrashIcon />}
+                onClick={handleUninstall}
+              >
+                Uninstall
+              </Button>
+            </>
           )}
         </ModalFooter>
       )}
@@ -273,6 +296,15 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
         currentVersion={packageDetails.version}
         isOpen={downgradeModalOpen}
         onClose={handleDowngradeClose}
+      />
+    )}
+    {uninstallTarget && (
+      <UninstallModal
+        packageName={uninstallTarget.name}
+        packageVersion={uninstallTarget.version}
+        isOpen={true}
+        onClose={handleUninstallClose}
+        onSuccess={onPackageRemoved}
       />
     )}
     </>

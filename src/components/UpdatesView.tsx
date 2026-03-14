@@ -1060,6 +1060,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
         onClose={clearDetails}
         error={detailsError}
         onViewDependencies={onViewDependencies}
+        onPackageRemoved={loadUpdates}
       />
 
       <Modal

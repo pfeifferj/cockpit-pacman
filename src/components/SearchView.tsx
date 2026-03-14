@@ -484,6 +484,11 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
           onClose={clearDetails}
           error={detailsError}
           onViewDependencies={onViewDependencies}
+          onPackageRemoved={() => {
+            if (currentQuery) {
+              fetchResults(currentQuery, page, perPage, installedFilter, true, activeSortIndex, activeSortDirection);
+            }
+          }}
         />
       </CardBody>
     </Card>
