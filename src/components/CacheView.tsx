@@ -1,14 +1,14 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import { LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES } from "../constants";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES, PER_PAGE_OPTIONS } from "../constants";
 import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
 import { usePackageDetails } from "../hooks/usePackageDetails";
+import { usePagination } from "../hooks/usePagination";
 import { useSortableTable } from "../hooks/useSortableTable";
 import {
   Card,
   CardBody,
   CardTitle,
   Button,
-  Alert,
   EmptyState,
   EmptyStateBody,
   EmptyStateActions,
@@ -27,10 +27,15 @@ import {
   Content,
   ContentVariants,
   Slider,
-  ClipboardCopy,
-  ClipboardCopyVariant,
+  SearchInput,
+  Toolbar,
+  ToolbarContent,
+  ToolbarItem,
+  Pagination,
+  Popover,
+  Icon,
 } from "@patternfly/react-core";
-import { TrashIcon, CheckCircleIcon, FolderIcon } from "@patternfly/react-icons";
+import { TrashIcon, CheckCircleIcon, FolderIcon, ExclamationCircleIcon, OutlinedQuestionCircleIcon } from "@patternfly/react-icons";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { StatBox } from "./StatBox";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
@@ -54,7 +59,9 @@ export const CacheView: React.FC = () => {
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [keepVersions, setKeepVersions] = useState(3);
+  const [searchFilter, setSearchFilter] = useState("");
   const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
+  const { page, perPage, onSetPage, onPerPageSelect } = usePagination();
   const cancelRef = useRef<(() => void) | null>(null);
   const logContainerRef = useAutoScrollLog(log);
   const isMountedRef = useRef(true);
@@ -169,6 +176,17 @@ export const CacheView: React.FC = () => {
     });
   }, [cacheData, activeSortIndex, activeSortDirection]);
 
+  const filteredPackages = useMemo(() => {
+    if (!searchFilter) return sortedPackages;
+    const lower = searchFilter.toLowerCase();
+    return sortedPackages.filter(pkg => pkg.name.toLowerCase().includes(lower));
+  }, [sortedPackages, searchFilter]);
+
+  const paginatedPackages = useMemo(() => {
+    const start = (page - 1) * perPage;
+    return filteredPackages.slice(start, start + perPage);
+  }, [filteredPackages, page, perPage]);
+
   const uniquePackageCount = groupedPackages.size;
   const multiVersionPackages = Array.from(groupedPackages.values()).filter(
     (versions) => versions.length > 1
@@ -190,14 +208,14 @@ export const CacheView: React.FC = () => {
     return (
       <Card>
         <CardBody>
-          <Alert variant="danger" title="Error loading cache information" isInline>
-            {sanitizeErrorMessage(error)}
-          </Alert>
-          <div className="pf-v6-u-mt-md">
-            <Button variant="primary" onClick={loadCacheInfo}>
-              Retry
-            </Button>
-          </div>
+          <EmptyState headingLevel="h2" icon={ExclamationCircleIcon} titleText="Error loading cache information" status="danger">
+            <EmptyStateBody>{sanitizeErrorMessage(error)}</EmptyStateBody>
+            <EmptyStateFooter>
+              <EmptyStateActions>
+                <Button variant="primary" onClick={loadCacheInfo}>Retry</Button>
+              </EmptyStateActions>
+            </EmptyStateFooter>
+          </EmptyState>
         </CardBody>
       </Card>
     );
@@ -292,22 +310,17 @@ export const CacheView: React.FC = () => {
       <CardBody>
         <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
           <FlexItem>
-            <CardTitle className="pf-v6-u-m-0">Package Cache</CardTitle>
-            <Flex spaceItems={{ default: "spaceItemsSm" }} alignItems={{ default: "alignItemsCenter" }} className="pf-v6-u-mb-md">
-              <FlexItem>
-                <FolderIcon color="var(--pf-t--global--icon--color--subtle)" />
-              </FlexItem>
-              <FlexItem>
-                <ClipboardCopy
-                  isReadOnly
-                  hoverTip="Copy path"
-                  clickTip="Copied"
-                  variant={ClipboardCopyVariant.inline}
-                >
-                  {cacheData.path}
-                </ClipboardCopy>
-              </FlexItem>
-            </Flex>
+            <CardTitle className="pf-v6-u-m-0">
+              Package Cache{" "}
+              <Popover
+                headerContent="Cache directory"
+                bodyContent={cacheData.path}
+              >
+                <Icon isInline style={{ cursor: "pointer" }}>
+                  <OutlinedQuestionCircleIcon />
+                </Icon>
+              </Popover>
+            </CardTitle>
             <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
               <FlexItem>
                 <StatBox
@@ -336,16 +349,41 @@ export const CacheView: React.FC = () => {
               </FlexItem>
             </Flex>
           </FlexItem>
-          <FlexItem>
-            <Button
-              variant="secondary"
-              icon={<TrashIcon />}
-              onClick={handleCleanCache}
-            >
-              Clean Cache
-            </Button>
-          </FlexItem>
         </Flex>
+
+        <Toolbar>
+          <ToolbarContent>
+            <ToolbarItem>
+              <SearchInput
+                placeholder="Filter cached packages..."
+                value={searchFilter}
+                onChange={(_event, value) => setSearchFilter(value)}
+                onClear={() => setSearchFilter("")}
+                aria-label="Filter cached packages"
+              />
+            </ToolbarItem>
+            <ToolbarItem>
+              <Button
+                variant="secondary"
+                icon={<TrashIcon />}
+                onClick={handleCleanCache}
+              >
+                Clean Cache
+              </Button>
+            </ToolbarItem>
+            <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
+              <Pagination
+                itemCount={filteredPackages.length}
+                perPage={perPage}
+                page={page}
+                onSetPage={onSetPage}
+                onPerPageSelect={onPerPageSelect}
+                perPageOptions={PER_PAGE_OPTIONS}
+                isCompact
+              />
+            </ToolbarItem>
+          </ToolbarContent>
+        </Toolbar>
 
         <Table aria-label="Cached packages" variant="compact">
           <Thead>
@@ -356,7 +394,7 @@ export const CacheView: React.FC = () => {
             </Tr>
           </Thead>
           <Tbody>
-            {sortedPackages.map((pkg: CachePackage) => (
+            {paginatedPackages.map((pkg: CachePackage) => (
               <Tr key={pkg.filename} isClickable onRowClick={() => handleRowClick(pkg.name)}>
                 <Td dataLabel="Package">
                   <Button variant="link" isInline className="pf-v6-u-p-0">
@@ -369,6 +407,21 @@ export const CacheView: React.FC = () => {
             ))}
           </Tbody>
         </Table>
+        <Toolbar>
+          <ToolbarContent>
+            <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
+              <Pagination
+                itemCount={filteredPackages.length}
+                perPage={perPage}
+                page={page}
+                onSetPage={onSetPage}
+                onPerPageSelect={onPerPageSelect}
+                perPageOptions={PER_PAGE_OPTIONS}
+                isCompact
+              />
+            </ToolbarItem>
+          </ToolbarContent>
+        </Toolbar>
       </CardBody>
 
       <Modal

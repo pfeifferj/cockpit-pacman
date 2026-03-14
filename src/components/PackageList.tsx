@@ -7,6 +7,8 @@ import {
   Card,
   CardBody,
   Spinner,
+  EmptyState,
+  EmptyStateBody,
   Alert,
   SearchInput,
   Toolbar,
@@ -206,9 +208,9 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphP
   const renderPackageContent = () => {
     if (loading && packages.length === 0) {
       return (
-        <div className="pf-v6-u-p-xl pf-v6-u-text-align-center">
-          <Spinner /> Loading packages...
-        </div>
+        <EmptyState headingLevel="h2" icon={Spinner} titleText="Loading packages">
+          <EmptyStateBody>Fetching installed package list...</EmptyStateBody>
+        </EmptyState>
       );
     }
 

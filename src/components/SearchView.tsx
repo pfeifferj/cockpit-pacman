@@ -13,7 +13,7 @@ import {
   Label,
   EmptyState,
   EmptyStateBody,
-  Title,
+
   MenuToggle,
   MenuToggleElement,
   Select,
@@ -380,21 +380,17 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
         })()}
 
         {!hasSearched ? (
-          <EmptyState titleText={<Title headingLevel="h3" size="lg">
-              Search for packages
-            </Title>} icon={SearchIcon}>
+          <EmptyState headingLevel="h3" titleText="Search for packages" icon={SearchIcon}>
             <EmptyStateBody>
               Enter a search term to find packages available in the Arch Linux repositories.
             </EmptyStateBody>
           </EmptyState>
         ) : loading && filteredResults.length === 0 ? (
-          <div className="pf-v6-u-p-xl pf-v6-u-text-align-center">
-            <Spinner /> Searching repositories...
-          </div>
+          <EmptyState headingLevel="h2" icon={Spinner} titleText="Searching repositories">
+            <EmptyStateBody>Looking for matching packages...</EmptyStateBody>
+          </EmptyState>
         ) : filteredResults.length === 0 ? (
-          <EmptyState titleText={<Title headingLevel="h3" size="lg">
-              No packages found
-            </Title>} icon={SearchIcon}>
+          <EmptyState headingLevel="h3" titleText="No packages found" icon={SearchIcon}>
             <EmptyStateBody>
               No packages matched your search. Try a different search term.
             </EmptyStateBody>

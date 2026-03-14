@@ -23,7 +23,10 @@ import {
   ModalFooter,
   Content,
   ContentVariants,
-  TextInput,
+  SearchInput,
+  Toolbar,
+  ToolbarContent,
+  ToolbarItem,
   Switch,
   MenuToggle,
   Select,
@@ -38,8 +41,10 @@ import {
   ArrowDownIcon,
   SyncAltIcon,
   OutlinedClockIcon,
+  ExclamationCircleIcon,
 } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
+import { StatBox } from "./StatBox";
 import {
   MirrorEntry,
   MirrorListResponse,
@@ -439,14 +444,14 @@ export const MirrorsView: React.FC = () => {
     return (
       <Card>
         <CardBody>
-          <Alert variant="danger" title="Error loading mirrors">
-            {sanitizeErrorMessage(error)}
-          </Alert>
-          <div className="pf-v6-u-mt-md">
-            <Button variant="primary" onClick={loadMirrors}>
-              Retry
-            </Button>
-          </div>
+          <EmptyState headingLevel="h2" icon={ExclamationCircleIcon} titleText="Error loading mirrors" status="danger">
+            <EmptyStateBody>{sanitizeErrorMessage(error)}</EmptyStateBody>
+            <EmptyStateFooter>
+              <EmptyStateActions>
+                <Button variant="primary" onClick={loadMirrors}>Retry</Button>
+              </EmptyStateActions>
+            </EmptyStateFooter>
+          </EmptyState>
         </CardBody>
       </Card>
     );
@@ -567,106 +572,94 @@ export const MirrorsView: React.FC = () => {
             <CardTitle className="pf-v6-u-m-0">Pacman Mirrors</CardTitle>
             <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md pf-v6-u-mt-sm">
               <FlexItem>
-                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600 }}>{formatNumber(mirrors.length)}</div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Total</div>
-                </div>
+                <StatBox label="Total" value={formatNumber(mirrors.length)} />
               </FlexItem>
               <FlexItem>
-                <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--pf-t--global--color--status--success--default)" }}>{formatNumber(mirrors.filter(m => m.enabled).length)}</div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Enabled</div>
-                </div>
+                <StatBox label="Enabled" value={formatNumber(mirrors.filter(m => m.enabled).length)} color="success" />
               </FlexItem>
               {mirrorData?.last_modified && (
                 <FlexItem>
-                  <div style={{ textAlign: "center", padding: "0.75rem 1.5rem", background: "var(--pf-t--global--background--color--secondary--default)", borderRadius: "6px" }}>
-                    <div style={{ fontSize: "1rem", fontWeight: 600 }}>{formatDate(mirrorData.last_modified)}</div>
-                    <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)", textTransform: "uppercase" }}>Last Modified</div>
-                  </div>
+                  <StatBox label="Last Modified" value={formatDate(mirrorData.last_modified)} />
                 </FlexItem>
               )}
             </Flex>
           </FlexItem>
-          <FlexItem>
-            <Flex spaceItems={{ default: "spaceItemsSm" }}>
-              <FlexItem>
-                <Button
-                  variant="secondary"
-                  icon={<SyncAltIcon />}
-                  onClick={() => handleFetchStatus(true)}
-                  isDisabled={state !== "ready"}
-                >
-                  {statusData ? "Refresh Status" : "Fetch Status"}
-                </Button>
-              </FlexItem>
-              <FlexItem>
-                <Button
-                  variant="secondary"
-                  icon={<OutlinedClockIcon />}
-                  onClick={handleTestMirrors}
-                  isDisabled={state !== "ready" || mirrors.filter(m => m.enabled).length === 0}
-                >
-                  Test Mirrors
-                </Button>
-              </FlexItem>
-              <FlexItem>
-                <Button
-                  variant="primary"
-                  onClick={handleSave}
-                  isDisabled={!hasChanges || state !== "ready"}
-                >
-                  Save Changes
-                </Button>
-              </FlexItem>
-            </Flex>
-          </FlexItem>
         </Flex>
 
-        <Flex spaceItems={{ default: "spaceItemsMd" }} className="pf-v6-u-mb-md">
-          <FlexItem>
-            <TextInput
-              type="search"
-              aria-label="Search mirrors"
-              placeholder="Search mirrors..."
-              value={searchFilter}
-              onChange={(_event, value) => setSearchFilter(value)}
-              style={{ minWidth: "250px" }}
-            />
-          </FlexItem>
-          {countries.length > 0 && (
-            <FlexItem>
-              <Select
-                toggle={(toggleRef) => (
-                  <MenuToggle
-                    ref={toggleRef}
-                    onClick={() => setCountryFilterOpen(!countryFilterOpen)}
-                    isExpanded={countryFilterOpen}
-                    style={{ minWidth: "150px" }}
-                  >
-                    {countryFilter === "all" ? "All Countries" : countryFilter}
-                  </MenuToggle>
-                )}
-                onSelect={(_event, value) => {
-                  setCountryFilter(value as string);
-                  setCountryFilterOpen(false);
-                }}
-                selected={countryFilter}
-                isOpen={countryFilterOpen}
-                onOpenChange={setCountryFilterOpen}
+        <Toolbar>
+          <ToolbarContent>
+            <ToolbarItem>
+              <SearchInput
+                placeholder="Search mirrors..."
+                value={searchFilter}
+                onChange={(_event: React.SyntheticEvent, value: string) => setSearchFilter(value)}
+                onClear={() => setSearchFilter("")}
+                aria-label="Search mirrors"
+              />
+            </ToolbarItem>
+            {countries.length > 0 && (
+              <ToolbarItem>
+                <Select
+                  toggle={(toggleRef) => (
+                    <MenuToggle
+                      ref={toggleRef}
+                      onClick={() => setCountryFilterOpen(!countryFilterOpen)}
+                      isExpanded={countryFilterOpen}
+                      style={{ minWidth: "150px" }}
+                    >
+                      {countryFilter === "all" ? "All Countries" : countryFilter}
+                    </MenuToggle>
+                  )}
+                  onSelect={(_event, value) => {
+                    setCountryFilter(value as string);
+                    setCountryFilterOpen(false);
+                  }}
+                  selected={countryFilter}
+                  isOpen={countryFilterOpen}
+                  onOpenChange={setCountryFilterOpen}
+                >
+                  <SelectList>
+                    <SelectOption value="all">All Countries</SelectOption>
+                    {countries.map(country => (
+                      <SelectOption key={country} value={country}>
+                        {country}
+                      </SelectOption>
+                    ))}
+                  </SelectList>
+                </Select>
+              </ToolbarItem>
+            )}
+            <ToolbarItem>
+              <Button
+                variant="secondary"
+                icon={<SyncAltIcon />}
+                onClick={() => handleFetchStatus(true)}
+                isDisabled={state !== "ready"}
               >
-                <SelectList>
-                  <SelectOption value="all">All Countries</SelectOption>
-                  {countries.map(country => (
-                    <SelectOption key={country} value={country}>
-                      {country}
-                    </SelectOption>
-                  ))}
-                </SelectList>
-              </Select>
-            </FlexItem>
-          )}
-        </Flex>
+                {statusData ? "Refresh Status" : "Fetch Status"}
+              </Button>
+            </ToolbarItem>
+            <ToolbarItem>
+              <Button
+                variant="secondary"
+                icon={<OutlinedClockIcon />}
+                onClick={handleTestMirrors}
+                isDisabled={state !== "ready" || mirrors.filter(m => m.enabled).length === 0}
+              >
+                Test Mirrors
+              </Button>
+            </ToolbarItem>
+            <ToolbarItem>
+              <Button
+                variant="primary"
+                onClick={handleSave}
+                isDisabled={!hasChanges || state !== "ready"}
+              >
+                Save Changes
+              </Button>
+            </ToolbarItem>
+          </ToolbarContent>
+        </Toolbar>
 
         <Table aria-label="Mirror list" variant="compact">
           <Thead>

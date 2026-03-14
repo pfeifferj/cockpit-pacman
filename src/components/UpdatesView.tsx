@@ -45,6 +45,7 @@ import {
 } from '@patternfly/react-core';
 import {
   CheckCircleIcon,
+  ExclamationCircleIcon,
   SyncAltIcon,
   ArrowUpIcon,
   ArrowDownIcon,
@@ -559,6 +560,26 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
     </Alert>
   ) : null;
 
+  const rebootAlert = rebootStatus?.requires_reboot ? (
+    <Alert
+      variant="warning"
+      title="System reboot recommended"
+      className="pf-v6-u-mb-md"
+    >
+      {rebootStatus.reason === "kernel_update" ? (
+        <>
+          Running kernel ({rebootStatus.running_kernel}) differs from installed kernel ({rebootStatus.installed_kernel}).
+          Reboot to use the new kernel.
+        </>
+      ) : (
+        <>
+          Critical system packages were updated since boot: {rebootStatus.updated_packages.join(", ")}.
+          A reboot is recommended to apply these changes.
+        </>
+      )}
+    </Alert>
+  ) : null;
+
   if (state === "loading" || state === "checking") {
     return (
       <Card>
@@ -579,27 +600,31 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
     return (
       <Card>
         <CardBody>
-          <Alert
-            variant={isLockError ? "warning" : "danger"}
-            title={isLockError ? "Database is locked" : "Error checking for updates"}
-            actionClose={<AlertActionCloseButton onClose={() => setState("uptodate")} />}
+          <EmptyState
+            headingLevel="h2"
+            icon={ExclamationCircleIcon}
+            titleText={isLockError ? "Database is locked" : "Error checking for updates"}
+            status={isLockError ? "warning" : "danger"}
           >
-            {isLockError
-              ? "Another package manager operation is in progress. This could be a system upgrade, package installation, or database sync. Please wait for it to complete before checking for updates."
-              : error}
-            {isNetworkError && !isLockError && (
-              <Content component={ContentVariants.p} className="pf-v6-u-mt-sm">
-                Check your network connection or visit the{" "}
-                <a href={ARCH_STATUS_URL} target="_blank" rel="noopener noreferrer">Arch Linux status page</a>
-                {" "}for service updates.
-              </Content>
-            )}
-          </Alert>
-          <div className="pf-v6-u-mt-md">
-            <Button variant="primary" onClick={loadUpdates}>
-              Retry
-            </Button>
-          </div>
+            <EmptyStateBody>
+              {isLockError
+                ? "Another package manager operation is in progress. This could be a system upgrade, package installation, or database sync. Please wait for it to complete before checking for updates."
+                : error}
+              {isNetworkError && !isLockError && (
+                <Content component={ContentVariants.p} className="pf-v6-u-mt-sm">
+                  Check your network connection or visit the{" "}
+                  <a href={ARCH_STATUS_URL} target="_blank" rel="noopener noreferrer">Arch Linux status page</a>
+                  {" "}for service updates.
+                </Content>
+              )}
+            </EmptyStateBody>
+            <EmptyStateFooter>
+              <EmptyStateActions>
+                <Button variant="primary" onClick={loadUpdates}>Retry</Button>
+                <Button variant="link" onClick={() => setState("uptodate")}>Dismiss</Button>
+              </EmptyStateActions>
+            </EmptyStateFooter>
+          </EmptyState>
         </CardBody>
       </Card>
     );
@@ -708,25 +733,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
     return (
       <Card>
         <CardBody>
-          {rebootStatus?.requires_reboot && (
-            <Alert
-              variant="warning"
-              title="System reboot recommended"
-              className="pf-v6-u-mb-md"
-            >
-              {rebootStatus.reason === "kernel_update" ? (
-                <>
-                  Running kernel ({rebootStatus.running_kernel}) differs from installed kernel ({rebootStatus.installed_kernel}).
-                  Reboot to use the new kernel.
-                </>
-              ) : (
-                <>
-                  Critical system packages were updated since boot: {rebootStatus.updated_packages.join(", ")}.
-                  A reboot is recommended to apply these changes.
-                </>
-              )}
-            </Alert>
-          )}
+          {rebootAlert}
           <EmptyState  headingLevel="h2" icon={CheckCircleIcon}  titleText="System Updated">
             <EmptyStateBody>
               All packages have been updated successfully.
@@ -754,25 +761,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
   if (state === "uptodate") {
     return (
       <>
-        {rebootStatus?.requires_reboot && (
-          <Alert
-            variant="warning"
-            title="System reboot recommended"
-            className="pf-v6-u-mb-md"
-          >
-            {rebootStatus.reason === "kernel_update" ? (
-              <>
-                Running kernel ({rebootStatus.running_kernel}) differs from installed kernel ({rebootStatus.installed_kernel}).
-                Reboot to use the new kernel.
-              </>
-            ) : (
-              <>
-                Critical system packages were updated since boot: {rebootStatus.updated_packages.join(", ")}.
-                A reboot is recommended to apply these changes.
-              </>
-            )}
-          </Alert>
-        )}
+        {rebootAlert}
         {warnings.length > 0 && (
           <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
             <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">
@@ -808,25 +797,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
 
   return (
     <>
-      {rebootStatus?.requires_reboot && (
-        <Alert
-          variant="warning"
-          title="System reboot recommended"
-          className="pf-v6-u-mb-md"
-        >
-          {rebootStatus.reason === "kernel_update" ? (
-            <>
-              Running kernel ({rebootStatus.running_kernel}) differs from installed kernel ({rebootStatus.installed_kernel}).
-              Reboot to use the new kernel.
-            </>
-          ) : (
-            <>
-              Critical system packages were updated since boot: {rebootStatus.updated_packages.join(", ")}.
-              A reboot is recommended to apply these changes.
-            </>
-          )}
-        </Alert>
-      )}
+      {rebootAlert}
       {warnings.length > 0 && (
         <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
           <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">
@@ -890,114 +861,112 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
 
       <Card>
         <CardBody>
-          <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
+          <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">
+            {formatNumber(selectedPackages.size)} of {formatNumber(updates.length)} update{updates.length !== 1 ? "s" : ""} selected
+            {filteredUpdates.length !== updates.length && ` (${formatNumber(filteredUpdates.length)} shown)`}
+          </CardTitle>
+          <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
             <FlexItem>
-              <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">
-                {formatNumber(selectedPackages.size)} of {formatNumber(updates.length)} update{updates.length !== 1 ? "s" : ""} selected
-                {filteredUpdates.length !== updates.length && ` (${formatNumber(filteredUpdates.length)} shown)`}
-              </CardTitle>
-              <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
-                <FlexItem>
-                  <StatBox
-                    label="Download Size"
-                    value={formatSize(selectedDownloadSize)}
-                    color="info"
-                  />
-                </FlexItem>
-                <FlexItem>
-                  <StatBox
-                    label="Installed Size"
-                    value={formatSize(selectedNewSize)}
-                  />
-                </FlexItem>
-                <FlexItem>
-                  <StatBox
-                    label="Net Size"
-                    value={`${selectedNetSize >= 0 ? "+" : ""}${formatSize(selectedNetSize)}`}
-                    color={selectedNetSize > 0 ? "danger" : selectedNetSize < 0 ? "success" : "default"}
-                  />
-                </FlexItem>
-              </Flex>
+              <StatBox
+                label="Download Size"
+                value={formatSize(selectedDownloadSize)}
+                color="info"
+              />
             </FlexItem>
             <FlexItem>
-              <Button
-                variant="secondary"
-                onClick={() => setScheduleModalOpen(true)}
-                className="pf-v6-u-mr-sm"
-              >
-                Manage Schedule
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => setIgnoredModalOpen(true)}
-                className="pf-v6-u-mr-sm"
-              >
-                Manage Ignored{configIgnored.size > 0 ? ` (${configIgnored.size})` : ""}
-              </Button>
-              <Button
-                variant="secondary"
-                icon={<SyncAltIcon />}
-                onClick={handleRefresh}
-                className="pf-v6-u-mr-sm"
-              >
-                Refresh
-              </Button>
-              <Button
-                variant="primary"
-                onClick={handleApplyUpdates}
-                isLoading={preflightLoading}
-                isDisabled={preflightLoading || selectedPackages.size === 0}
-              >
-                {preflightLoading ? "Checking..." : `Apply ${formatNumber(selectedPackages.size)} Update${selectedPackages.size !== 1 ? "s" : ""}`}
-              </Button>
+              <StatBox
+                label="Installed Size"
+                value={formatSize(selectedNewSize)}
+              />
+            </FlexItem>
+            <FlexItem>
+              <StatBox
+                label="Net Size"
+                value={`${selectedNetSize >= 0 ? "+" : ""}${formatSize(selectedNetSize)}`}
+                color={selectedNetSize > 0 ? "danger" : selectedNetSize < 0 ? "success" : "default"}
+              />
             </FlexItem>
           </Flex>
-
           <Toolbar className="pf-v6-u-px-0">
-          <ToolbarContent>
-            <ToolbarItem >
-              <SearchInput
-                placeholder="Filter updates..."
-                value={searchFilter}
-                onChange={(_event: React.SyntheticEvent, value: string) => setSearchFilter(value)}
-                onClear={() => setSearchFilter("")}
-                aria-label="Filter updates"
-              />
-            </ToolbarItem>
-            {repositories.length > 1 && (
+            <ToolbarContent>
               <ToolbarItem>
-                <Select
-                  isOpen={repoSelectOpen}
-                  selected={repoFilter}
-                  onSelect={(_event: React.MouseEvent | undefined, value: string | number | undefined) => {
-                    setRepoFilter(value as string);
-                    setRepoSelectOpen(false);
-                  }}
-                  onOpenChange={setRepoSelectOpen}
-                  toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
-                    <MenuToggle
-                      ref={toggleRef}
-                      onClick={() => setRepoSelectOpen(!repoSelectOpen)}
-                      isExpanded={repoSelectOpen}
-                      aria-label="Filter by repository"
-                    >
-                      {repoFilter === "all" ? "All repositories" : repoFilter}
-                    </MenuToggle>
-                  )}
-                >
-                  <SelectList>
-                    <SelectOption value="all">All repositories</SelectOption>
-                    {repositories.map((repo) => (
-                      <SelectOption key={repo} value={repo}>
-                        {repo}
-                      </SelectOption>
-                    ))}
-                  </SelectList>
-                </Select>
+                <SearchInput
+                  placeholder="Filter updates..."
+                  value={searchFilter}
+                  onChange={(_event: React.SyntheticEvent, value: string) => setSearchFilter(value)}
+                  onClear={() => setSearchFilter("")}
+                  aria-label="Filter updates"
+                />
               </ToolbarItem>
-            )}
-          </ToolbarContent>
-        </Toolbar>
+              {repositories.length > 1 && (
+                <ToolbarItem>
+                  <Select
+                    isOpen={repoSelectOpen}
+                    selected={repoFilter}
+                    onSelect={(_event: React.MouseEvent | undefined, value: string | number | undefined) => {
+                      setRepoFilter(value as string);
+                      setRepoSelectOpen(false);
+                    }}
+                    onOpenChange={setRepoSelectOpen}
+                    toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+                      <MenuToggle
+                        ref={toggleRef}
+                        onClick={() => setRepoSelectOpen(!repoSelectOpen)}
+                        isExpanded={repoSelectOpen}
+                        aria-label="Filter by repository"
+                      >
+                        {repoFilter === "all" ? "All repositories" : repoFilter}
+                      </MenuToggle>
+                    )}
+                  >
+                    <SelectList>
+                      <SelectOption value="all">All repositories</SelectOption>
+                      {repositories.map((repo) => (
+                        <SelectOption key={repo} value={repo}>
+                          {repo}
+                        </SelectOption>
+                      ))}
+                    </SelectList>
+                  </Select>
+                </ToolbarItem>
+              )}
+              <ToolbarItem>
+                <Button
+                  variant="secondary"
+                  onClick={() => setScheduleModalOpen(true)}
+                >
+                  Manage Schedule
+                </Button>
+              </ToolbarItem>
+              <ToolbarItem>
+                <Button
+                  variant="secondary"
+                  onClick={() => setIgnoredModalOpen(true)}
+                >
+                  Manage Ignored{configIgnored.size > 0 ? ` (${configIgnored.size})` : ""}
+                </Button>
+              </ToolbarItem>
+              <ToolbarItem>
+                <Button
+                  variant="secondary"
+                  icon={<SyncAltIcon />}
+                  onClick={handleRefresh}
+                >
+                  Refresh
+                </Button>
+              </ToolbarItem>
+              <ToolbarItem>
+                <Button
+                  variant="primary"
+                  onClick={handleApplyUpdates}
+                  isLoading={preflightLoading}
+                  isDisabled={preflightLoading || selectedPackages.size === 0}
+                >
+                  {preflightLoading ? "Checking..." : `Apply ${formatNumber(selectedPackages.size)} Update${selectedPackages.size !== 1 ? "s" : ""}`}
+                </Button>
+              </ToolbarItem>
+            </ToolbarContent>
+          </Toolbar>
 
         <Table aria-label="Available updates" variant="compact">
           <Thead>
@@ -1192,7 +1161,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
         <ModalFooter>
           <Button
             key="confirm"
-            variant="primary"
+            variant={(preflightData?.removals?.length ?? 0) > 0 || (preflightData?.conflicts?.length ?? 0) > 0 ? "danger" : "primary"}
             onClick={startUpgrade}
             isDisabled={!allDangerousActionsAcknowledged}
           >

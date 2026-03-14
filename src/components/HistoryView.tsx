@@ -10,7 +10,6 @@ import {
   CardBody,
   CardTitle,
   Button,
-  Alert,
   EmptyState,
   EmptyStateBody,
   EmptyStateActions,
@@ -26,7 +25,7 @@ import {
 } from "@patternfly/react-core";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { StatBox } from "./StatBox";
-import { HistoryIcon, ArrowUpIcon, ArrowDownIcon, PlusIcon, MinusIcon } from "@patternfly/react-icons";
+import { HistoryIcon, ArrowUpIcon, ArrowDownIcon, PlusIcon, MinusIcon, ExclamationCircleIcon } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
   LogEntry,
@@ -212,14 +211,14 @@ export const HistoryView: React.FC = () => {
     return (
       <Card>
         <CardBody>
-          <Alert variant="danger" title="Error loading history" isInline>
-            {sanitizeErrorMessage(error)}
-          </Alert>
-          <div className="pf-v6-u-mt-md">
-            <Button variant="primary" onClick={loadHistory}>
-              Retry
-            </Button>
-          </div>
+          <EmptyState headingLevel="h2" icon={ExclamationCircleIcon} titleText="Error loading history" status="danger">
+            <EmptyStateBody>{sanitizeErrorMessage(error)}</EmptyStateBody>
+            <EmptyStateFooter>
+              <EmptyStateActions>
+                <Button variant="primary" onClick={loadHistory}>Retry</Button>
+              </EmptyStateActions>
+            </EmptyStateFooter>
+          </EmptyState>
         </CardBody>
       </Card>
     );

@@ -78,7 +78,6 @@ describe("CacheView", () => {
 
     expect(screen.getByText("4.66 GiB")).toBeInTheDocument();
     expect(screen.getByText("150")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("/var/cache/pacman/pkg")).toBeInTheDocument();
   });
 
   it("displays error message on API failure", async () => {
