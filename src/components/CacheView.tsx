@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES, PER_PAGE_OPTIONS } from "../constants";
 import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
+import { useBackdropClose } from "../hooks/useBackdropClose";
 import { usePackageDetails } from "../hooks/usePackageDetails";
 import { usePagination } from "../hooks/usePagination";
 import { useSortableTable } from "../hooks/useSortableTable";
@@ -58,6 +59,7 @@ export const CacheView: React.FC = () => {
   const [log, setLog] = useState("");
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  useBackdropClose(confirmModalOpen, () => setConfirmModalOpen(false));
   const [keepVersions, setKeepVersions] = useState(3);
   const [searchFilter, setSearchFilter] = useState("");
   const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();

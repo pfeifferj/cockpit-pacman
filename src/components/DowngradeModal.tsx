@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useBackdropClose } from "../hooks/useBackdropClose";
 import { LOG_CONTAINER_HEIGHT } from "../constants";
 import {
   Modal,
@@ -43,6 +44,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
   isOpen,
   onClose,
 }) => {
+  useBackdropClose(isOpen, onClose);
   const [state, setState] = useState<ModalState>("loading");
   const [versions, setVersions] = useState<CachedVersion[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<CachedVersion | null>(null);

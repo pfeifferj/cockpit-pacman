@@ -3,17 +3,17 @@
 ## [0.3.2] - 2026-02-28
 
 ### Fixed
-- Dependency graph max depth warning only shown when slider is at maximum
+- Dependency graph max depth warning only shown when slider is at maximum (7330ecc)
 
 ## [0.3.1] - 2026-02-20
 
 ### Added
-- Arch Linux news feed in the Updates tab
-- Network error detection with link to Arch Linux status page
+- Arch Linux news feed in the Updates tab (d509747)
+- Network error detection with link to Arch Linux status page (1f46219)
 
 ### Fixed
-- System hooks not running after upgrades due to alpm_utils overwriting hookdir
-- Alerts positioned outside card in up-to-date view
+- System hooks not running after upgrades due to alpm_utils overwriting hookdir (9f5de24)
+- Alerts positioned outside card in up-to-date view (496cfbd)
 
 ## [0.3.0] - 2026-01-23
 

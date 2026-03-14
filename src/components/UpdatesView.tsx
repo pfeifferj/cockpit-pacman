@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { ARCH_STATUS_URL, LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES, NEWS_LOOKBACK_DAYS } from "../constants";
 import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
+import { useBackdropClose } from "../hooks/useBackdropClose";
 import { usePackageDetails } from "../hooks/usePackageDetails";
 import { useSortableTable } from "../hooks/useSortableTable";
 import {
@@ -112,6 +113,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
   const [repoFilter, setRepoFilter] = useState("all");
   const [repoSelectOpen, setRepoSelectOpen] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  useBackdropClose(confirmModalOpen, () => setConfirmModalOpen(false));
   const [preflightData, setPreflightData] = useState<PreflightResponse | null>(null);
   const [preflightLoading, setPreflightLoading] = useState(false);
   const [selectedPackages, setSelectedPackages] = useState<Set<string>>(new Set());
@@ -124,6 +126,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
   });
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  useBackdropClose(cancelModalOpen, () => setCancelModalOpen(false));
   const [isCancelling, setIsCancelling] = useState(false);
   const [configIgnored, setConfigIgnored] = useState<Set<string>>(new Set());
   const [ignoredModalOpen, setIgnoredModalOpen] = useState(false);
@@ -539,7 +542,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
   };
 
   const handlePackageClick = (pkgName: string) => {
-    fetchDetails(pkgName, { strategy: "sync" });
+    fetchDetails(pkgName);
   };
 
   // Summary totals based on selected packages

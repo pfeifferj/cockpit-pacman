@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useBackdropClose } from "../hooks/useBackdropClose";
 import { LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES } from "../constants";
 import {
   Card,
@@ -160,6 +161,7 @@ export const MirrorsView: React.FC = () => {
   const [log, setLog] = useState("");
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  useBackdropClose(confirmModalOpen, () => setConfirmModalOpen(false));
   const [hasChanges, setHasChanges] = useState(false);
   const [searchFilter, setSearchFilter] = useState("");
   const [countryFilter, setCountryFilter] = useState<string>("all");

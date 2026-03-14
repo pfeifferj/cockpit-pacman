@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
-import { usePackageDetails } from "../hooks/usePackageDetails";
+import { useBackdropClose } from "../hooks/useBackdropClose";
 import { useSortableTable } from "../hooks/useSortableTable";
 import {
   Button,
@@ -27,7 +27,6 @@ import {
 } from "@patternfly/react-core";
 import { TrashIcon, CheckCircleIcon } from "@patternfly/react-icons";
 import { StatBox } from "./StatBox";
-import { PackageDetailsModal } from "./PackageDetailsModal";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
   OrphanPackage,
@@ -41,19 +40,24 @@ import { LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES } from "../constants";
 
 type ViewState = "loading" | "ready" | "removing" | "success";
 
-export const OrphansView: React.FC = () => {
+interface OrphansViewProps {
+  onRowClick: (pkgName: string) => void;
+  onOrphansLoaded?: (count: number) => void;
+  refreshTrigger?: number;
+}
+
+export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansLoaded, refreshTrigger }) => {
   const [orphanData, setOrphanData] = useState<OrphanResponse | null>(null);
   const [viewState, setViewState] = useState<ViewState>("loading");
   const [error, setError] = useState<string | null>(null);
   const [searchValue, setSearchValue] = useState("");
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  useBackdropClose(confirmModalOpen, () => setConfirmModalOpen(false));
   const [log, setLog] = useState("");
   const [logExpanded, setLogExpanded] = useState(false);
   const cancelRef = useRef<(() => void) | null>(null);
   const isMountedRef = useRef(true);
   const logContainerRef = useAutoScrollLog(log);
-
-  const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
 
   const { activeSortIndex, activeSortDirection, getSortParams } = useSortableTable({
     sortableColumns: [0, 2, 3],
@@ -82,21 +86,18 @@ export const OrphansView: React.FC = () => {
       const response = await listOrphans();
       if (!isMountedRef.current) return;
       setOrphanData(response);
+      onOrphansLoaded?.(response.orphans.length);
       setViewState("ready");
     } catch (ex) {
       if (!isMountedRef.current) return;
       setError(ex instanceof Error ? ex.message : String(ex));
       setViewState("ready");
     }
-  }, []);
+  }, [onOrphansLoaded]);
 
   useEffect(() => {
     loadOrphans();
-  }, [loadOrphans]);
-
-  const handleRowClick = (pkgName: string) => {
-    fetchDetails(pkgName);
-  };
+  }, [loadOrphans, refreshTrigger]);
 
   const startRemoval = () => {
     setConfirmModalOpen(false);
@@ -269,39 +270,33 @@ export const OrphansView: React.FC = () => {
 
   return (
     <>
-      <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }} className="pf-v6-u-mb-md">
+      <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsCenter" }} className="pf-v6-u-mb-md">
         <FlexItem>
-          <Flex spaceItems={{ default: "spaceItemsLg" }}>
-            <FlexItem>
-              <StatBox
-                label="Space to Free"
-                value={formatSize(orphanData.total_size)}
-                color="success"
-              />
-            </FlexItem>
-          </Flex>
+          <StatBox
+            label="Space to Free"
+            value={formatSize(orphanData.total_size)}
+            color="success"
+          />
         </FlexItem>
-        <FlexItem>
-          <Flex spaceItems={{ default: "spaceItemsMd" }} alignItems={{ default: "alignItemsCenter" }}>
-            <FlexItem>
-              <SearchInput
-                placeholder="Filter orphans..."
-                value={searchValue}
-                onChange={(_event, value) => setSearchValue(value)}
-                onClear={() => setSearchValue("")}
-              />
-            </FlexItem>
-            <FlexItem>
-              <Button
-                variant="danger"
-                icon={<TrashIcon />}
-                onClick={() => setConfirmModalOpen(true)}
-              >
-                Remove All Orphans
-              </Button>
-            </FlexItem>
-          </Flex>
-        </FlexItem>
+        <Flex spaceItems={{ default: "spaceItemsMd" }} alignItems={{ default: "alignItemsCenter" }}>
+          <FlexItem>
+            <SearchInput
+              placeholder="Filter orphans..."
+              value={searchValue}
+              onChange={(_event, value) => setSearchValue(value)}
+              onClear={() => setSearchValue("")}
+            />
+          </FlexItem>
+          <FlexItem>
+            <Button
+              variant="danger"
+              icon={<TrashIcon />}
+              onClick={() => setConfirmModalOpen(true)}
+            >
+              Remove All Orphans
+            </Button>
+          </FlexItem>
+        </Flex>
       </Flex>
 
       <Table aria-label="Orphan packages" variant="compact">
@@ -316,7 +311,7 @@ export const OrphansView: React.FC = () => {
         </Thead>
         <Tbody>
           {filteredAndSorted.map((pkg: OrphanPackage) => (
-            <Tr key={pkg.name} isClickable onRowClick={() => handleRowClick(pkg.name)}>
+            <Tr key={pkg.name} isClickable onRowClick={() => onRowClick(pkg.name)}>
               <Td dataLabel="Package">
                 <Button variant="link" isInline className="pf-v6-u-p-0">
                   {pkg.name}
@@ -334,14 +329,6 @@ export const OrphansView: React.FC = () => {
           ))}
         </Tbody>
       </Table>
-
-      <PackageDetailsModal
-        packageDetails={selectedPackage}
-        isLoading={detailsLoading}
-        onClose={clearDetails}
-        error={detailsError}
-        onPackageRemoved={loadOrphans}
-      />
 
       <Modal
         variant={ModalVariant.small}

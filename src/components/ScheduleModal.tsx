@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useBackdropClose } from "../hooks/useBackdropClose";
 import {
   Modal,
   ModalVariant,
@@ -89,6 +90,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   isOpen,
   onClose,
 }) => {
+  useBackdropClose(isOpen, onClose);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [config, setConfig] = useState<ScheduleConfig | null>(null);

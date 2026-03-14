@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useBackdropClose } from "../hooks/useBackdropClose";
 import {
 	Spinner,
 	DescriptionList,
@@ -51,6 +52,7 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
   const [uninstallTarget, setUninstallTarget] = useState<{ name: string; version: string } | null>(null);
   const isOpen = packageDetails !== null || isLoading || !!error;
   const isInstalled = packageDetails && isInstalledPackage(packageDetails);
+  useBackdropClose(isOpen, onClose);
 
   const handleDowngradeClose = () => {
     setDowngradeModalOpen(false);

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useBackdropClose } from "../hooks/useBackdropClose";
 import { useDebouncedValue } from "../hooks/useDebounce";
 import {
   Modal,
@@ -57,6 +58,7 @@ export const IgnoredPackagesModal: React.FC<IgnoredPackagesModalProps> = ({
   onClose,
   onIgnoredChange,
 }) => {
+  useBackdropClose(isOpen, onClose);
   const [ignoredPackages, setIgnoredPackages] = useState<string[]>([]);
   const [packageVersions, setPackageVersions] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);

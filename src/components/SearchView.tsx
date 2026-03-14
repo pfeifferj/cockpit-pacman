@@ -288,8 +288,8 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
     }
   };
 
-  const handleRowClick = (pkgName: string, repo: string) => {
-    fetchDetails(pkgName, { strategy: "sync", repo });
+  const handleRowClick = (pkgName: string, repo: string, installed: boolean) => {
+    fetchDetails(pkgName, installed ? { strategy: "local" } : { strategy: "sync", repo });
   };
 
   return (
@@ -434,7 +434,7 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
                     <Tr
                       key={`${pkg.repository}/${pkg.name}`}
                       isClickable
-                      onRowClick={() => handleRowClick(pkg.name, pkg.repository)}
+                      onRowClick={() => handleRowClick(pkg.name, pkg.repository, pkg.installed)}
                     >
                       <Td dataLabel="Name">
                         <Button variant="link" isInline className="pf-v6-u-p-0">

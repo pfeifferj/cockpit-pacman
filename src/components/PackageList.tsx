@@ -34,7 +34,6 @@ import {
   PackageListResponse,
   FilterType,
   listInstalled,
-  listOrphans,
   formatSize,
   formatNumber,
 } from "../api";
@@ -66,6 +65,7 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphP
   const isMountedRef = useRef(true);
 
   const [orphanCount, setOrphanCount] = useState(0);
+  const [orphanRefresh, setOrphanRefresh] = useState(0);
 
   const { activeSortIndex, activeSortDirection, getSortParams } = useSortableTable({
     sortableColumns: [0, 3, 4],
@@ -112,16 +112,6 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphP
     }
   };
 
-  const loadOrphanCount = useCallback(async () => {
-    try {
-      const response = await listOrphans();
-      if (!isMountedRef.current) return;
-      setOrphanCount(response.orphans.length);
-    } catch {
-      // Not critical
-    }
-  }, []);
-
   const loadPackages = useCallback(async () => {
     if (filter === "graph" || filter === "orphan") {
       setLoading(false);
@@ -159,10 +149,6 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphP
   useEffect(() => {
     loadPackages();
   }, [loadPackages]);
-
-  useEffect(() => {
-    loadOrphanCount();
-  }, [loadOrphanCount]);
 
   const handleSearch = () => {
     manualSearchRef.current = true;
@@ -363,7 +349,11 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphP
         {filter === "graph" ? (
           <DependencyView initialPackage={graphPackage} />
         ) : filter === "orphan" ? (
-          <OrphansView />
+          <OrphansView
+            onRowClick={handleRowClick}
+            onOrphansLoaded={setOrphanCount}
+            refreshTrigger={orphanRefresh}
+          />
         ) : (
           renderPackageContent()
         )}
@@ -386,19 +376,20 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphP
           </Toolbar>
         )}
 
-        {filter !== "orphan" && (
-          <PackageDetailsModal
-            packageDetails={selectedPackage}
-            isLoading={detailsLoading}
-            onClose={clearDetails}
-            error={detailsError}
-            onViewDependencies={(packageName) => {
-              onGraphPackageChange?.(packageName);
-              setFilter("graph");
-            }}
-            onPackageRemoved={loadPackages}
-          />
-        )}
+        <PackageDetailsModal
+          packageDetails={selectedPackage}
+          isLoading={detailsLoading}
+          onClose={clearDetails}
+          error={detailsError}
+          onViewDependencies={(packageName) => {
+            onGraphPackageChange?.(packageName);
+            setFilter("graph");
+          }}
+          onPackageRemoved={() => {
+            loadPackages();
+            setOrphanRefresh(r => r + 1);
+          }}
+        />
       </CardBody>
     </Card>
   );
