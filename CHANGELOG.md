@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.3] - 2026-03-15
+
+### Added
+- Package uninstall from the details modal with confirmation and progress feedback (0fcd6e4)
+- Package name search and expand-all toggle in History view (66d12b0)
+- Preflight warning when firmware packages are upgraded without a matching kernel upgrade (d9e49ec)
+
+### Changed
+- Updates view now syncs the package database on load instead of relying on stale state (fd9e47d)
+
 ## [0.3.2] - 2026-02-28
 
 ### Fixed
