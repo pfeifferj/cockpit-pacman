@@ -24,9 +24,10 @@ fn parse_filter(filter: Option<&str>) -> Option<Action> {
     })
 }
 
-fn collect_log_entries(filter: Option<&str>) -> LogStats {
+fn collect_log_entries(filter: Option<&str>, search: Option<&str>) -> LogStats {
     let reader = LogReader::system();
     let filter_action = parse_filter(filter);
+    let search_lower = search.map(|s| s.to_lowercase());
 
     let mut entries: Vec<LogEntry> = Vec::new();
     let mut total_upgraded = 0usize;
@@ -42,6 +43,12 @@ fn collect_log_entries(filter: Option<&str>) -> LogStats {
                 continue;
             }
         };
+
+        if let Some(ref needle) = search_lower
+            && !entry.package.to_lowercase().contains(needle.as_str())
+        {
+            continue;
+        }
 
         match entry.action {
             Action::Upgraded => total_upgraded += 1,
@@ -77,8 +84,13 @@ fn collect_log_entries(filter: Option<&str>) -> LogStats {
     }
 }
 
-pub fn get_history(offset: usize, limit: usize, filter: Option<&str>) -> Result<()> {
-    let stats = collect_log_entries(filter);
+pub fn get_history(
+    offset: usize,
+    limit: usize,
+    filter: Option<&str>,
+    search: Option<&str>,
+) -> Result<()> {
+    let stats = collect_log_entries(filter, search);
     let total = stats.entries.len();
     let paginated: Vec<LogEntry> = stats.entries.into_iter().skip(offset).take(limit).collect();
 
@@ -134,8 +146,13 @@ fn finalize_group(entries: Vec<LogEntry>, group_index: usize) -> LogGroup {
     }
 }
 
-pub fn get_grouped_history(offset: usize, limit: usize, filter: Option<&str>) -> Result<()> {
-    let stats = collect_log_entries(filter);
+pub fn get_grouped_history(
+    offset: usize,
+    limit: usize,
+    filter: Option<&str>,
+    search: Option<&str>,
+) -> Result<()> {
+    let stats = collect_log_entries(filter, search);
 
     let mut groups: Vec<LogGroup> = Vec::new();
     let mut current_group_entries: Vec<LogEntry> = Vec::new();

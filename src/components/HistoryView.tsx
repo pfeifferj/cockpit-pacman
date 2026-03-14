@@ -18,10 +18,14 @@ import {
   Flex,
   FlexItem,
   Label,
-  Pagination,
   MenuToggle,
+  Pagination,
+  SearchInput,
   Select,
   SelectOption,
+  Toolbar,
+  ToolbarContent,
+  ToolbarItem,
 } from "@patternfly/react-core";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { StatBox } from "./StatBox";
@@ -35,7 +39,8 @@ import {
   getGroupedHistory,
   formatNumber,
 } from "../api";
-import { sanitizeErrorMessage } from "../utils";
+import { sanitizeErrorMessage, sanitizeSearchInput } from "../utils";
+import { SEARCH_DEBOUNCE_MS } from "../constants";
 
 type ViewState = "loading" | "ready" | "error";
 
@@ -68,9 +73,11 @@ export const HistoryView: React.FC = () => {
   const { page, perPage, offset, setPage, setPerPage } = usePagination({ defaultPerPage: 20 });
   const [filter, setFilter] = useState<HistoryFilterType>("all");
   const [filterOpen, setFilterOpen] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const expandAllRef = useRef(false);
   const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
-  const isMountedRef = useRef(true);
 
   const loadHistory = useCallback(async () => {
     setState("loading");
@@ -80,24 +87,32 @@ export const HistoryView: React.FC = () => {
         offset,
         limit: perPage,
         filter,
+        search: searchQuery,
       });
       setGroupedData(response);
+      setExpandedGroups(
+        expandAllRef.current ? new Set(response.groups.map((g) => g.id)) : new Set()
+      );
       setState("ready");
     } catch (ex) {
       setState("error");
       setError(ex instanceof Error ? ex.message : String(ex));
     }
-  }, [offset, perPage, filter]);
+  }, [offset, perPage, filter, searchQuery]);
 
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
 
   useEffect(() => {
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
+    const sanitized = sanitizeSearchInput(searchInput);
+    if (sanitized === searchQuery) return;
+    const timer = setTimeout(() => {
+      setSearchQuery(sanitized);
+      setPage(1);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [searchInput, searchQuery, setPage]);
 
   const handleRowClick = (pkgName: string) => {
     fetchDetails(pkgName, { strategy: "local-then-sync" });
@@ -107,21 +122,33 @@ export const HistoryView: React.FC = () => {
     setFilter(value);
     setPage(1);
     setFilterOpen(false);
-    setExpandedGroups(new Set());
   };
 
   const handleSetPage = (_event: React.MouseEvent | React.KeyboardEvent | MouseEvent, newPage: number) => {
     setPage(newPage);
-    setExpandedGroups(new Set());
   };
 
   const handlePerPageSelect = (_event: React.MouseEvent | React.KeyboardEvent | MouseEvent, newPerPage: number) => {
     setPerPage(newPerPage);
     setPage(1);
-    setExpandedGroups(new Set());
+  };
+
+  const allExpanded = groupedData?.groups.length
+    ? groupedData.groups.every((g) => expandedGroups.has(g.id))
+    : false;
+
+  const toggleAllGroups = () => {
+    if (allExpanded) {
+      expandAllRef.current = false;
+      setExpandedGroups(new Set());
+    } else {
+      expandAllRef.current = true;
+      setExpandedGroups(new Set(groupedData?.groups.map((g) => g.id) || []));
+    }
   };
 
   const toggleGroup = (groupId: string) => {
+    expandAllRef.current = false;
     setExpandedGroups((prev) => {
       const next = new Set(prev);
       if (next.has(groupId)) {
@@ -224,7 +251,7 @@ export const HistoryView: React.FC = () => {
     );
   }
 
-  if (!groupedData?.groups.length && filter === "all") {
+  if (!groupedData?.groups.length && filter === "all" && !searchQuery) {
     return (
       <Card>
         <CardBody>
@@ -250,7 +277,7 @@ export const HistoryView: React.FC = () => {
       <CardBody>
         <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
           <FlexItem>
-            <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">Package History</CardTitle>
+            <CardTitle className="pf-v6-u-m-0">Package History</CardTitle>
             <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
               <FlexItem>
                 <StatBox
@@ -284,34 +311,70 @@ export const HistoryView: React.FC = () => {
               )}
             </Flex>
           </FlexItem>
-          <FlexItem>
-            <Select
-              toggle={(toggleRef) => (
-                <MenuToggle
-                  ref={toggleRef}
-                  onClick={() => setFilterOpen(!filterOpen)}
-                  isExpanded={filterOpen}
-                >
-                  {filter === "all" ? "All actions" : filter.charAt(0).toUpperCase() + filter.slice(1)}
-                </MenuToggle>
-              )}
-              onSelect={(_event, value) => handleFilterChange(value as HistoryFilterType)}
-              selected={filter}
-              isOpen={filterOpen}
-              onOpenChange={(isOpen) => setFilterOpen(isOpen)}
-            >
-              <SelectOption value="all">All actions</SelectOption>
-              <SelectOption value="upgraded">Upgraded</SelectOption>
-              <SelectOption value="installed">Installed</SelectOption>
-              <SelectOption value="removed">Removed</SelectOption>
-            </Select>
-          </FlexItem>
         </Flex>
+
+        <Toolbar>
+          <ToolbarContent>
+            <ToolbarItem>
+              <SearchInput
+                placeholder="Filter by package name..."
+                value={searchInput}
+                onChange={(_event, value) => setSearchInput(value)}
+                onClear={() => setSearchInput("")}
+                aria-label="Filter history by package name"
+              />
+            </ToolbarItem>
+            <ToolbarItem>
+              <Select
+                toggle={(toggleRef) => (
+                  <MenuToggle
+                    ref={toggleRef}
+                    onClick={() => setFilterOpen(!filterOpen)}
+                    isExpanded={filterOpen}
+                  >
+                    {filter === "all" ? "All actions" : filter.charAt(0).toUpperCase() + filter.slice(1)}
+                  </MenuToggle>
+                )}
+                onSelect={(_event, value) => handleFilterChange(value as HistoryFilterType)}
+                selected={filter}
+                isOpen={filterOpen}
+                onOpenChange={(isOpen) => setFilterOpen(isOpen)}
+              >
+                <SelectOption value="all">All actions</SelectOption>
+                <SelectOption value="upgraded">Upgraded</SelectOption>
+                <SelectOption value="installed">Installed</SelectOption>
+                <SelectOption value="removed">Removed</SelectOption>
+              </Select>
+            </ToolbarItem>
+            <ToolbarItem>
+              <Button
+                variant="secondary"
+                onClick={toggleAllGroups}
+                isDisabled={!groupedData?.groups.length}
+              >
+                {allExpanded ? "Collapse all" : "Expand all"}
+              </Button>
+            </ToolbarItem>
+            <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
+              <Pagination
+                itemCount={groupedData?.total_groups || 0}
+                perPage={perPage}
+                page={page}
+                onSetPage={handleSetPage}
+                onPerPageSelect={handlePerPageSelect}
+                perPageOptions={PER_PAGE_OPTIONS}
+                isCompact
+              />
+            </ToolbarItem>
+          </ToolbarContent>
+        </Toolbar>
 
         {!groupedData?.groups.length ? (
           <EmptyState headingLevel="h3" titleText="No matching entries">
             <EmptyStateBody>
-              No {filter} packages found in history.
+              {searchQuery
+                ? `No history found for "${searchQuery}"${filter !== "all" ? ` with filter "${filter}"` : ""}.`
+                : `No ${filter} packages found in history.`}
             </EmptyStateBody>
           </EmptyState>
         ) : (
