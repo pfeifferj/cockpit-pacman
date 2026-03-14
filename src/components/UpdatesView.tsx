@@ -274,7 +274,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
     setState("checking");
     setError(null);
     setWarnings([]);
-    setNewsError(false);
     try {
       const response = await checkUpdates();
       setUpdates(response.updates);
@@ -287,7 +286,18 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
   }, []);
 
   useEffect(() => {
-    loadUpdates();
+    const { cancel } = syncDatabase({
+      onData: (data) => setLog((prev) => {
+        const newLog = prev + data;
+        return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
+      }),
+      onComplete: () => loadUpdates(),
+      onError: (err) => {
+        setState("error");
+        setError(err);
+      },
+    });
+    return () => cancel();
   }, [loadUpdates]);
 
   const loadConfigIgnored = useCallback(async () => {
