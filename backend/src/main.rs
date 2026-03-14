@@ -5,9 +5,9 @@ use cockpit_pacman_backend::handlers::{
     get_cache_info, get_dependency_tree, get_grouped_history, get_history, get_reboot_status,
     get_schedule_config, get_scheduled_runs, init_keyring, keyring_status, list_downgrades,
     list_ignored, list_installed, list_mirrors, list_orphans, local_package_info,
-    preflight_upgrade, refresh_keyring, remove_ignored, remove_orphans, run_upgrade,
-    save_mirrorlist, scheduled_run, search, set_schedule_config, sync_database, sync_package_info,
-    test_mirrors,
+    preflight_upgrade, refresh_keyring, remove_ignored, remove_orphans, remove_package,
+    run_upgrade, save_mirrorlist, scheduled_run, search, set_schedule_config, sync_database,
+    sync_package_info, test_mirrors,
 };
 use cockpit_pacman_backend::models::MirrorEntry;
 use cockpit_pacman_backend::validation::{
@@ -54,6 +54,9 @@ fn print_usage() {
     eprintln!("  list-orphans           List orphan packages (dependencies no longer required)");
     eprintln!("  remove-orphans [timeout]");
     eprintln!("                         Remove all orphan packages (requires root)");
+    eprintln!("                         timeout: seconds (default: 300)");
+    eprintln!("  remove-package NAME [timeout]");
+    eprintln!("                         Remove an installed package (requires root)");
     eprintln!("                         timeout: seconds (default: 300)");
     eprintln!("  list-ignored           List packages ignored during upgrades");
     eprintln!("  add-ignored NAME       Add a package to the ignored list (requires root)");
@@ -210,6 +213,14 @@ fn main() {
         "remove-orphans" => {
             let timeout = args.get(2).and_then(|s| s.parse().ok());
             remove_orphans(timeout)
+        }
+        "remove-package" => {
+            if args.len() < 3 {
+                eprintln!("Error: remove-package requires a package name");
+                std::process::exit(1);
+            }
+            let timeout = args.get(3).and_then(|s| s.parse().ok());
+            validate_package_name(&args[2]).and_then(|_| remove_package(&args[2], timeout))
         }
         "list-ignored" => list_ignored(),
         "add-ignored" => {

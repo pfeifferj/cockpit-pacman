@@ -396,6 +396,7 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphP
               onGraphPackageChange?.(packageName);
               setFilter("graph");
             }}
+            onPackageRemoved={loadPackages}
           />
         )}
       </CardBody>

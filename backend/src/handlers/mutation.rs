@@ -537,3 +537,122 @@ pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
 
     Ok(())
 }
+
+pub fn remove_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
+    setup_signal_handler();
+    let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
+
+    let mut handle = get_handle()?;
+
+    setup_log_cb(&mut handle);
+
+    handle.set_progress_cb(
+        (),
+        |progress: Progress,
+         pkgname: &str,
+         percent: i32,
+         howmany: usize,
+         current: usize,
+         _: &mut ()| {
+            if is_cancelled() {
+                return;
+            }
+            emit_event(&StreamEvent::Progress {
+                operation: progress_to_string(progress).to_string(),
+                package: pkgname.to_string(),
+                percent,
+                current,
+                total: howmany,
+            });
+        },
+    );
+
+    handle.set_event_cb((), |event: AnyEvent, _: &mut ()| {
+        let (event_str, pkg_name) = match event.event() {
+            Event::PackageOperationStart(op) | Event::PackageOperationDone(op) => {
+                let (op_name, pkg_name) = match op.operation() {
+                    PackageOperation::Remove(pkg) => ("remove", pkg.name().to_string()),
+                    _ => return,
+                };
+                (op_name.to_string(), Some(pkg_name))
+            }
+            Event::TransactionStart => ("transaction_start".to_string(), None),
+            Event::TransactionDone => ("transaction_done".to_string(), None),
+            Event::HookStart(_) => ("hook_start".to_string(), None),
+            Event::HookDone(_) => ("hook_done".to_string(), None),
+            Event::HookRunStart(h) => ("hook_run_start".to_string(), Some(h.name().to_string())),
+            Event::HookRunDone(h) => ("hook_run_done".to_string(), Some(h.name().to_string())),
+            _ => return,
+        };
+        emit_event(&StreamEvent::Event {
+            event: event_str,
+            package: pkg_name,
+        });
+    });
+
+    check_cancel_early!(&timeout);
+
+    handle
+        .trans_init(TransFlag::RECURSE)
+        .map_err(|e| anyhow::anyhow!("Failed to initialize transaction: {}", e))?;
+
+    let mark_result = handle
+        .localdb()
+        .pkg(name)
+        .map_err(|e| format!("{}", e))
+        .and_then(|pkg| handle.trans_remove_pkg(pkg).map_err(|e| format!("{}", e)));
+
+    if let Err(err_msg) = mark_result {
+        let _ = handle.trans_release();
+        emit_event(&StreamEvent::Complete {
+            success: false,
+            message: Some(format!(
+                "Failed to mark '{}' for removal: {}",
+                name, err_msg
+            )),
+        });
+        return Err(anyhow::anyhow!(
+            "Failed to mark '{}' for removal: {}",
+            name,
+            err_msg
+        ));
+    }
+
+    check_cancel_early!(&timeout);
+
+    let prepare_err: Option<String> = handle.trans_prepare().err().map(|e| e.to_string());
+    if let Some(err_msg) = prepare_err {
+        let _ = handle.trans_release();
+        emit_event(&StreamEvent::Complete {
+            success: false,
+            message: Some(format!("Failed to prepare transaction: {}", err_msg)),
+        });
+        return Err(anyhow::anyhow!(
+            "Failed to prepare transaction: {}",
+            err_msg
+        ));
+    }
+
+    let was_cancelled_before = is_cancelled();
+    let was_timed_out_before = timeout.is_timed_out();
+    let commit_err: Option<String> = handle.trans_commit().err().map(|e| e.to_string());
+    if let Some(err_msg) = commit_err {
+        let _ = handle.trans_release();
+        return handle_commit_error(
+            &err_msg,
+            was_cancelled_before,
+            was_timed_out_before,
+            &timeout,
+            "Operation interrupted - package may be in inconsistent state",
+        )
+        .map(|_| ());
+    }
+
+    let _ = handle.trans_release();
+    emit_event(&StreamEvent::Complete {
+        success: true,
+        message: Some(format!("Successfully removed {}", name)),
+    });
+
+    Ok(())
+}
