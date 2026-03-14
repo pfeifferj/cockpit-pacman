@@ -61,13 +61,15 @@ fn print_usage() {
     eprintln!("  cache-info             Show package cache information and size");
     eprintln!("  clean-cache [KEEP]     Clean package cache (requires root)");
     eprintln!("                         KEEP: number of versions to keep (default: 3)");
-    eprintln!("  history [offset] [limit] [filter]");
+    eprintln!("  history [offset] [limit] [filter] [search]");
     eprintln!("                         View package history from pacman.log");
     eprintln!("                         filter: all|upgraded|installed|removed");
-    eprintln!("  history-grouped [offset] [limit] [filter]");
+    eprintln!("                         search: filter by package name (substring)");
+    eprintln!("  history-grouped [offset] [limit] [filter] [search]");
     eprintln!("                         View package history grouped by upgrade runs");
     eprintln!("                         Groups entries within 60s of each other");
     eprintln!("                         filter: all|upgraded|installed|removed");
+    eprintln!("                         search: filter by package name (substring)");
     eprintln!("  list-downgrades [NAME] List cached package versions available for downgrade");
     eprintln!("                         NAME: optional package name to filter");
     eprintln!("  downgrade NAME VERSION [timeout]");
@@ -236,7 +238,13 @@ fn main() {
                 .get(4)
                 .map(|s| s.as_str())
                 .filter(|s| !s.is_empty() && *s != "all");
-            validate_pagination(offset, limit).and_then(|_| get_history(offset, limit, filter))
+            let search = args.get(5).map(|s| s.as_str()).filter(|s| !s.is_empty());
+            validate_pagination(offset, limit).and_then(|_| {
+                if let Some(q) = search {
+                    validate_search_query(q)?;
+                }
+                get_history(offset, limit, filter, search)
+            })
         }
         "history-grouped" => {
             let offset = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -245,8 +253,13 @@ fn main() {
                 .get(4)
                 .map(|s| s.as_str())
                 .filter(|s| !s.is_empty() && *s != "all");
-            validate_pagination(offset, limit)
-                .and_then(|_| get_grouped_history(offset, limit, filter))
+            let search = args.get(5).map(|s| s.as_str()).filter(|s| !s.is_empty());
+            validate_pagination(offset, limit).and_then(|_| {
+                if let Some(q) = search {
+                    validate_search_query(q)?;
+                }
+                get_grouped_history(offset, limit, filter, search)
+            })
         }
         "list-downgrades" => {
             let name = args.get(2).map(|s| s.as_str()).filter(|s| !s.is_empty());

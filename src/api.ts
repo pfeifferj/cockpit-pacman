@@ -676,11 +676,12 @@ export interface HistoryParams {
   offset?: number;
   limit?: number;
   filter?: HistoryFilterType;
+  search?: string;
 }
 
 export async function getHistory(params: HistoryParams = {}): Promise<LogResponse> {
-  const { offset = 0, limit = 100, filter = "all" } = params;
-  return runBackend<LogResponse>("history", [String(offset), String(limit), filter]);
+  const { offset = 0, limit = 100, filter = "all", search = "" } = params;
+  return runBackend<LogResponse>("history", [String(offset), String(limit), filter, search]);
 }
 
 export interface LogGroup {
@@ -705,11 +706,12 @@ export interface GroupedLogResponse {
 }
 
 export async function getGroupedHistory(params: HistoryParams = {}): Promise<GroupedLogResponse> {
-  const { offset = 0, limit = 20, filter = "all" } = params;
+  const { offset = 0, limit = 20, filter = "all", search = "" } = params;
   return runBackend<GroupedLogResponse>("history-grouped", [
     String(offset),
     String(limit),
     filter,
+    search,
   ]);
 }
 
