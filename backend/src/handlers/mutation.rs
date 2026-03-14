@@ -7,8 +7,8 @@ use crate::alpm::{TransactionGuard, get_handle, progress_to_string, setup_dl_cb,
 use crate::check_cancel_early;
 use crate::db::invalidate_repo_map_cache;
 use crate::models::{
-    ConflictInfo, KeyInfo, PreflightResponse, PreflightState, ProviderChoice, ReplacementInfo,
-    StreamEvent,
+    ConflictInfo, KeyInfo, PreflightResponse, PreflightState, PreflightWarning, ProviderChoice,
+    ReplacementInfo, StreamEvent, WarningSeverity,
 };
 use crate::util::{
     CheckResult, DEFAULT_MUTATION_TIMEOUT_SECS, TimeoutGuard, check_cancel,
@@ -119,6 +119,37 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
         return emit_json(&response);
     }
 
+    let upgrade_pkgs = tx.add();
+    let upgrade_names: Vec<String> = upgrade_pkgs.iter().map(|p| p.name().to_string()).collect();
+
+    let mut warnings = Vec::new();
+
+    let firmware_pkgs: Vec<String> = upgrade_names
+        .iter()
+        .filter(|name| {
+            name.starts_with("linux-firmware") || *name == "amd-ucode" || *name == "intel-ucode"
+        })
+        .cloned()
+        .collect();
+
+    let has_kernel = upgrade_pkgs
+        .iter()
+        .any(|p| p.provides().iter().any(|dep| dep.name() == "linux"));
+
+    if !firmware_pkgs.is_empty() && !has_kernel {
+        warnings.push(PreflightWarning {
+            id: "firmware_without_kernel".to_string(),
+            severity: WarningSeverity::Warning,
+            title: "Firmware upgrade without kernel".to_string(),
+            message: "Firmware packages are being upgraded without a matching kernel upgrade. \
+                This can cause boot failures if the new firmware is incompatible with the \
+                installed kernel. Consider upgrading the kernel at the same time, or verify \
+                compatibility before rebooting."
+                .to_string(),
+            packages: firmware_pkgs,
+        });
+    }
+
     let s = state.borrow();
     let response = PreflightResponse {
         success: true,
@@ -128,6 +159,7 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
         removals: s.removals.clone(),
         providers: s.providers.clone(),
         import_keys: s.import_keys.clone(),
+        warnings,
         packages_to_upgrade,
         total_download_size,
     };

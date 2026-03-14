@@ -120,6 +120,23 @@ pub struct KeyInfo {
     pub uid: String,
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum WarningSeverity {
+    Info,
+    Warning,
+    Danger,
+}
+
+#[derive(Serialize, Clone)]
+pub struct PreflightWarning {
+    pub id: String,
+    pub severity: WarningSeverity,
+    pub title: String,
+    pub message: String,
+    pub packages: Vec<String>,
+}
+
 #[derive(Serialize, Default)]
 pub struct PreflightResponse {
     pub success: bool,
@@ -135,6 +152,8 @@ pub struct PreflightResponse {
     pub providers: Vec<ProviderChoice>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub import_keys: Vec<KeyInfo>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<PreflightWarning>,
     pub packages_to_upgrade: usize,
     pub total_download_size: i64,
 }

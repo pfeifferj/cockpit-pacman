@@ -131,6 +131,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
   const [acknowledgedRemovals, setAcknowledgedRemovals] = useState(false);
   const [acknowledgedConflicts, setAcknowledgedConflicts] = useState(false);
   const [acknowledgedKeyImports, setAcknowledgedKeyImports] = useState(false);
+  const [acknowledgedWarnings, setAcknowledgedWarnings] = useState<Set<string>>(new Set());
   const [rebootStatus, setRebootStatus] = useState<RebootStatus | null>(null);
   const [orphanCount, setOrphanCount] = useState<number | null>(null);
   const [cacheSize, setCacheSize] = useState<number | null>(null);
@@ -218,12 +219,17 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
     const needsRemovalAck = (preflightData.removals?.length ?? 0) > 0;
     const needsConflictAck = (preflightData.conflicts?.length ?? 0) > 0;
     const needsKeyImportAck = (preflightData.import_keys?.length ?? 0) > 0;
+    const warningsNeedingAck = (preflightData.warnings ?? []).filter(
+      (w) => w.severity === "warning" || w.severity === "danger"
+    );
+    const allWarningsAcked = warningsNeedingAck.every((w) => acknowledgedWarnings.has(w.id));
     return (
       (!needsRemovalAck || acknowledgedRemovals) &&
       (!needsConflictAck || acknowledgedConflicts) &&
-      (!needsKeyImportAck || acknowledgedKeyImports)
+      (!needsKeyImportAck || acknowledgedKeyImports) &&
+      allWarningsAcked
     );
-  }, [preflightData, acknowledgedRemovals, acknowledgedConflicts, acknowledgedKeyImports]);
+  }, [preflightData, acknowledgedRemovals, acknowledgedConflicts, acknowledgedKeyImports, acknowledgedWarnings]);
 
   const visibleNews = useMemo(
     () => newsItems.filter((item) => !dismissedNews.has(item.link)),
@@ -419,13 +425,15 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
         (preflight.replacements?.length ?? 0) > 0 ||
         (preflight.removals?.length ?? 0) > 0 ||
         (preflight.providers?.length ?? 0) > 0 ||
-        (preflight.import_keys?.length ?? 0) > 0;
+        (preflight.import_keys?.length ?? 0) > 0 ||
+        (preflight.warnings?.some((w) => w.severity !== "info") ?? false);
 
       if (hasIssues) {
         // Reset acknowledgments and show confirmation modal
         setAcknowledgedRemovals(false);
         setAcknowledgedConflicts(false);
         setAcknowledgedKeyImports(false);
+        setAcknowledgedWarnings(new Set());
         setConfirmModalOpen(true);
         return;
       }
@@ -1120,6 +1128,44 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
                   />
                 </Alert>
               )}
+
+              {preflightData.warnings?.map((w) => (
+                <Alert
+                  key={w.id}
+                  variant={w.severity === "danger" ? "danger" : w.severity === "info" ? "info" : "warning"}
+                  title={w.title}
+                  isInline
+                  className="pf-v6-u-mt-md"
+                >
+                  <Content component={ContentVariants.p}>{w.message}</Content>
+                  {w.packages.length > 0 && (
+                    <List>
+                      {w.packages.map((pkg, i) => (
+                        <ListItem key={i}>{pkg}</ListItem>
+                      ))}
+                    </List>
+                  )}
+                  {(w.severity === "warning" || w.severity === "danger") && (
+                    <Checkbox
+                      id={`acknowledge-warning-${w.id}`}
+                      label="I understand and want to proceed"
+                      isChecked={acknowledgedWarnings.has(w.id)}
+                      onChange={(_event, checked) => {
+                        setAcknowledgedWarnings((prev) => {
+                          const next = new Set(prev);
+                          if (checked) {
+                            next.add(w.id);
+                          } else {
+                            next.delete(w.id);
+                          }
+                          return next;
+                        });
+                      }}
+                      className="pf-v6-u-mt-sm"
+                    />
+                  )}
+                </Alert>
+              ))}
 
               {(preflightData.replacements?.length ?? 0) > 0 && (
                 <Alert variant="info" title="Package replacements" isInline className="pf-v6-u-mt-md">
