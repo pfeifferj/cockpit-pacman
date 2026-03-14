@@ -152,6 +152,14 @@ export interface PreflightKeyInfo {
   uid: string;
 }
 
+export interface PreflightWarning {
+  id: string;
+  severity: "warning" | "danger" | "info";
+  title: string;
+  message: string;
+  packages: string[];
+}
+
 export interface PreflightResponse {
   success: boolean;
   error?: string;
@@ -160,6 +168,7 @@ export interface PreflightResponse {
   removals?: string[];
   providers?: ProviderChoice[];
   import_keys?: PreflightKeyInfo[];
+  warnings?: PreflightWarning[];
   packages_to_upgrade: number;
   total_download_size: number;
 }
