@@ -3,8 +3,8 @@ use std::env;
 use cockpit_pacman_backend::handlers::{
     add_ignored, check_updates, clean_cache, downgrade_package, fetch_mirror_status, fetch_news,
     get_cache_info, get_dependency_tree, get_grouped_history, get_history, get_reboot_status,
-    get_schedule_config, get_scheduled_runs, init_keyring, keyring_status, list_downgrades,
-    list_ignored, list_installed, list_mirrors, list_orphans, local_package_info,
+    get_schedule_config, get_scheduled_runs, init_keyring, install_package, keyring_status,
+    list_downgrades, list_ignored, list_installed, list_mirrors, list_orphans, local_package_info,
     preflight_upgrade, refresh_keyring, remove_ignored, remove_orphans, remove_package,
     run_upgrade, save_mirrorlist, scheduled_run, search, set_schedule_config, sync_database,
     sync_package_info, test_mirrors,
@@ -54,6 +54,9 @@ fn print_usage() {
     eprintln!("  list-orphans           List orphan packages (dependencies no longer required)");
     eprintln!("  remove-orphans [timeout]");
     eprintln!("                         Remove all orphan packages (requires root)");
+    eprintln!("                         timeout: seconds (default: 300)");
+    eprintln!("  install-package NAME [timeout]");
+    eprintln!("                         Install a package from repositories (requires root)");
     eprintln!("                         timeout: seconds (default: 300)");
     eprintln!("  remove-package NAME [timeout]");
     eprintln!("                         Remove an installed package (requires root)");
@@ -213,6 +216,14 @@ fn main() {
         "remove-orphans" => {
             let timeout = args.get(2).and_then(|s| s.parse().ok());
             remove_orphans(timeout)
+        }
+        "install-package" => {
+            if args.len() < 3 {
+                eprintln!("Error: install-package requires a package name");
+                std::process::exit(1);
+            }
+            let timeout = args.get(3).and_then(|s| s.parse().ok());
+            validate_package_name(&args[2]).and_then(|_| install_package(&args[2], timeout))
         }
         "remove-package" => {
             if args.len() < 3 {

@@ -600,6 +600,17 @@ export async function listOrphans(): Promise<OrphanResponse> {
   return runBackend<OrphanResponse>("list-orphans");
 }
 
+export function installPackage(
+  callbacks: UpgradeCallbacks,
+  name: string
+): { cancel: () => void } {
+  const args = [sanitizeSearchInput(name)];
+  if (callbacks.timeout !== undefined) {
+    args.push(String(callbacks.timeout));
+  }
+  return runStreamingBackend("install-package", args, callbacks);
+}
+
 export function removePackage(
   callbacks: UpgradeCallbacks,
   name: string

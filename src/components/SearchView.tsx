@@ -489,6 +489,11 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
               fetchResults(currentQuery, page, perPage, installedFilter, true, activeSortIndex, activeSortDirection);
             }
           }}
+          onPackageInstalled={() => {
+            if (currentQuery) {
+              fetchResults(currentQuery, page, perPage, installedFilter, true, activeSortIndex, activeSortDirection);
+            }
+          }}
         />
       </CardBody>
     </Card>

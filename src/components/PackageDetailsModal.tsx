@@ -19,10 +19,11 @@ import {
 	EmptyState,
 	EmptyStateBody,
 } from '@patternfly/react-core';
-import { OutlinedQuestionCircleIcon, ArrowDownIcon, ExclamationCircleIcon, TopologyIcon, TrashIcon } from "@patternfly/react-icons";
+import { OutlinedQuestionCircleIcon, ArrowDownIcon, ExclamationCircleIcon, TopologyIcon, TrashIcon, PlusCircleIcon } from "@patternfly/react-icons";
 import { PackageDetails, SyncPackageDetails, formatSize, formatDate } from "../api";
 import { sanitizeUrl } from "../utils";
 import { DowngradeModal } from "./DowngradeModal";
+import { InstallModal } from "./InstallModal";
 import { UninstallModal } from "./UninstallModal";
 
 type PackageInfo = PackageDetails | SyncPackageDetails;
@@ -38,6 +39,7 @@ interface PackageDetailsModalProps {
   error?: string | null;
   onViewDependencies?: (packageName: string) => void;
   onPackageRemoved?: () => void;
+  onPackageInstalled?: () => void;
 }
 
 export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
@@ -47,9 +49,11 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
   error,
   onViewDependencies,
   onPackageRemoved,
+  onPackageInstalled,
 }) => {
   const [downgradeModalOpen, setDowngradeModalOpen] = useState(false);
   const [uninstallTarget, setUninstallTarget] = useState<{ name: string; version: string } | null>(null);
+  const [installTarget, setInstallTarget] = useState<{ name: string; version: string } | null>(null);
   const isOpen = packageDetails !== null || isLoading || !!error;
   const isInstalled = packageDetails && isInstalledPackage(packageDetails);
   useBackdropClose(isOpen, onClose);
@@ -66,6 +70,16 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
 
   const handleUninstallClose = () => {
     setUninstallTarget(null);
+  };
+
+  const handleInstall = () => {
+    if (!packageDetails) return;
+    setInstallTarget({ name: packageDetails.name, version: packageDetails.version });
+    onClose();
+  };
+
+  const handleInstallClose = () => {
+    setInstallTarget(null);
   };
 
   return (
@@ -271,7 +285,7 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
               View Dependencies
             </Button>
           )}
-          {isInstalled && (
+          {isInstalled ? (
             <>
               <Button
                 variant="secondary"
@@ -288,6 +302,14 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
                 Uninstall
               </Button>
             </>
+          ) : (
+            <Button
+              variant="primary"
+              icon={<PlusCircleIcon />}
+              onClick={handleInstall}
+            >
+              Install
+            </Button>
           )}
         </ModalFooter>
       )}
@@ -307,6 +329,15 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
         isOpen={true}
         onClose={handleUninstallClose}
         onSuccess={onPackageRemoved}
+      />
+    )}
+    {installTarget && (
+      <InstallModal
+        packageName={installTarget.name}
+        packageVersion={installTarget.version}
+        isOpen={true}
+        onClose={handleInstallClose}
+        onSuccess={onPackageInstalled}
       />
     )}
     </>
