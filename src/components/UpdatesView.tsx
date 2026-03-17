@@ -792,14 +792,74 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
         )}
         {newsErrorAlert}
         {newsAlerts}
-        <Card>
+        {keyringStatus && !keyringStatus.master_key_initialized && (
+          <Alert variant="warning" title="Keyring not initialized" isInline className="pf-v6-u-mb-md">
+            The pacman keyring is not initialized. Package signature verification may fail.
+          </Alert>
+        )}
+        {keyringStatus?.warnings.map((w, i) => (
+          <Alert key={i} variant="warning" title={w} isInline className="pf-v6-u-mb-md" />
+        ))}
+
+        <Card className="pf-v6-u-mb-md">
           <CardBody>
-            <EmptyState  headingLevel="h2" icon={CheckCircleIcon}  titleText="System is up to date">
-              <EmptyStateBody>
-                All installed packages are at their latest versions.
-              </EmptyStateBody>
-              <EmptyStateFooter>
-                <EmptyStateActions>
+            <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">System Overview</CardTitle>
+            <Flex spaceItems={{ default: "spaceItemsLg" }}>
+              <FlexItem>
+                <StatBox
+                  label="Updates"
+                  value={formatNumber(updates.length)}
+                  color={updates.length > 0 ? "danger" : "success"}
+                />
+              </FlexItem>
+              <FlexItem>
+                <StatBox
+                  label="Orphans"
+                  value={orphanCount !== null ? formatNumber(orphanCount) : "-"}
+                  color={orphanCount && orphanCount > 0 ? "warning" : "default"}
+                  isLoading={summaryLoading}
+                />
+              </FlexItem>
+              <FlexItem>
+                <StatBox
+                  label="Cache"
+                  value={cacheSize !== null ? formatSize(cacheSize) : "-"}
+                  isLoading={summaryLoading}
+                />
+              </FlexItem>
+              <FlexItem>
+                <StatBox
+                  label="Keyring"
+                  value={keyringStatus ? `${keyringStatus.total} keys` : "-"}
+                  color={keyringStatus?.warnings.length ? "warning" : "default"}
+                  isLoading={summaryLoading}
+                />
+              </FlexItem>
+            </Flex>
+          </CardBody>
+        </Card>
+
+        <Card className="pf-v6-u-mb-md">
+          <CardBody style={{ paddingBottom: 0 }}>
+            <Toolbar>
+              <ToolbarContent>
+                <ToolbarItem>
+                  <Button
+                    variant="secondary"
+                    onClick={() => setScheduleModalOpen(true)}
+                  >
+                    Manage Schedule
+                  </Button>
+                </ToolbarItem>
+                <ToolbarItem>
+                  <Button
+                    variant="secondary"
+                    onClick={() => setIgnoredModalOpen(true)}
+                  >
+                    Manage Ignored{configIgnored.size > 0 ? ` (${configIgnored.size})` : ""}
+                  </Button>
+                </ToolbarItem>
+                <ToolbarItem>
                   <Button
                     variant="secondary"
                     icon={<SyncAltIcon />}
@@ -807,11 +867,31 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
                   >
                     Refresh
                   </Button>
-                </EmptyStateActions>
-              </EmptyStateFooter>
+                </ToolbarItem>
+              </ToolbarContent>
+            </Toolbar>
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardBody>
+            <EmptyState  headingLevel="h2" icon={CheckCircleIcon}  titleText="System is up to date">
+              <EmptyStateBody>
+                All installed packages are at their latest versions.
+              </EmptyStateBody>
             </EmptyState>
           </CardBody>
         </Card>
+
+        <IgnoredPackagesModal
+          isOpen={ignoredModalOpen}
+          onClose={() => setIgnoredModalOpen(false)}
+          onIgnoredChange={() => loadConfigIgnored()}
+        />
+        <ScheduleModal
+          isOpen={scheduleModalOpen}
+          onClose={() => setScheduleModalOpen(false)}
+        />
       </>
     );
   }
