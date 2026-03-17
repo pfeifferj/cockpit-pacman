@@ -130,7 +130,7 @@ describe("DependencyView", () => {
     await waitFor(() => {
       expect(mockGetDependencyTree).toHaveBeenCalledWith({
         name: "linux",
-        depth: 3,
+        depth: 1,
         direction: "forward",
       });
     });

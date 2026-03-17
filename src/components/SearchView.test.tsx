@@ -2,18 +2,20 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, act, cleanup } from "@testing-library/react";
 import { SearchView } from "./SearchView";
 import * as api from "../api";
+import { mockPackageDetails } from "../test/mocks";
 
 vi.mock("../api", async () => {
   const actual = await vi.importActual("../api");
   return {
     ...actual,
     searchPackages: vi.fn(),
+    getPackageInfo: vi.fn(),
     getSyncPackageInfo: vi.fn(),
   };
 });
 
 const mockSearchPackages = vi.mocked(api.searchPackages);
-const mockGetSyncPackageInfo = vi.mocked(api.getSyncPackageInfo);
+const mockGetPackageInfo = vi.mocked(api.getPackageInfo);
 
 const mockSearchResponse: api.SearchResponse = {
   results: [
@@ -46,26 +48,6 @@ const mockSearchResponse: api.SearchResponse = {
   total_installed: 1,
   total_not_installed: 2,
   repositories: ["core", "extra"],
-};
-
-const mockSyncPackageDetails: api.SyncPackageDetails = {
-  name: "linux",
-  version: "6.7.1-arch1-1",
-  description: "The Linux kernel and modules",
-  url: "https://kernel.org/",
-  licenses: ["GPL-2.0-only"],
-  groups: [],
-  provides: [],
-  depends: ["coreutils"],
-  optdepends: [],
-  conflicts: [],
-  replaces: [],
-  download_size: 150000000,
-  installed_size: 145000000,
-  packager: "heftig",
-  architecture: "x86_64",
-  build_date: 1704067200,
-  repository: "core",
 };
 
 describe("SearchView", () => {
@@ -340,7 +322,7 @@ describe("SearchView", () => {
   });
 
   it("opens package details modal when clicking a row", async () => {
-    mockGetSyncPackageInfo.mockResolvedValue(mockSyncPackageDetails);
+    mockGetPackageInfo.mockResolvedValue(mockPackageDetails);
 
     render(<SearchView />);
 
@@ -358,13 +340,14 @@ describe("SearchView", () => {
       expect(screen.getByText("linux")).toBeInTheDocument();
     });
 
+    // linux is installed=true in mock data, so it uses "local" strategy -> getPackageInfo
     const linuxButton = screen.getByRole("button", { name: "linux" });
     await act(async () => {
       fireEvent.click(linuxButton);
     });
 
     await waitFor(() => {
-      expect(mockGetSyncPackageInfo).toHaveBeenCalledWith("linux", "core");
+      expect(mockGetPackageInfo).toHaveBeenCalledWith("linux");
     });
   });
 
