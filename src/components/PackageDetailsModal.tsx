@@ -19,9 +19,9 @@ import {
 	EmptyState,
 	EmptyStateBody,
 } from '@patternfly/react-core';
-import { OutlinedQuestionCircleIcon, ArrowDownIcon, ExclamationCircleIcon, TopologyIcon, TrashIcon, PlusCircleIcon } from "@patternfly/react-icons";
+import { OutlinedQuestionCircleIcon, ArrowDownIcon, ExclamationCircleIcon, TopologyIcon, TrashIcon, PlusCircleIcon, HistoryIcon } from "@patternfly/react-icons";
 import { PackageDetails, SyncPackageDetails, formatSize, formatDate } from "../api";
-import { sanitizeUrl } from "../utils";
+import { sanitizeUrl, sanitizeErrorMessage } from "../utils";
 import { DowngradeModal } from "./DowngradeModal";
 import { InstallModal } from "./InstallModal";
 import { UninstallModal } from "./UninstallModal";
@@ -38,6 +38,7 @@ interface PackageDetailsModalProps {
   onClose: () => void;
   error?: string | null;
   onViewDependencies?: (packageName: string) => void;
+  onViewHistory?: (packageName: string) => void;
   onPackageRemoved?: () => void;
   onPackageInstalled?: () => void;
 }
@@ -48,6 +49,7 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
   onClose,
   error,
   onViewDependencies,
+  onViewHistory,
   onPackageRemoved,
   onPackageInstalled,
 }) => {
@@ -96,7 +98,7 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
         ) : error ? (
           <EmptyState headingLevel="h4" icon={ExclamationCircleIcon} titleText="Package not found">
             <EmptyStateBody>
-              {error}
+              {sanitizeErrorMessage(error)}
             </EmptyStateBody>
           </EmptyState>
         ) : packageDetails ? (
@@ -151,7 +153,7 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
               <DescriptionListTerm>Package Source</DescriptionListTerm>
               <DescriptionListDescription>
                 <a
-                  href={`https://gitlab.archlinux.org/archlinux/packaging/packages/${packageDetails.name}`}
+                  href={`https://gitlab.archlinux.org/archlinux/packaging/packages/${encodeURIComponent(packageDetails.name)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -283,6 +285,18 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
               }}
             >
               View Dependencies
+            </Button>
+          )}
+          {onViewHistory && (
+            <Button
+              variant="secondary"
+              icon={<HistoryIcon />}
+              onClick={() => {
+                onViewHistory(packageDetails.name);
+                onClose();
+              }}
+            >
+              View History
             </Button>
           )}
           {isInstalled ? (

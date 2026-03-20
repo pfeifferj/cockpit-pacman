@@ -38,9 +38,10 @@ const MIN_SEARCH_LENGTH = 1;
 
 interface SearchViewProps {
   onViewDependencies?: (packageName: string) => void;
+  onViewHistory?: (packageName: string) => void;
 }
 
-export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) => {
+export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies, onViewHistory }) => {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,10 +74,12 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
     };
   }, []);
 
-  // Refs to avoid stale closures in debounced callback
+  // Refs to avoid stale closures in debounced callback and sort handler
   const perPageRef = useRef(perPage);
+  const installedFilterRef = useRef(installedFilter);
   currentQueryRef.current = currentQuery;
   perPageRef.current = perPage;
+  installedFilterRef.current = installedFilter;
 
   // Custom getSortParams with component-specific onSort behavior for server-side sorting
   const getSortParams = (columnIndex: number) => {
@@ -91,8 +94,8 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
         setActiveSortIndex(index);
         setActiveSortDirection(direction);
         setPage(1);
-        if (currentQuery) {
-          fetchResults(currentQuery, 1, perPage, installedFilter, false, index, direction);
+        if (currentQueryRef.current) {
+          fetchResults(currentQueryRef.current, 1, perPageRef.current, installedFilterRef.current, false, index, direction);
         }
       },
       columnIndex,
@@ -405,17 +408,19 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
                     {repoFilter !== "all" && ` (${filteredResults.length} in ${repoFilter})`}
                   </span>
                 </ToolbarItem>
-                <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
-                  <Pagination
-                    itemCount={total}
-                    perPage={perPage}
-                    page={page}
-                    onSetPage={handleSetPage}
-                    onPerPageSelect={handlePerPageSelect}
-                    perPageOptions={PER_PAGE_OPTIONS}
-                    isCompact
-                  />
-                </ToolbarItem>
+                {repoFilter === "all" && (
+                  <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
+                    <Pagination
+                      itemCount={total}
+                      perPage={perPage}
+                      page={page}
+                      onSetPage={handleSetPage}
+                      onPerPageSelect={handlePerPageSelect}
+                      perPageOptions={PER_PAGE_OPTIONS}
+                      isCompact
+                    />
+                  </ToolbarItem>
+                )}
               </ToolbarContent>
             </Toolbar>
             <TableLoadingOverlay loading={loading}>
@@ -462,17 +467,19 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
             </TableLoadingOverlay>
             <Toolbar>
               <ToolbarContent>
-                <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
-                  <Pagination
-                    itemCount={total}
-                    perPage={perPage}
-                    page={page}
-                    onSetPage={handleSetPage}
-                    onPerPageSelect={handlePerPageSelect}
-                    perPageOptions={PER_PAGE_OPTIONS}
-                    isCompact
-                  />
-                </ToolbarItem>
+                {repoFilter === "all" && (
+                  <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
+                    <Pagination
+                      itemCount={total}
+                      perPage={perPage}
+                      page={page}
+                      onSetPage={handleSetPage}
+                      onPerPageSelect={handlePerPageSelect}
+                      perPageOptions={PER_PAGE_OPTIONS}
+                      isCompact
+                    />
+                  </ToolbarItem>
+                )}
               </ToolbarContent>
             </Toolbar>
           </>
@@ -484,6 +491,7 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies }) =>
           onClose={clearDetails}
           error={detailsError}
           onViewDependencies={onViewDependencies}
+          onViewHistory={onViewHistory}
           onPackageRemoved={() => {
             if (currentQuery) {
               fetchResults(currentQuery, page, perPage, installedFilter, true, activeSortIndex, activeSortDirection);

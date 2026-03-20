@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { ThProps } from "@patternfly/react-table";
 
 export type SortDirection = "asc" | "desc";
@@ -88,6 +88,9 @@ export function useSortableTable<K extends string = string>(
     }
   }, [columns]);
 
+  const onSortRef = useRef(options.onSort);
+  onSortRef.current = options.onSort;
+
   const getSortParams = useCallback((columnKeyOrIndex: K | number): ThProps["sort"] | undefined => {
     const columnIndex = typeof columnKeyOrIndex === "number"
       ? columnKeyOrIndex
@@ -104,16 +107,16 @@ export function useSortableTable<K extends string = string>(
       onSort: (_event, index, direction) => {
         setActiveSortIndexInternal(index);
         setActiveSortDirection(direction);
-        if (isColumnsMode && "onSort" in options && options.onSort) {
+        if (isColumnsMode && onSortRef.current) {
           const key = indexToKey.get(index) ?? null;
-          (options.onSort as (key: K | null, direction: SortDirection) => void)(key, direction);
-        } else if (!isColumnsMode && "onSort" in options && options.onSort) {
-          (options.onSort as (index: number, direction: SortDirection) => void)(index, direction);
+          (onSortRef.current as (key: K | null, direction: SortDirection) => void)(key, direction);
+        } else if (!isColumnsMode && onSortRef.current) {
+          (onSortRef.current as (index: number, direction: SortDirection) => void)(index, direction);
         }
       },
       columnIndex,
     };
-  }, [columns, sortableIndices, activeSortIndex, activeSortDirection, defaultDirection, indexToKey, isColumnsMode, options]);
+  }, [columns, sortableIndices, activeSortIndex, activeSortDirection, defaultDirection, indexToKey, isColumnsMode]);
 
   const resetSort = useCallback(() => {
     setActiveSortIndexInternal(null);

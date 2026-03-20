@@ -66,7 +66,11 @@ const PER_PAGE_OPTIONS = [
   { title: "50", value: 50 },
 ];
 
-export const HistoryView: React.FC = () => {
+interface HistoryViewProps {
+  initialSearch?: { query: string; key: number };
+}
+
+export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
   const [state, setState] = useState<ViewState>("loading");
   const [groupedData, setGroupedData] = useState<GroupedLogResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +83,15 @@ export const HistoryView: React.FC = () => {
   const expandAllRef = useRef(false);
   const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
 
+  useEffect(() => {
+    if (initialSearch) {
+      setSearchInput(initialSearch.query);
+      setSearchQuery(initialSearch.query);
+      setPage(1);
+      expandAllRef.current = true;
+    }
+  }, [initialSearch, setPage]);
+
   const loadHistory = useCallback(async () => {
     setState("loading");
     setError(null);
@@ -90,8 +103,10 @@ export const HistoryView: React.FC = () => {
         search: searchQuery,
       });
       setGroupedData(response);
+      const shouldExpandAll = expandAllRef.current;
+      expandAllRef.current = false;
       setExpandedGroups(
-        expandAllRef.current ? new Set(response.groups.map((g) => g.id)) : new Set()
+        shouldExpandAll ? new Set(response.groups.map((g) => g.id)) : new Set()
       );
       setState("ready");
     } catch (ex) {

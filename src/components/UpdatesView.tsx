@@ -96,11 +96,58 @@ type ViewState =
   | "success"
   | "error";
 
+const SystemOverviewCard: React.FC<{
+  updates: UpdateInfo[];
+  orphanCount: number | null;
+  cacheSize: number | null;
+  keyringStatus: KeyringStatusResponse | null;
+  summaryLoading: boolean;
+}> = ({ updates, orphanCount, cacheSize, keyringStatus, summaryLoading }) => (
+  <Card className="pf-v6-u-mb-md">
+    <CardBody>
+      <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">System Overview</CardTitle>
+      <Flex spaceItems={{ default: "spaceItemsLg" }}>
+        <FlexItem>
+          <StatBox
+            label="Updates"
+            value={formatNumber(updates.length)}
+            color={updates.length > 0 ? "danger" : "success"}
+          />
+        </FlexItem>
+        <FlexItem>
+          <StatBox
+            label="Orphans"
+            value={orphanCount !== null ? formatNumber(orphanCount) : "-"}
+            color={orphanCount && orphanCount > 0 ? "warning" : "default"}
+            isLoading={summaryLoading}
+          />
+        </FlexItem>
+        <FlexItem>
+          <StatBox
+            label="Cache"
+            value={cacheSize !== null ? formatSize(cacheSize) : "-"}
+            isLoading={summaryLoading}
+          />
+        </FlexItem>
+        <FlexItem>
+          <StatBox
+            label="Keyring"
+            value={keyringStatus ? `${keyringStatus.total} keys` : "-"}
+            color={keyringStatus?.warnings.length ? "warning" : "default"}
+            isLoading={summaryLoading}
+          />
+        </FlexItem>
+      </Flex>
+    </CardBody>
+  </Card>
+);
+
 interface UpdatesViewProps {
   onViewDependencies?: (packageName: string) => void;
+  onViewHistory?: (packageName: string) => void;
 }
 
-export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) => {
+export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, onViewHistory }) => {
   const [state, setState] = useState<ViewState>("loading");
   const [updates, setUpdates] = useState<UpdateInfo[]>([]);
   const [log, setLog] = useState("");
@@ -401,10 +448,13 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
 
 
   const handleRefresh = async () => {
+    if (cancelRef.current) {
+      cancelRef.current();
+    }
     setState("checking");
     setLog("");
     setSelectedPackages(new Set());
-    syncDatabase({
+    const { cancel } = syncDatabase({
       onData: (data) => setLog((prev) => {
         const newLog = prev + data;
         return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
@@ -415,6 +465,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
         setError(err);
       },
     });
+    cancelRef.current = cancel;
   };
 
   const handleApplyUpdates = async () => {
@@ -801,43 +852,13 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
           <Alert key={i} variant="warning" title={w} isInline className="pf-v6-u-mb-md" />
         ))}
 
-        <Card className="pf-v6-u-mb-md">
-          <CardBody>
-            <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">System Overview</CardTitle>
-            <Flex spaceItems={{ default: "spaceItemsLg" }}>
-              <FlexItem>
-                <StatBox
-                  label="Updates"
-                  value={formatNumber(updates.length)}
-                  color={updates.length > 0 ? "danger" : "success"}
-                />
-              </FlexItem>
-              <FlexItem>
-                <StatBox
-                  label="Orphans"
-                  value={orphanCount !== null ? formatNumber(orphanCount) : "-"}
-                  color={orphanCount && orphanCount > 0 ? "warning" : "default"}
-                  isLoading={summaryLoading}
-                />
-              </FlexItem>
-              <FlexItem>
-                <StatBox
-                  label="Cache"
-                  value={cacheSize !== null ? formatSize(cacheSize) : "-"}
-                  isLoading={summaryLoading}
-                />
-              </FlexItem>
-              <FlexItem>
-                <StatBox
-                  label="Keyring"
-                  value={keyringStatus ? `${keyringStatus.total} keys` : "-"}
-                  color={keyringStatus?.warnings.length ? "warning" : "default"}
-                  isLoading={summaryLoading}
-                />
-              </FlexItem>
-            </Flex>
-          </CardBody>
-        </Card>
+        <SystemOverviewCard
+          updates={updates}
+          orphanCount={orphanCount}
+          cacheSize={cacheSize}
+          keyringStatus={keyringStatus}
+          summaryLoading={summaryLoading}
+        />
 
         <Card className="pf-v6-u-mb-md">
           <CardBody style={{ paddingBottom: 0 }}>
@@ -922,43 +943,13 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
         </Alert>
       )}
 
-      <Card className="pf-v6-u-mb-md">
-        <CardBody>
-          <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">System Overview</CardTitle>
-          <Flex spaceItems={{ default: "spaceItemsLg" }}>
-            <FlexItem>
-              <StatBox
-                label="Updates"
-                value={formatNumber(updates.length)}
-                color={updates.length > 0 ? "danger" : "success"}
-              />
-            </FlexItem>
-            <FlexItem>
-              <StatBox
-                label="Orphans"
-                value={orphanCount !== null ? formatNumber(orphanCount) : "-"}
-                color={orphanCount && orphanCount > 0 ? "warning" : "default"}
-                isLoading={summaryLoading}
-              />
-            </FlexItem>
-            <FlexItem>
-              <StatBox
-                label="Cache"
-                value={cacheSize !== null ? formatSize(cacheSize) : "-"}
-                isLoading={summaryLoading}
-              />
-            </FlexItem>
-            <FlexItem>
-              <StatBox
-                label="Keyring"
-                value={keyringStatus ? `${keyringStatus.total} keys` : "-"}
-                color={keyringStatus?.warnings.length ? "warning" : "default"}
-                isLoading={summaryLoading}
-              />
-            </FlexItem>
-          </Flex>
-        </CardBody>
-      </Card>
+      <SystemOverviewCard
+        updates={updates}
+        orphanCount={orphanCount}
+        cacheSize={cacheSize}
+        keyringStatus={keyringStatus}
+        summaryLoading={summaryLoading}
+      />
 
       <Card>
         <CardBody>
@@ -1143,6 +1134,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies }) 
         onClose={clearDetails}
         error={detailsError}
         onViewDependencies={onViewDependencies}
+        onViewHistory={onViewHistory}
         onPackageRemoved={loadUpdates}
       />
 

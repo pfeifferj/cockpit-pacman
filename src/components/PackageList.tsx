@@ -44,9 +44,10 @@ import { PER_PAGE_OPTIONS, SEARCH_DEBOUNCE_MS } from "../constants";
 interface PackageListProps {
   graphPackage?: string;
   onGraphPackageChange?: (packageName: string | undefined) => void;
+  onViewHistory?: (packageName: string) => void;
 }
 
-export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphPackageChange }) => {
+export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphPackageChange, onViewHistory }) => {
   const [packages, setPackages] = useState<Package[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -385,6 +386,7 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphP
             onGraphPackageChange?.(packageName);
             setFilter("graph");
           }}
+          onViewHistory={onViewHistory}
           onPackageRemoved={() => {
             loadPackages();
             setOrphanRefresh(r => r + 1);

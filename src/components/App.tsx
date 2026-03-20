@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   Page,
   PageSection,
@@ -18,10 +18,17 @@ import { ErrorBoundary } from "./ErrorBoundary";
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string | number>(0);
   const [graphPackage, setGraphPackage] = useState<string | undefined>(undefined);
+  const [historySearch, setHistorySearch] = useState<{ query: string; key: number } | undefined>(undefined);
+  const historyKeyRef = useRef(0);
 
   const handleViewDependencies = (packageName: string) => {
     setGraphPackage(packageName);
-    setActiveTab(1); // Switch to Installed Packages tab
+    setActiveTab(1);
+  };
+
+  const handleViewHistory = (packageName: string) => {
+    setHistorySearch({ query: packageName, key: ++historyKeyRef.current });
+    setActiveTab(3);
   };
 
   return (
@@ -33,22 +40,22 @@ export const App: React.FC = () => {
         >
           <Tab eventKey={0} title={<TabTitleText>Updates</TabTitleText>}>
             <ErrorBoundary fallbackTitle="Error loading updates">
-              <UpdatesView onViewDependencies={handleViewDependencies} />
+              <UpdatesView onViewDependencies={handleViewDependencies} onViewHistory={handleViewHistory} />
             </ErrorBoundary>
           </Tab>
           <Tab eventKey={1} title={<TabTitleText>Installed Packages</TabTitleText>}>
             <ErrorBoundary fallbackTitle="Error loading packages">
-              <PackageList graphPackage={graphPackage} onGraphPackageChange={setGraphPackage} />
+              <PackageList graphPackage={graphPackage} onGraphPackageChange={setGraphPackage} onViewHistory={handleViewHistory} />
             </ErrorBoundary>
           </Tab>
           <Tab eventKey={2} title={<TabTitleText>Search Packages</TabTitleText>}>
             <ErrorBoundary fallbackTitle="Error loading search">
-              <SearchView onViewDependencies={handleViewDependencies} />
+              <SearchView onViewDependencies={handleViewDependencies} onViewHistory={handleViewHistory} />
             </ErrorBoundary>
           </Tab>
           <Tab eventKey={3} title={<TabTitleText>History</TabTitleText>}>
             <ErrorBoundary fallbackTitle="Error loading history">
-              <HistoryView />
+              <HistoryView initialSearch={historySearch} />
             </ErrorBoundary>
           </Tab>
           <Tab eventKey={4} title={<TabTitleText>Cache</TabTitleText>}>

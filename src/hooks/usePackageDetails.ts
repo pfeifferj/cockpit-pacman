@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useCallback } from "react";
 import {
   PackageDetails,
   SyncPackageDetails,
@@ -27,42 +27,38 @@ export function usePackageDetails(
   const [selectedPackage, setSelectedPackage] = useState<PackageDetailsData | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
-  const isMountedRef = useRef(true);
-
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
+  const requestIdRef = useRef(0);
 
   const fetchDetails = useCallback(async (
     name: string,
     options?: FetchDetailsOptions,
   ) => {
     const strategy = options?.strategy ?? "local";
+    const requestId = ++requestIdRef.current;
     setDetailsLoading(true);
     setDetailsError(null);
     setSelectedPackage(null);
 
+    const isStale = () => requestId !== requestIdRef.current;
+
     try {
       if (strategy === "sync") {
         const details = await getSyncPackageInfo(name, options?.repo);
-        if (!isMountedRef.current) return;
+        if (isStale()) return;
         setSelectedPackage(details);
       } else if (strategy === "local-then-sync") {
         try {
           const details = await getPackageInfo(name);
-          if (!isMountedRef.current) return;
+          if (isStale()) return;
           setSelectedPackage(details);
         } catch {
-          if (!isMountedRef.current) return;
+          if (isStale()) return;
           try {
             const syncDetails = await getSyncPackageInfo(name);
-            if (!isMountedRef.current) return;
+            if (isStale()) return;
             setSelectedPackage(syncDetails);
           } catch {
-            if (!isMountedRef.current) return;
+            if (isStale()) return;
             const msg = `Package '${name}' not found locally or in sync databases`;
             setDetailsError(msg);
             onError?.(msg);
@@ -70,16 +66,16 @@ export function usePackageDetails(
         }
       } else {
         const details = await getPackageInfo(name);
-        if (!isMountedRef.current) return;
+        if (isStale()) return;
         setSelectedPackage(details);
       }
     } catch (ex) {
-      if (!isMountedRef.current) return;
+      if (isStale()) return;
       const msg = ex instanceof Error ? ex.message : String(ex);
       setDetailsError(msg);
       onError?.(msg);
     } finally {
-      if (isMountedRef.current) {
+      if (!isStale()) {
         setDetailsLoading(false);
       }
     }
