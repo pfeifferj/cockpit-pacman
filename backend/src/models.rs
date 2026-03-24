@@ -1,3 +1,4 @@
+use archweb_client::models::Signoff;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
@@ -64,6 +65,8 @@ pub struct PackageDetails {
     pub optdepends: Vec<String>,
     pub conflicts: Vec<String>,
     pub replaces: Vec<String>,
+    pub required_by: Vec<String>,
+    pub optional_for: Vec<String>,
     pub installed_size: i64,
     pub packager: Option<String>,
     pub architecture: Option<String>,
@@ -72,6 +75,15 @@ pub struct PackageDetails {
     pub reason: String,
     pub validation: Vec<String>,
     pub repository: Option<String>,
+    pub update_stats: Option<UpdateStats>,
+}
+
+#[derive(Serialize)]
+pub struct UpdateStats {
+    pub update_count: usize,
+    pub first_installed: Option<String>,
+    pub last_updated: Option<String>,
+    pub avg_days_between_updates: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -438,4 +450,55 @@ pub struct DependencyTreeResponse {
     pub root: String,
     pub max_depth_reached: bool,
     pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct SignoffStatusResponse {
+    pub available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum VersionMatch {
+    Match,
+    Mismatch,
+    NotInstalled,
+}
+
+#[derive(Serialize)]
+pub struct SignoffGroupWithLocal {
+    pub pkgbase: String,
+    pub pkgnames: Vec<String>,
+    pub version: String,
+    pub arch: String,
+    pub repo: String,
+    pub packager: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comments: Option<String>,
+    pub last_update: String,
+    pub known_bad: bool,
+    pub approved: bool,
+    pub required: u32,
+    pub enabled: bool,
+    pub signoffs: Vec<Signoff>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_version: Option<String>,
+    pub version_match: VersionMatch,
+}
+
+#[derive(Serialize)]
+pub struct SignoffListResponse {
+    pub signoff_groups: Vec<SignoffGroupWithLocal>,
+    pub total: usize,
+}
+
+#[derive(Serialize)]
+pub struct SignoffActionResponse {
+    pub success: bool,
+    pub pkgbase: String,
+    pub action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }

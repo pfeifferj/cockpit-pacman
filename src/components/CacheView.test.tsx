@@ -43,6 +43,8 @@ const mockPackageDetails: api.PackageDetails = {
   optdepends: [],
   conflicts: [],
   replaces: [],
+  required_by: [],
+  optional_for: [],
   installed_size: 150000000,
   packager: "heftig",
   architecture: "x86_64",
@@ -51,6 +53,7 @@ const mockPackageDetails: api.PackageDetails = {
   reason: "explicit",
   validation: ["pgp"],
   repository: "core",
+  update_stats: null,
 };
 
 describe("CacheView", () => {

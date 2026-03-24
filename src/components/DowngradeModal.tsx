@@ -205,7 +205,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
           <>
             <Content component={ContentVariants.p} className="pf-v6-u-mb-md">
               Select a version to downgrade <strong>{packageName}</strong> from{" "}
-              <Label color="blue">{currentVersion}</Label>
+              <Label isCompact variant="outline">{currentVersion}</Label>
             </Content>
             <Table aria-label="Available versions" variant="compact">
               <Thead>
@@ -246,9 +246,9 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
               Are you sure you want to downgrade <strong>{packageName}</strong>?
             </Content>
             <Content component={ContentVariants.p} className="pf-v6-u-mt-md">
-              <Label color="blue">{currentVersion}</Label>
+              <Label isCompact variant="outline">{currentVersion}</Label>
               {" -> "}
-              <Label color="orange">{selectedVersion?.version}</Label>
+              <Label isCompact color="orange">{selectedVersion?.version}</Label>
             </Content>
             <Alert variant="warning" title="Warning" className="pf-v6-u-mt-md">
               Downgrading packages may cause dependency issues or break functionality.

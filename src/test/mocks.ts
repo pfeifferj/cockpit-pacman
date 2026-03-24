@@ -67,6 +67,8 @@ export const mockPackageDetails: PackageDetails = {
   optdepends: ["wireless-regdb: to set the correct wireless channels"],
   conflicts: [],
   replaces: [],
+  required_by: [],
+  optional_for: [],
   installed_size: 142000000,
   packager: "Jan Alexander Steffens (heftig) <heftig@archlinux.org>",
   architecture: "x86_64",
@@ -75,6 +77,7 @@ export const mockPackageDetails: PackageDetails = {
   reason: "explicit",
   validation: ["pgp"],
   repository: "core",
+  update_stats: null,
 };
 
 export const mockSearchResults: SearchResult[] = [

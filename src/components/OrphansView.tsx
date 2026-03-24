@@ -321,7 +321,7 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
               <Td dataLabel="Size">{formatSize(pkg.installed_size)}</Td>
               <Td dataLabel="Installed">{formatDate(pkg.install_date)}</Td>
               <Td dataLabel="Repository">
-                <Label color={pkg.repository ? "blue" : "grey"}>
+                <Label isCompact color="grey">
                   {pkg.repository || "user"}
                 </Label>
               </Td>

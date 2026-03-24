@@ -1110,7 +1110,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
                     )}
                   </Td>
                   <Td dataLabel="Repository">
-                    <Label color="blue">{update.repository}</Label>
+                    <Label isCompact color="grey">{update.repository}</Label>
                   </Td>
                   <Td dataLabel="Version">{update.current_version} {"\u2192"} {update.new_version}</Td>
                   <Td dataLabel="Download">{formatSize(update.download_size)}</Td>

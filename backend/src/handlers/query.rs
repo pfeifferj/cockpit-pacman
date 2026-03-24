@@ -1,11 +1,13 @@
 use anyhow::Result;
+use chrono::NaiveDateTime;
+use pacman_log::{Action, LogReader};
 use std::collections::HashSet;
 
 use crate::alpm::{find_available_updates, get_handle, reason_to_string};
 use crate::db::{find_package_repo, get_repo_map};
 use crate::models::{
     OrphanPackage, OrphanResponse, Package, PackageDetails, PackageListResponse, SearchResponse,
-    SearchResult, SyncPackageDetails, UpdatesResponse,
+    SearchResult, SyncPackageDetails, UpdateStats, UpdatesResponse,
 };
 use crate::util::{emit_json, sort_with_direction};
 
@@ -139,6 +141,77 @@ pub fn check_updates() -> Result<()> {
     emit_json(&response)
 }
 
+fn split_licenses(license: &str) -> Vec<String> {
+    license
+        .split(" AND ")
+        .flat_map(|s| s.split(" OR "))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn compute_update_stats(name: &str) -> Option<UpdateStats> {
+    let reader = LogReader::system();
+    let name_lower = name.to_lowercase();
+
+    let mut upgrade_timestamps: Vec<NaiveDateTime> = Vec::new();
+    let mut first_installed: Option<String> = None;
+    let mut last_updated: Option<String> = None;
+    let mut update_count = 0usize;
+
+    for result in reader.into_iter() {
+        let entry = match result {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        if entry.package.to_lowercase() != name_lower {
+            continue;
+        }
+
+        let ts_str = entry.timestamp.format("%Y-%m-%dT%H:%M:%S%z").to_string();
+
+        match entry.action {
+            Action::Installed => {
+                if first_installed.is_none() {
+                    first_installed = Some(ts_str);
+                }
+            }
+            Action::Upgraded => {
+                update_count += 1;
+                last_updated = Some(ts_str.clone());
+                if let Some(dt) =
+                    NaiveDateTime::parse_from_str(&ts_str, "%Y-%m-%dT%H:%M:%S%z").ok()
+                {
+                    upgrade_timestamps.push(dt);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if update_count == 0 && first_installed.is_none() {
+        return None;
+    }
+
+    let avg_days = if upgrade_timestamps.len() >= 2 {
+        let total_days: f64 = upgrade_timestamps
+            .windows(2)
+            .map(|w| (w[1] - w[0]).num_seconds().abs() as f64 / 86400.0)
+            .sum();
+        Some(total_days / (upgrade_timestamps.len() - 1) as f64)
+    } else {
+        None
+    };
+
+    Some(UpdateStats {
+        update_count,
+        first_installed,
+        last_updated,
+        avg_days_between_updates: avg_days,
+    })
+}
+
 pub fn local_package_info(name: &str) -> Result<()> {
     let handle = get_handle()?;
     let localdb = handle.localdb();
@@ -154,7 +227,7 @@ pub fn local_package_info(name: &str) -> Result<()> {
         version: pkg.version().to_string(),
         description: pkg.desc().map(|s| s.to_string()),
         url: pkg.url().map(|s| s.to_string()),
-        licenses: pkg.licenses().iter().map(|s| s.to_string()).collect(),
+        licenses: pkg.licenses().iter().flat_map(|s| split_licenses(s)).collect(),
         groups: pkg.groups().iter().map(|s| s.to_string()).collect(),
         provides: pkg
             .provides()
@@ -177,6 +250,8 @@ pub fn local_package_info(name: &str) -> Result<()> {
             .iter()
             .map(|d| d.name().to_string())
             .collect(),
+        required_by: pkg.required_by().into_iter().collect(),
+        optional_for: pkg.optional_for().into_iter().collect(),
         installed_size: pkg.isize(),
         packager: pkg.packager().map(|s| s.to_string()),
         architecture: pkg.arch().map(|s| s.to_string()),
@@ -186,9 +261,15 @@ pub fn local_package_info(name: &str) -> Result<()> {
         validation: pkg
             .validation()
             .iter()
-            .map(|v| format!("{:?}", v))
+            .map(|v| match v {
+                alpm::PackageValidation::MD5SUM => "MD5",
+                alpm::PackageValidation::SHA256SUM => "SHA-256",
+                alpm::PackageValidation::SIGNATURE => "PGP Signature",
+                _ => "Unknown",
+            }.to_string())
             .collect(),
         repository,
+        update_stats: compute_update_stats(name),
     };
 
     emit_json(&details)
@@ -302,7 +383,7 @@ pub fn sync_package_info(name: &str, repo: Option<&str>) -> Result<()> {
         version: pkg.version().to_string(),
         description: pkg.desc().map(|s| s.to_string()),
         url: pkg.url().map(|s| s.to_string()),
-        licenses: pkg.licenses().iter().map(|s| s.to_string()).collect(),
+        licenses: pkg.licenses().iter().flat_map(|s| split_licenses(s)).collect(),
         groups: pkg.groups().iter().map(|s| s.to_string()).collect(),
         provides: pkg
             .provides()

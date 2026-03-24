@@ -126,7 +126,7 @@ export const InstallModal: React.FC<InstallModalProps> = ({
                 Install <strong>{packageName}</strong>?
               </Content>
               <Content component={ContentVariants.p} className="pf-v6-u-mt-md">
-                <Label color="blue">{packageVersion}</Label>
+                <Label isCompact variant="outline">{packageVersion}</Label>
               </Content>
             </Content>
             <Alert variant="info" title="Note" className="pf-v6-u-mt-md">

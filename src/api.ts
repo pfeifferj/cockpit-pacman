@@ -73,6 +73,8 @@ export interface PackageDetails {
   optdepends: string[];
   conflicts: string[];
   replaces: string[];
+  required_by: string[];
+  optional_for: string[];
   installed_size: number;
   packager: string | null;
   architecture: string | null;
@@ -81,6 +83,14 @@ export interface PackageDetails {
   reason: string;
   validation: string[];
   repository: string | null;
+  update_stats: UpdateStats | null;
+}
+
+export interface UpdateStats {
+  update_count: number;
+  first_installed: string | null;
+  last_updated: string | null;
+  avg_days_between_updates: number | null;
 }
 
 export interface SearchResult {
@@ -236,10 +246,10 @@ function parseErrorCode(message: string): ErrorCode {
   return "internal_error";
 }
 
-async function runBackend<T>(command: string, args: string[] = []): Promise<T> {
+async function runBackend<T>(command: string, args: string[] = [], options?: { superuser?: "try" | "require" }): Promise<T> {
   const spawnPromise = cockpit.spawn(
     [BACKEND_PATH, command, ...args],
-    { superuser: "try", err: "message" }
+    { superuser: options?.superuser ?? "try", err: "message" }
   );
 
   const controller = new AbortController();
@@ -998,4 +1008,73 @@ export async function getDependencyTree(params: DependencyTreeParams): Promise<D
     String(depth),
     direction,
   ]);
+}
+
+// Signoff types
+
+export interface SignoffStatusResponse {
+  available: boolean;
+  username?: string;
+}
+
+export interface Signoff {
+  user: string;
+  created: string;
+  revoked: boolean;
+}
+
+export type VersionMatch = "match" | "mismatch" | "not_installed";
+
+export interface SignoffGroupWithLocal {
+  pkgbase: string;
+  pkgnames: string[];
+  version: string;
+  arch: string;
+  repo: string;
+  packager: string;
+  comments: string | null;
+  last_update: string;
+  known_bad: boolean;
+  approved: boolean;
+  required: number;
+  enabled: boolean;
+  signoffs: Signoff[];
+  local_version: string | null;
+  version_match: VersionMatch;
+}
+
+export interface SignoffListResponse {
+  signoff_groups: SignoffGroupWithLocal[];
+  total: number;
+}
+
+export interface SignoffActionResponse {
+  success: boolean;
+  pkgbase: string;
+  action: string;
+  error?: string;
+}
+
+export async function getSignoffStatus(): Promise<SignoffStatusResponse> {
+  return runBackend<SignoffStatusResponse>("signoff-status", [], { superuser: undefined });
+}
+
+export async function getSignoffList(): Promise<SignoffListResponse> {
+  return runBackend<SignoffListResponse>("signoff-list", [], { superuser: undefined });
+}
+
+export async function signoffPackage(
+  pkgbase: string,
+  repo: string,
+  arch: string,
+): Promise<SignoffActionResponse> {
+  return runBackend<SignoffActionResponse>("signoff-sign", [pkgbase, repo, arch], { superuser: undefined });
+}
+
+export async function revokeSignoff(
+  pkgbase: string,
+  repo: string,
+  arch: string,
+): Promise<SignoffActionResponse> {
+  return runBackend<SignoffActionResponse>("signoff-revoke", [pkgbase, repo, arch], { superuser: undefined });
 }

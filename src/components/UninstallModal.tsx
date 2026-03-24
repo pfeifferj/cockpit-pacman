@@ -126,7 +126,7 @@ export const UninstallModal: React.FC<UninstallModalProps> = ({
                 Are you sure you want to uninstall <strong>{packageName}</strong>?
               </Content>
               <Content component={ContentVariants.p} className="pf-v6-u-mt-md">
-                <Label color="blue">{packageVersion}</Label>
+                <Label isCompact variant="outline">{packageVersion}</Label>
               </Content>
             </Content>
             <Alert variant="warning" title="Warning" className="pf-v6-u-mt-md">

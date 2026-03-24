@@ -27,6 +27,8 @@ const localDetails: api.PackageDetails = {
   optdepends: [],
   conflicts: [],
   replaces: [],
+  required_by: [],
+  optional_for: [],
   installed_size: 142000000,
   packager: "heftig",
   architecture: "x86_64",
@@ -35,6 +37,7 @@ const localDetails: api.PackageDetails = {
   reason: "explicit",
   validation: ["pgp"],
   repository: "core",
+  update_stats: null,
 };
 
 const syncDetails: api.SyncPackageDetails = {

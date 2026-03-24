@@ -91,7 +91,20 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
     >
-      <ModalHeader title={packageDetails?.name ?? (error ? "Package Details" : "Loading...")} />
+      <ModalHeader title={
+        packageDetails
+          ? <>{packageDetails.name} <Label isCompact variant="outline">{packageDetails.version}</Label> <Label isCompact color="grey">{packageDetails.repository || "user"}</Label>{isInstalled && !packageDetails.repository && (
+              <Popover
+                headerContent="User Package"
+                bodyContent="This package is not from an official repository. It may have been installed from the AUR, built manually with makepkg, or installed from a local PKGBUILD."
+              >
+                <Icon isInline style={{ marginLeft: "0.5em", cursor: "pointer" }}>
+                  <OutlinedQuestionCircleIcon />
+                </Icon>
+              </Popover>
+            )}</>
+          : (error ? "Package Details" : "Loading...")
+      } />
       <ModalBody>
         {isLoading ? (
           <Spinner />
@@ -103,29 +116,8 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
           </EmptyState>
         ) : packageDetails ? (
           <DescriptionList>
-          <DescriptionListGroup>
-            <DescriptionListTerm>Version</DescriptionListTerm>
-            <DescriptionListDescription>
-              {packageDetails.version}
-            </DescriptionListDescription>
-          </DescriptionListGroup>
 
-          <DescriptionListGroup>
-            <DescriptionListTerm>Repository</DescriptionListTerm>
-            <DescriptionListDescription>
-              {packageDetails.repository || "user"}
-              {isInstalled && !packageDetails.repository && (
-                <Popover
-                  headerContent="User Package"
-                  bodyContent="This package is not from an official repository. It may have been installed from the AUR, built manually with makepkg, or installed from a local PKGBUILD."
-                >
-                  <Icon isInline style={{ marginLeft: "0.5em", cursor: "pointer" }}>
-                    <OutlinedQuestionCircleIcon />
-                  </Icon>
-                </Popover>
-              )}
-            </DescriptionListDescription>
-          </DescriptionListGroup>
+          {/* Overview */}
 
           <DescriptionListGroup>
             <DescriptionListTerm>Description</DescriptionListTerm>
@@ -163,6 +155,41 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
             </DescriptionListGroup>
           )}
 
+          {packageDetails.licenses.length > 0 && (
+            <DescriptionListGroup>
+              <DescriptionListTerm>Licenses</DescriptionListTerm>
+              <DescriptionListDescription>
+                <LabelGroup>
+                  {packageDetails.licenses.map((license: string) => (
+                    <Label key={license}>{license}</Label>
+                  ))}
+                </LabelGroup>
+              </DescriptionListDescription>
+            </DescriptionListGroup>
+          )}
+
+          {packageDetails.groups.length > 0 && (
+            <DescriptionListGroup>
+              <DescriptionListTerm>Groups</DescriptionListTerm>
+              <DescriptionListDescription>
+                <LabelGroup>
+                  {packageDetails.groups.map((g: string) => (
+                    <Label key={g} color="teal">{g}</Label>
+                  ))}
+                </LabelGroup>
+              </DescriptionListDescription>
+            </DescriptionListGroup>
+          )}
+
+          <DescriptionListGroup>
+            <DescriptionListTerm>Architecture</DescriptionListTerm>
+            <DescriptionListDescription>
+              {packageDetails.architecture || "any"}
+            </DescriptionListDescription>
+          </DescriptionListGroup>
+
+          {/* Size & Dates */}
+
           {!isInstalled && "download_size" in packageDetails && (
             <DescriptionListGroup>
               <DescriptionListTerm>Download Size</DescriptionListTerm>
@@ -176,6 +203,13 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
             <DescriptionListTerm>Installed Size</DescriptionListTerm>
             <DescriptionListDescription>
               {formatSize(packageDetails.installed_size)}
+            </DescriptionListDescription>
+          </DescriptionListGroup>
+
+          <DescriptionListGroup>
+            <DescriptionListTerm>Build Date</DescriptionListTerm>
+            <DescriptionListDescription>
+              {formatDate(packageDetails.build_date)}
             </DescriptionListDescription>
           </DescriptionListGroup>
 
@@ -199,18 +233,43 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
             </>
           )}
 
-          {packageDetails.licenses.length > 0 && (
-            <DescriptionListGroup>
-              <DescriptionListTerm>Licenses</DescriptionListTerm>
-              <DescriptionListDescription>
-                <LabelGroup>
-                  {packageDetails.licenses.map((license: string) => (
-                    <Label key={license}>{license}</Label>
-                  ))}
-                </LabelGroup>
-              </DescriptionListDescription>
-            </DescriptionListGroup>
+          {/* Update History */}
+
+          {isInstalled && packageDetails.update_stats && (
+            <>
+              <DescriptionListGroup>
+                <DescriptionListTerm>Updates</DescriptionListTerm>
+                <DescriptionListDescription>
+                  {packageDetails.update_stats.update_count === 0
+                    ? "Never updated"
+                    : `${packageDetails.update_stats.update_count} update${packageDetails.update_stats.update_count !== 1 ? "s" : ""}`}
+                  {packageDetails.update_stats.avg_days_between_updates !== null && (
+                    <> (avg. every {packageDetails.update_stats.avg_days_between_updates.toFixed(0)} days)</>
+                  )}
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+
+              {packageDetails.update_stats.first_installed && (
+                <DescriptionListGroup>
+                  <DescriptionListTerm>First Installed</DescriptionListTerm>
+                  <DescriptionListDescription>
+                    {new Date(packageDetails.update_stats.first_installed).toLocaleString()}
+                  </DescriptionListDescription>
+                </DescriptionListGroup>
+              )}
+
+              {packageDetails.update_stats.last_updated && (
+                <DescriptionListGroup>
+                  <DescriptionListTerm>Last Updated</DescriptionListTerm>
+                  <DescriptionListDescription>
+                    {new Date(packageDetails.update_stats.last_updated).toLocaleString()}
+                  </DescriptionListDescription>
+                </DescriptionListGroup>
+              )}
+            </>
           )}
+
+          {/* Relationships */}
 
           {packageDetails.depends.length > 0 && (
             <DescriptionListGroup>
@@ -238,6 +297,73 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
             </DescriptionListGroup>
           )}
 
+          {packageDetails.provides.length > 0 && (
+            <DescriptionListGroup>
+              <DescriptionListTerm>Provides</DescriptionListTerm>
+              <DescriptionListDescription>
+                <LabelGroup numLabels={10}>
+                  {packageDetails.provides.map((p: string) => (
+                    <Label key={p} variant="outline" color="green">{p}</Label>
+                  ))}
+                </LabelGroup>
+              </DescriptionListDescription>
+            </DescriptionListGroup>
+          )}
+
+          {packageDetails.conflicts.length > 0 && (
+            <DescriptionListGroup>
+              <DescriptionListTerm>Conflicts</DescriptionListTerm>
+              <DescriptionListDescription>
+                <LabelGroup numLabels={10}>
+                  {packageDetails.conflicts.map((c: string) => (
+                    <Label key={c} variant="outline" color="orange">{c}</Label>
+                  ))}
+                </LabelGroup>
+              </DescriptionListDescription>
+            </DescriptionListGroup>
+          )}
+
+          {packageDetails.replaces.length > 0 && (
+            <DescriptionListGroup>
+              <DescriptionListTerm>Replaces</DescriptionListTerm>
+              <DescriptionListDescription>
+                <LabelGroup numLabels={10}>
+                  {packageDetails.replaces.map((r: string) => (
+                    <Label key={r} variant="outline" color="orange">{r}</Label>
+                  ))}
+                </LabelGroup>
+              </DescriptionListDescription>
+            </DescriptionListGroup>
+          )}
+
+          {isInstalled && packageDetails.required_by.length > 0 && (
+            <DescriptionListGroup>
+              <DescriptionListTerm>Required By</DescriptionListTerm>
+              <DescriptionListDescription>
+                <LabelGroup numLabels={10}>
+                  {packageDetails.required_by.map((r: string) => (
+                    <Label key={r} variant="outline" color="purple">{r}</Label>
+                  ))}
+                </LabelGroup>
+              </DescriptionListDescription>
+            </DescriptionListGroup>
+          )}
+
+          {isInstalled && packageDetails.optional_for.length > 0 && (
+            <DescriptionListGroup>
+              <DescriptionListTerm>Optional For</DescriptionListTerm>
+              <DescriptionListDescription>
+                <LabelGroup numLabels={10}>
+                  {packageDetails.optional_for.map((o: string) => (
+                    <Label key={o} variant="outline" color="grey">{o}</Label>
+                  ))}
+                </LabelGroup>
+              </DescriptionListDescription>
+            </DescriptionListGroup>
+          )}
+
+          {/* Packaging */}
+
           {isInstalled && packageDetails.packager && (
             <DescriptionListGroup>
               <DescriptionListTerm>Packager</DescriptionListTerm>
@@ -257,19 +383,19 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
             </DescriptionListGroup>
           )}
 
-          <DescriptionListGroup>
-            <DescriptionListTerm>Architecture</DescriptionListTerm>
-            <DescriptionListDescription>
-              {packageDetails.architecture || "any"}
-            </DescriptionListDescription>
-          </DescriptionListGroup>
+          {isInstalled && packageDetails.validation.length > 0 && (
+            <DescriptionListGroup>
+              <DescriptionListTerm>Validation</DescriptionListTerm>
+              <DescriptionListDescription>
+                <LabelGroup>
+                  {packageDetails.validation.map((v: string) => (
+                    <Label key={v} variant="outline">{v}</Label>
+                  ))}
+                </LabelGroup>
+              </DescriptionListDescription>
+            </DescriptionListGroup>
+          )}
 
-          <DescriptionListGroup>
-            <DescriptionListTerm>Build Date</DescriptionListTerm>
-            <DescriptionListDescription>
-              {formatDate(packageDetails.build_date)}
-            </DescriptionListDescription>
-          </DescriptionListGroup>
           </DescriptionList>
         ) : null}
       </ModalBody>

@@ -363,7 +363,7 @@ export const IgnoredPackagesModal: React.FC<IgnoredPackagesModalProps> = ({
                       <strong>{previewPackage.name}</strong>
                     </FlexItem>
                     <FlexItem>
-                      <Label color="blue" isCompact>{previewPackage.repository}</Label>
+                      <Label isCompact color="grey">{previewPackage.repository}</Label>
                     </FlexItem>
                     <FlexItem>
                       <span style={{ color: "var(--pf-t--global--text--color--subtle)" }}>
@@ -383,7 +383,7 @@ export const IgnoredPackagesModal: React.FC<IgnoredPackagesModalProps> = ({
                     <strong>{selectedPackage.name}</strong>
                   </FlexItem>
                   <FlexItem>
-                    <Label color="blue" isCompact>{selectedPackage.repository}</Label>
+                    <Label isCompact color="grey">{selectedPackage.repository}</Label>
                   </FlexItem>
                 </Flex>
               )}

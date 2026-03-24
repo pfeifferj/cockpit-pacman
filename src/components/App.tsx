@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Page,
   PageSection,
@@ -13,13 +13,28 @@ import { KeyringView } from "./KeyringView";
 import { CacheView } from "./CacheView";
 import { HistoryView } from "./HistoryView";
 import { MirrorsView } from "./MirrorsView";
+import { SignoffsView } from "./SignoffsView";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { getSignoffStatus } from "../api";
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string | number>(0);
   const [graphPackage, setGraphPackage] = useState<string | undefined>(undefined);
   const [historySearch, setHistorySearch] = useState<{ query: string; key: number } | undefined>(undefined);
   const historyKeyRef = useRef(0);
+  const [signoffAvailable, setSignoffAvailable] = useState(false);
+  const [signoffUsername, setSignoffUsername] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    getSignoffStatus()
+      .then((status) => {
+        setSignoffAvailable(status.available);
+        setSignoffUsername(status.username);
+      })
+      .catch(() => {
+        setSignoffAvailable(false);
+      });
+  }, []);
 
   const handleViewDependencies = (packageName: string) => {
     setGraphPackage(packageName);
@@ -73,6 +88,13 @@ export const App: React.FC = () => {
               <MirrorsView />
             </ErrorBoundary>
           </Tab>
+          {signoffAvailable && (
+            <Tab eventKey={7} title={<TabTitleText>Signoffs</TabTitleText>}>
+              <ErrorBoundary fallbackTitle="Error loading signoffs">
+                <SignoffsView username={signoffUsername} />
+              </ErrorBoundary>
+            </Tab>
+          )}
         </Tabs>
       </PageSection>
     </Page>

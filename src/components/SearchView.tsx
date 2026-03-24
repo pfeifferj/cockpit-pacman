@@ -449,7 +449,7 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies, onVi
                       <Td dataLabel="Version">{pkg.version}</Td>
                       <Td dataLabel="Description">{pkg.description || "-"}</Td>
                       <Td dataLabel="Repository">
-                        <Label color="blue">{pkg.repository}</Label>
+                        <Label isCompact color="grey">{pkg.repository}</Label>
                       </Td>
                       <Td dataLabel="Status">
                         {pkg.installed ? (

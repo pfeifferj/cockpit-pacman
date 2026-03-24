@@ -141,6 +141,8 @@ describe("PackageList", () => {
       optdepends: [],
       conflicts: [],
       replaces: [],
+      required_by: [],
+      optional_for: [],
       installed_size: 142000000,
       packager: "heftig",
       architecture: "x86_64",
@@ -149,6 +151,7 @@ describe("PackageList", () => {
       reason: "explicit",
       validation: ["pgp"],
       repository: "core",
+      update_stats: null,
     };
     mockGetPackageInfo.mockResolvedValue(mockDetails);
 

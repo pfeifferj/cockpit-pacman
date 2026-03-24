@@ -10,6 +10,7 @@ pub mod news;
 pub mod query;
 pub mod reboot;
 pub mod scheduled;
+pub mod signoff;
 
 pub use cache::{clean_cache, get_cache_info};
 pub use config::{add_ignored, list_ignored, remove_ignored};
@@ -27,3 +28,4 @@ pub use query::{
 };
 pub use reboot::get_reboot_status;
 pub use scheduled::{get_schedule_config, get_scheduled_runs, scheduled_run, set_schedule_config};
+pub use signoff::{signoff_list, signoff_revoke, signoff_sign, signoff_status};
