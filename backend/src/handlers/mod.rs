@@ -28,4 +28,4 @@ pub use query::{
 };
 pub use reboot::get_reboot_status;
 pub use scheduled::{get_schedule_config, get_scheduled_runs, scheduled_run, set_schedule_config};
-pub use signoff::{signoff_list, signoff_revoke, signoff_sign, signoff_status};
+pub use signoff::{signoff_list, signoff_revoke, signoff_sign};

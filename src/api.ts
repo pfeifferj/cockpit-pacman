@@ -1,16 +1,6 @@
 import { BACKEND_TIMEOUT_MS } from "./constants";
 import { sanitizeSearchInput } from "./utils";
 
-declare const cockpit: {
-  spawn(args: string[], options?: {
-    superuser?: "try" | "require";
-    err?: "out" | "message";
-  }): Promise<string> & {
-    stream(callback: (data: string) => void): void;
-    close(problem?: string): void;
-  };
-};
-
 const BACKEND_PATH = "/usr/libexec/cockpit-pacman/cockpit-pacman-backend";
 
 export interface Package {
@@ -246,10 +236,15 @@ function parseErrorCode(message: string): ErrorCode {
   return "internal_error";
 }
 
-async function runBackend<T>(command: string, args: string[] = [], options?: { superuser?: "try" | "require" }): Promise<T> {
+async function runBackend<T>(command: string, args: string[] = [], options?: { superuser?: "try" | "require" | "none" }): Promise<T> {
+  const su = options?.superuser ?? "try";
+  const spawnOpts: Record<string, unknown> = { err: "message" };
+  if (su !== "none") {
+    spawnOpts.superuser = su;
+  }
   const spawnPromise = cockpit.spawn(
     [BACKEND_PATH, command, ...args],
-    { superuser: options?.superuser ?? "try", err: "message" }
+    spawnOpts,
   );
 
   const controller = new AbortController();
@@ -1012,9 +1007,9 @@ export async function getDependencyTree(params: DependencyTreeParams): Promise<D
 
 // Signoff types
 
-export interface SignoffStatusResponse {
-  available: boolean;
-  username?: string;
+export interface KeyringCredentials {
+  username: string;
+  password: string;
 }
 
 export interface Signoff {
@@ -1055,26 +1050,28 @@ export interface SignoffActionResponse {
   error?: string;
 }
 
-export async function getSignoffStatus(): Promise<SignoffStatusResponse> {
-  return runBackend<SignoffStatusResponse>("signoff-status", [], { superuser: undefined });
+function encodeCredentials(credentials: KeyringCredentials): string {
+  return btoa(JSON.stringify({ username: credentials.username, password: credentials.password }));
 }
 
-export async function getSignoffList(): Promise<SignoffListResponse> {
-  return runBackend<SignoffListResponse>("signoff-list", [], { superuser: undefined });
+export async function getSignoffList(credentials: KeyringCredentials): Promise<SignoffListResponse> {
+  return runBackend<SignoffListResponse>("signoff-list", [encodeCredentials(credentials)], { superuser: "none" });
 }
 
 export async function signoffPackage(
   pkgbase: string,
   repo: string,
   arch: string,
+  credentials: KeyringCredentials,
 ): Promise<SignoffActionResponse> {
-  return runBackend<SignoffActionResponse>("signoff-sign", [pkgbase, repo, arch], { superuser: undefined });
+  return runBackend<SignoffActionResponse>("signoff-sign", [encodeCredentials(credentials), pkgbase, repo, arch], { superuser: "none" });
 }
 
 export async function revokeSignoff(
   pkgbase: string,
   repo: string,
   arch: string,
+  credentials: KeyringCredentials,
 ): Promise<SignoffActionResponse> {
-  return runBackend<SignoffActionResponse>("signoff-revoke", [pkgbase, repo, arch], { superuser: undefined });
+  return runBackend<SignoffActionResponse>("signoff-revoke", [encodeCredentials(credentials), pkgbase, repo, arch], { superuser: "none" });
 }

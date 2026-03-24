@@ -109,15 +109,16 @@ export function createMockSpawnPromise(
   result: string,
   shouldFail = false,
   error?: Error
-): Promise<string> & { stream: () => void; close: () => void } {
+): Promise<string> & { stream: () => void; close: () => void; input: () => void } {
   const promise = (
     shouldFail
       ? Promise.reject(error ?? new Error("spawn failed"))
       : Promise.resolve(result)
-  ) as Promise<string> & { stream: () => void; close: () => void };
+  ) as Promise<string> & { stream: () => void; close: () => void; input: () => void };
 
   promise.stream = () => {};
   promise.close = () => {};
+  promise.input = () => {};
 
   return promise;
 }

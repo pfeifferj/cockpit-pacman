@@ -35,6 +35,7 @@ import {
   Pagination,
   Popover,
   Icon,
+  Label,
 } from "@patternfly/react-core";
 import { TrashIcon, CheckCircleIcon, FolderIcon, ExclamationCircleIcon, OutlinedQuestionCircleIcon } from "@patternfly/react-icons";
 import { PackageDetailsModal } from "./PackageDetailsModal";
@@ -403,7 +404,7 @@ export const CacheView: React.FC = () => {
                     {pkg.name}
                   </Button>
                 </Td>
-                <Td dataLabel="Version">{pkg.version}</Td>
+                <Td dataLabel="Version"><Label isCompact variant="outline">{pkg.version}</Label></Td>
                 <Td dataLabel="Size">{formatSize(pkg.size)}</Td>
               </Tr>
             ))}

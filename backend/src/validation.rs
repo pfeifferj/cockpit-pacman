@@ -168,6 +168,22 @@ pub fn validate_direction(direction: &str) -> Result<()> {
 
 const MAX_JSON_PAYLOAD_BYTES: usize = 1024 * 1024; // 1 MiB
 
+pub fn validate_signoff_arg(value: &str, field: &str) -> Result<()> {
+    if value.is_empty() {
+        anyhow::bail!("{} cannot be empty", field);
+    }
+    if value.len() > 256 {
+        anyhow::bail!("{} too long (max 256)", field);
+    }
+    if !value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "@._+-".contains(c))
+    {
+        anyhow::bail!("{} contains invalid characters", field);
+    }
+    Ok(())
+}
+
 pub fn validate_json_payload_size(payload: &str) -> Result<()> {
     if payload.len() > MAX_JSON_PAYLOAD_BYTES {
         anyhow::bail!(

@@ -15,7 +15,8 @@ import { HistoryView } from "./HistoryView";
 import { MirrorsView } from "./MirrorsView";
 import { SignoffsView } from "./SignoffsView";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { getSignoffStatus } from "../api";
+import type { KeyringCredentials } from "../api";
+import { getCredentials } from "../keyring";
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string | number>(0);
@@ -23,13 +24,13 @@ export const App: React.FC = () => {
   const [historySearch, setHistorySearch] = useState<{ query: string; key: number } | undefined>(undefined);
   const historyKeyRef = useRef(0);
   const [signoffAvailable, setSignoffAvailable] = useState(false);
-  const [signoffUsername, setSignoffUsername] = useState<string | undefined>(undefined);
+  const [signoffCredentials, setSignoffCredentials] = useState<KeyringCredentials | null>(null);
 
   useEffect(() => {
-    getSignoffStatus()
-      .then((status) => {
-        setSignoffAvailable(status.available);
-        setSignoffUsername(status.username);
+    getCredentials()
+      .then((creds) => {
+        setSignoffAvailable(true);
+        setSignoffCredentials(creds);
       })
       .catch(() => {
         setSignoffAvailable(false);
@@ -91,7 +92,7 @@ export const App: React.FC = () => {
           {signoffAvailable && (
             <Tab eventKey={7} title={<TabTitleText>Signoffs</TabTitleText>}>
               <ErrorBoundary fallbackTitle="Error loading signoffs">
-                <SignoffsView username={signoffUsername} />
+                <SignoffsView credentials={signoffCredentials!} />
               </ErrorBoundary>
             </Tab>
           )}

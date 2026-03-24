@@ -236,7 +236,7 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphP
                     {pkg.name}
                   </Button>
                 </Td>
-                <Td dataLabel="Version">{pkg.version}</Td>
+                <Td dataLabel="Version"><Label isCompact variant="outline">{pkg.version}</Label></Td>
                 <Td dataLabel="Description">{pkg.description || "-"}</Td>
                 <Td dataLabel="Size">{formatSize(pkg.installed_size)}</Td>
                 <Td dataLabel="Reason">
