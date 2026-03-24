@@ -7,13 +7,13 @@ use cockpit_pacman_backend::handlers::{
     list_downgrades, list_ignored, list_installed, list_mirrors, list_orphans, local_package_info,
     preflight_upgrade, refresh_keyring, remove_ignored, remove_orphans, remove_package,
     run_upgrade, save_mirrorlist, scheduled_run, search, set_schedule_config, signoff_list,
-    signoff_revoke, signoff_sign, signoff_status, sync_database, sync_package_info, test_mirrors,
+    signoff_revoke, signoff_sign, sync_database, sync_package_info, test_mirrors,
 };
 use cockpit_pacman_backend::models::MirrorEntry;
 use cockpit_pacman_backend::validation::{
     validate_depth, validate_direction, validate_json_payload_size, validate_keep_versions,
     validate_mirror_timeout, validate_mirror_url, validate_package_name, validate_pagination,
-    validate_search_query,
+    validate_search_query, validate_signoff_arg,
 };
 
 fn print_usage() {
@@ -106,12 +106,12 @@ fn print_usage() {
     eprintln!("                         direction: forward|reverse|both (default: forward)");
     eprintln!("  fetch-news [days]      Fetch recent Arch Linux news items");
     eprintln!("                         days: lookback period (default: 30)");
-    eprintln!("  signoff-status         Check if ArchWeb signoff is available via pass");
-    eprintln!("  signoff-list           List packages awaiting signoff");
-    eprintln!("  signoff-sign PKGBASE REPO ARCH");
+    eprintln!("  signoff-list CREDS     List packages awaiting signoff");
+    eprintln!("  signoff-sign CREDS PKGBASE REPO ARCH");
     eprintln!("                         Sign off a package");
-    eprintln!("  signoff-revoke PKGBASE REPO ARCH");
+    eprintln!("  signoff-revoke CREDS PKGBASE REPO ARCH");
     eprintln!("                         Revoke a signoff");
+    eprintln!("                         CREDS: base64-encoded JSON {{username, password}}");
 }
 
 fn main() {
@@ -372,10 +372,33 @@ fn main() {
             let days = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(30u32);
             fetch_news(days)
         }
-        "signoff-status" => signoff_status(),
-        "signoff-list" => signoff_list(),
-        "signoff-sign" => signoff_sign(&args[2..]),
-        "signoff-revoke" => signoff_revoke(&args[2..]),
+        "signoff-list" => {
+            if args.len() < 3 {
+                eprintln!("Error: signoff-list requires CREDS");
+                std::process::exit(1);
+            }
+            signoff_list(&args[2])
+        }
+        "signoff-sign" => {
+            if args.len() < 6 {
+                eprintln!("Error: signoff-sign requires CREDS PKGBASE REPO ARCH");
+                std::process::exit(1);
+            }
+            validate_signoff_arg(&args[3], "pkgbase")
+                .and_then(|_| validate_signoff_arg(&args[4], "repo"))
+                .and_then(|_| validate_signoff_arg(&args[5], "arch"))
+                .and_then(|_| signoff_sign(&args[2..]))
+        }
+        "signoff-revoke" => {
+            if args.len() < 6 {
+                eprintln!("Error: signoff-revoke requires CREDS PKGBASE REPO ARCH");
+                std::process::exit(1);
+            }
+            validate_signoff_arg(&args[3], "pkgbase")
+                .and_then(|_| validate_signoff_arg(&args[4], "repo"))
+                .and_then(|_| validate_signoff_arg(&args[5], "arch"))
+                .and_then(|_| signoff_revoke(&args[2..]))
+        }
         "help" | "--help" | "-h" => {
             print_usage();
             Ok(())

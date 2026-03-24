@@ -81,6 +81,8 @@ fn test_package_details_serialization() {
         optdepends: vec![],
         conflicts: vec![],
         replaces: vec![],
+        required_by: vec!["linux-headers".to_string()],
+        optional_for: vec![],
         installed_size: 150_000_000,
         packager: Some("Arch Linux".to_string()),
         architecture: Some("x86_64".to_string()),
@@ -89,6 +91,7 @@ fn test_package_details_serialization() {
         reason: "explicit".to_string(),
         validation: vec!["pgp".to_string()],
         repository: Some("core".to_string()),
+        update_stats: None,
     };
 
     let json = serde_json::to_string(&details).unwrap();

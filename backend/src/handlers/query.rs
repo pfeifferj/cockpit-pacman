@@ -180,9 +180,7 @@ fn compute_update_stats(name: &str) -> Option<UpdateStats> {
             Action::Upgraded => {
                 update_count += 1;
                 last_updated = Some(ts_str.clone());
-                if let Some(dt) =
-                    NaiveDateTime::parse_from_str(&ts_str, "%Y-%m-%dT%H:%M:%S%z").ok()
-                {
+                if let Ok(dt) = NaiveDateTime::parse_from_str(&ts_str, "%Y-%m-%dT%H:%M:%S%z") {
                     upgrade_timestamps.push(dt);
                 }
             }
@@ -227,7 +225,7 @@ pub fn local_package_info(name: &str) -> Result<()> {
         version: pkg.version().to_string(),
         description: pkg.desc().map(|s| s.to_string()),
         url: pkg.url().map(|s| s.to_string()),
-        licenses: pkg.licenses().iter().flat_map(|s| split_licenses(s)).collect(),
+        licenses: pkg.licenses().iter().flat_map(split_licenses).collect(),
         groups: pkg.groups().iter().map(|s| s.to_string()).collect(),
         provides: pkg
             .provides()
@@ -261,12 +259,15 @@ pub fn local_package_info(name: &str) -> Result<()> {
         validation: pkg
             .validation()
             .iter()
-            .map(|v| match v {
-                alpm::PackageValidation::MD5SUM => "MD5",
-                alpm::PackageValidation::SHA256SUM => "SHA-256",
-                alpm::PackageValidation::SIGNATURE => "PGP Signature",
-                _ => "Unknown",
-            }.to_string())
+            .map(|v| {
+                match v {
+                    alpm::PackageValidation::MD5SUM => "MD5",
+                    alpm::PackageValidation::SHA256SUM => "SHA-256",
+                    alpm::PackageValidation::SIGNATURE => "PGP Signature",
+                    _ => "Unknown",
+                }
+                .to_string()
+            })
             .collect(),
         repository,
         update_stats: compute_update_stats(name),
@@ -383,7 +384,7 @@ pub fn sync_package_info(name: &str, repo: Option<&str>) -> Result<()> {
         version: pkg.version().to_string(),
         description: pkg.desc().map(|s| s.to_string()),
         url: pkg.url().map(|s| s.to_string()),
-        licenses: pkg.licenses().iter().flat_map(|s| split_licenses(s)).collect(),
+        licenses: pkg.licenses().iter().flat_map(split_licenses).collect(),
         groups: pkg.groups().iter().map(|s| s.to_string()).collect(),
         provides: pkg
             .provides()

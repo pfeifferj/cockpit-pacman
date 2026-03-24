@@ -452,13 +452,6 @@ pub struct DependencyTreeResponse {
     pub warnings: Vec<String>,
 }
 
-#[derive(Serialize)]
-pub struct SignoffStatusResponse {
-    pub available: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub username: Option<String>,
-}
-
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum VersionMatch {
