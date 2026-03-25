@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
-  PageSection,
   Alert,
   Badge,
+  Card,
+  CardBody,
   Checkbox,
   Spinner,
   Button,
   Label,
+  Pagination,
   Toolbar,
   ToolbarContent,
   ToolbarItem,
@@ -46,9 +48,11 @@ import {
   revokeSignoff,
 } from "../api";
 import { usePackageDetails } from "../hooks/usePackageDetails";
+import { usePagination } from "../hooks/usePagination";
 import { useSortableTable } from "../hooks/useSortableTable";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { sanitizeErrorMessage } from "../utils";
+import { PER_PAGE_OPTIONS } from "../constants";
 
 type SignoffFilter = "installed" | "pending" | "signed" | "bad";
 
@@ -77,6 +81,7 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
   const [repoFilter, setRepoFilter] = useState("all");
   const [repoSelectOpen, setRepoSelectOpen] = useState(false);
   const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
+  const { page, perPage, onSetPage, onPerPageSelect, resetPage } = usePagination({ defaultPerPage: 20 });
 
   // Column indices: 0=checkbox, 1=package, 2=version, 3=local, 4=signoffs, 5=status, 6=actions
   const sortColumns = { package: 1, version: 2, signoffs: 4, status: 5 } as const;
@@ -157,6 +162,7 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
       if (next.has(f)) next.delete(f); else next.add(f);
       return next;
     });
+    resetPage();
   };
 
   const filterCounts = useMemo(() => {
@@ -220,6 +226,11 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
     });
   }, [data, search, filters, repoFilter, username, activeSortKey, activeSortDirection]);
 
+  const pagedGroups = useMemo(() => {
+    const start = (page - 1) * perPage;
+    return filteredGroups.slice(start, start + perPage);
+  }, [filteredGroups, page, perPage]);
+
   const selectableGroups = useMemo(() => {
     return filteredGroups.filter((g) => {
       if (g.known_bad) return false;
@@ -275,7 +286,8 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
   const hasFilters = filters.size > 0 || !!search || repoFilter !== "all";
 
   return (
-    <PageSection hasBodyWrapper={false}>
+    <Card>
+      <CardBody>
       {error && (
         <Alert
           variant="danger"
@@ -294,8 +306,8 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
             <SearchInput
               placeholder="Filter packages..."
               value={search}
-              onChange={(_event, value) => setSearch(value)}
-              onClear={() => setSearch("")}
+              onChange={(_event, value) => { setSearch(value); resetPage(); }}
+              onClear={() => { setSearch(""); resetPage(); }}
             />
           </ToolbarItem>
           <ToolbarItem>
@@ -332,6 +344,7 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
               onSelect={(_event, value) => {
                 setRepoFilter(value as string);
                 setRepoSelectOpen(false);
+                resetPage();
               }}
               onOpenChange={setRepoSelectOpen}
               toggle={(toggleRef) => (
@@ -375,13 +388,16 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
               </Button>
             </ToolbarItem>
           )}
-          <ToolbarItem align={{ default: "alignEnd" }}>
-            {data && (
-              <span style={{ color: "var(--pf-t--global--color--200)" }}>
-                {filteredGroups.length !== data.total ? `${filteredGroups.length} of ${data.total}` : data.total} packages
-                {username && <> &middot; {username}</>}
-              </span>
-            )}
+          <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
+            <Pagination
+              itemCount={filteredGroups.length}
+              perPage={perPage}
+              page={page}
+              onSetPage={onSetPage}
+              onPerPageSelect={onPerPageSelect}
+              perPageOptions={PER_PAGE_OPTIONS}
+              isCompact
+            />
           </ToolbarItem>
         </ToolbarContent>
       </Toolbar>
@@ -418,7 +434,7 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
             </Tr>
           </Thead>
           <Tbody>
-            {filteredGroups.map((group, rowIndex) => {
+            {pagedGroups.map((group, rowIndex) => {
               const key = signoffKey(group);
               const isActing = actionInProgress === key;
               const userHasSignoff = group.signoffs.some((s) => !s.revoked && s.user === username);
@@ -493,12 +509,25 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
         </Table>
       )}
 
+      {filteredGroups.length > 0 && (
+        <Pagination
+          itemCount={filteredGroups.length}
+          perPage={perPage}
+          page={page}
+          onSetPage={onSetPage}
+          onPerPageSelect={onPerPageSelect}
+          perPageOptions={PER_PAGE_OPTIONS}
+          variant="bottom"
+        />
+      )}
+
       <PackageDetailsModal
         packageDetails={selectedPackage}
         isLoading={detailsLoading}
         onClose={clearDetails}
         error={detailsError}
       />
-    </PageSection>
+      </CardBody>
+    </Card>
   );
 };
