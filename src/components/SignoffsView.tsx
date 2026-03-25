@@ -23,6 +23,9 @@ import {
   Select,
   SelectOption,
   SelectList,
+  Popover,
+  Tooltip,
+  Icon,
 } from "@patternfly/react-core";
 import {
   Table,
@@ -36,6 +39,7 @@ import {
   CheckCircleIcon,
   ExclamationTriangleIcon,
   SyncAltIcon,
+  OutlinedQuestionCircleIcon,
 } from "@patternfly/react-icons";
 import type {
   KeyringCredentials,
@@ -278,9 +282,9 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
   };
 
   const renderStatus = (group: SignoffGroupWithLocal) => {
-    if (group.known_bad) return <Label color="red" isCompact>Known Bad</Label>;
-    if (group.approved) return <Label color="green" isCompact>Approved</Label>;
-    return <Label color="blue" isCompact>Pending</Label>;
+    if (group.known_bad) return <Tooltip content="Flagged as broken by a Trusted User. Do not sign off."><Label color="red" isCompact>Known Bad</Label></Tooltip>;
+    if (group.approved) return <Tooltip content="Has enough signoffs to move to stable repositories."><Label color="green" isCompact>Approved</Label></Tooltip>;
+    return <Tooltip content="Waiting for Trusted Users to test and sign off."><Label color="blue" isCompact>Pending</Label></Tooltip>;
   };
 
   const hasFilters = filters.size > 0 || !!search || repoFilter !== "all";
@@ -429,7 +433,7 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
               <Th sort={getSortParams("version")}>Version</Th>
               <Th>Local</Th>
               <Th sort={getSortParams("signoffs")}>Signoffs</Th>
-              <Th sort={getSortParams("status")}>Status</Th>
+              <Th sort={getSortParams("status")}>Status{" "}<Popover headerContent="Signoff Status" bodyContent="Signoffs are part of Arch's package testing pipeline. Trusted Users install and test packages from [testing] repositories, then sign them off. A package needs enough signoffs before it moves to stable repos. 'Known Bad' flags a broken package."><Icon isInline style={{ cursor: "pointer" }} onClick={(e: React.MouseEvent) => e.stopPropagation()}><OutlinedQuestionCircleIcon /></Icon></Popover></Th>
               <Th>Actions</Th>
             </Tr>
           </Thead>

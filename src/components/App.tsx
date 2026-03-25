@@ -23,6 +23,8 @@ export const App: React.FC = () => {
   const [graphPackage, setGraphPackage] = useState<string | undefined>(undefined);
   const [historySearch, setHistorySearch] = useState<{ query: string; key: number } | undefined>(undefined);
   const historyKeyRef = useRef(0);
+  const [orphanFilter, setOrphanFilter] = useState<{ filter: "orphan"; key: number } | undefined>(undefined);
+  const orphanKeyRef = useRef(0);
   const [signoffAvailable, setSignoffAvailable] = useState(false);
   const [signoffCredentials, setSignoffCredentials] = useState<KeyringCredentials | null>(null);
 
@@ -42,6 +44,23 @@ export const App: React.FC = () => {
     setActiveTab(1);
   };
 
+  const handleViewOrphans = () => {
+    setOrphanFilter({ filter: "orphan", key: ++orphanKeyRef.current });
+    setActiveTab(1);
+  };
+
+  const handleViewCache = () => {
+    setActiveTab(4);
+  };
+
+  const handleViewSignoffs = () => {
+    setActiveTab(7);
+  };
+
+  const handleViewKeyring = () => {
+    setActiveTab(5);
+  };
+
   const handleViewHistory = (packageName: string) => {
     setHistorySearch({ query: packageName, key: ++historyKeyRef.current });
     setActiveTab(3);
@@ -56,12 +75,20 @@ export const App: React.FC = () => {
         >
           <Tab eventKey={0} title={<TabTitleText>Updates</TabTitleText>}>
             <ErrorBoundary fallbackTitle="Error loading updates">
-              <UpdatesView onViewDependencies={handleViewDependencies} onViewHistory={handleViewHistory} />
+              <UpdatesView
+                onViewDependencies={handleViewDependencies}
+                onViewHistory={handleViewHistory}
+                onViewOrphans={handleViewOrphans}
+                onViewCache={handleViewCache}
+                onViewSignoffs={signoffAvailable ? handleViewSignoffs : undefined}
+                onViewKeyring={handleViewKeyring}
+                signoffCredentials={signoffCredentials}
+              />
             </ErrorBoundary>
           </Tab>
           <Tab eventKey={1} title={<TabTitleText>Installed Packages</TabTitleText>}>
             <ErrorBoundary fallbackTitle="Error loading packages">
-              <PackageList graphPackage={graphPackage} onGraphPackageChange={setGraphPackage} onViewHistory={handleViewHistory} />
+              <PackageList graphPackage={graphPackage} initialFilter={orphanFilter} onGraphPackageChange={setGraphPackage} onViewHistory={handleViewHistory} />
             </ErrorBoundary>
           </Tab>
           <Tab eventKey={2} title={<TabTitleText>Search Packages</TabTitleText>}>

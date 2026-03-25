@@ -24,8 +24,9 @@ import {
   SelectOption,
   SelectList,
   Button,
+  Tooltip,
 } from "@patternfly/react-core";
-import { TopologyIcon } from "@patternfly/react-icons";
+import { TopologyIcon, OutlinedQuestionCircleIcon } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import { DependencyView } from "./DependencyView";
 import { OrphansView } from "./OrphansView";
@@ -43,11 +44,12 @@ import { PER_PAGE_OPTIONS, SEARCH_DEBOUNCE_MS } from "../constants";
 
 interface PackageListProps {
   graphPackage?: string;
+  initialFilter?: { filter: FilterType; key: number };
   onGraphPackageChange?: (packageName: string | undefined) => void;
   onViewHistory?: (packageName: string) => void;
 }
 
-export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphPackageChange, onViewHistory }) => {
+export const PackageList: React.FC<PackageListProps> = ({ graphPackage, initialFilter, onGraphPackageChange, onViewHistory }) => {
   const [packages, setPackages] = useState<Package[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -86,6 +88,12 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphP
       setFilter("graph");
     }
   }, [graphPackage]);
+
+  useEffect(() => {
+    if (initialFilter) {
+      setFilter(initialFilter.filter);
+    }
+  }, [initialFilter]);
 
   const debouncedSearchInput = useDebouncedValue(
     sanitizeSearchInput(searchInput),
@@ -286,7 +294,7 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, onGraphP
                   onChange={() => handleFilterChange("dependency")}
                 />
                 <ToggleGroupItem
-                  text={<>Orphans <Badge isRead>{formatNumber(orphanCount)}</Badge></>}
+                  text={<>Orphans <Tooltip content="Packages installed as dependencies that are no longer required by any other package."><OutlinedQuestionCircleIcon style={{ cursor: "pointer" }} /></Tooltip> <Badge isRead>{formatNumber(orphanCount)}</Badge></>}
                   isSelected={filter === "orphan"}
                   onChange={() => handleFilterChange("orphan")}
                 />

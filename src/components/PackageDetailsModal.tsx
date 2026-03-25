@@ -161,7 +161,22 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
               <DescriptionListDescription>
                 <LabelGroup>
                   {packageDetails.licenses.map((license: string) => (
-                    <Label key={license}>{license}</Label>
+                    <Label
+                      key={license}
+                      render={({ className, content, componentRef }) => (
+                        <a
+                          ref={componentRef}
+                          className={className}
+                          href={`https://spdx.org/licenses/${encodeURIComponent(license)}.html`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {content}
+                        </a>
+                      )}
+                    >
+                      {license}
+                    </Label>
                   ))}
                 </LabelGroup>
               </DescriptionListDescription>
@@ -170,7 +185,17 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
 
           {packageDetails.groups.length > 0 && (
             <DescriptionListGroup>
-              <DescriptionListTerm>Groups</DescriptionListTerm>
+              <DescriptionListTerm>
+                Groups{" "}
+                <Popover
+                  headerContent="Package Groups"
+                  bodyContent="Named collections of related packages. Installing a group (e.g. 'base-devel') installs all its members at once. Membership is defined by the packager, not by dependencies."
+                >
+                  <Icon isInline style={{ marginLeft: "0.5em", cursor: "pointer" }}>
+                    <OutlinedQuestionCircleIcon />
+                  </Icon>
+                </Popover>
+              </DescriptionListTerm>
               <DescriptionListDescription>
                 <LabelGroup>
                   {packageDetails.groups.map((g: string) => (
@@ -182,7 +207,17 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
           )}
 
           <DescriptionListGroup>
-            <DescriptionListTerm>Architecture</DescriptionListTerm>
+            <DescriptionListTerm>
+              Architecture{" "}
+              <Popover
+                headerContent="Package Architecture"
+                bodyContent="The CPU architecture this package was built for. 'x86_64' is compiled native code. 'any' means the package is architecture-independent (scripts, data, fonts, etc.)."
+              >
+                <Icon isInline style={{ marginLeft: "0.5em", cursor: "pointer" }}>
+                  <OutlinedQuestionCircleIcon />
+                </Icon>
+              </Popover>
+            </DescriptionListTerm>
             <DescriptionListDescription>
               {packageDetails.architecture || "any"}
             </DescriptionListDescription>
@@ -223,7 +258,17 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
               </DescriptionListGroup>
 
               <DescriptionListGroup>
-                <DescriptionListTerm>Install Reason</DescriptionListTerm>
+                <DescriptionListTerm>
+                  Install Reason{" "}
+                  <Popover
+                    headerContent="Install Reason"
+                    bodyContent="'Explicit' means you installed this package directly. 'Dependency' means it was pulled in as a requirement of another package. Dependencies no longer required by anything become orphans."
+                  >
+                    <Icon isInline style={{ marginLeft: "0.5em", cursor: "pointer" }}>
+                      <OutlinedQuestionCircleIcon />
+                    </Icon>
+                  </Popover>
+                </DescriptionListTerm>
                 <DescriptionListDescription>
                   <Label color={packageDetails.reason === "explicit" ? "blue" : "grey"}>
                     {packageDetails.reason}
@@ -299,7 +344,17 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
 
           {packageDetails.provides.length > 0 && (
             <DescriptionListGroup>
-              <DescriptionListTerm>Provides</DescriptionListTerm>
+              <DescriptionListTerm>
+                Provides{" "}
+                <Popover
+                  headerContent="Virtual Packages"
+                  bodyContent="Other package names that this package satisfies. If another package depends on a name listed here, this package fulfills that dependency."
+                >
+                  <Icon isInline style={{ marginLeft: "0.5em", cursor: "pointer" }}>
+                    <OutlinedQuestionCircleIcon />
+                  </Icon>
+                </Popover>
+              </DescriptionListTerm>
               <DescriptionListDescription>
                 <LabelGroup numLabels={10}>
                   {packageDetails.provides.map((p: string) => (
@@ -312,7 +367,17 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
 
           {packageDetails.conflicts.length > 0 && (
             <DescriptionListGroup>
-              <DescriptionListTerm>Conflicts</DescriptionListTerm>
+              <DescriptionListTerm>
+                Conflicts{" "}
+                <Popover
+                  headerContent="Package Conflicts"
+                  bodyContent="Packages that cannot be installed alongside this one. Pacman will refuse to install both simultaneously and will prompt you to remove the conflicting package."
+                >
+                  <Icon isInline style={{ marginLeft: "0.5em", cursor: "pointer" }}>
+                    <OutlinedQuestionCircleIcon />
+                  </Icon>
+                </Popover>
+              </DescriptionListTerm>
               <DescriptionListDescription>
                 <LabelGroup numLabels={10}>
                   {packageDetails.conflicts.map((c: string) => (
@@ -325,7 +390,17 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
 
           {packageDetails.replaces.length > 0 && (
             <DescriptionListGroup>
-              <DescriptionListTerm>Replaces</DescriptionListTerm>
+              <DescriptionListTerm>
+                Replaces{" "}
+                <Popover
+                  headerContent="Package Replacement"
+                  bodyContent="Packages that this one supersedes. During a system upgrade, pacman will automatically remove the listed packages and install this one instead."
+                >
+                  <Icon isInline style={{ marginLeft: "0.5em", cursor: "pointer" }}>
+                    <OutlinedQuestionCircleIcon />
+                  </Icon>
+                </Popover>
+              </DescriptionListTerm>
               <DescriptionListDescription>
                 <LabelGroup numLabels={10}>
                   {packageDetails.replaces.map((r: string) => (
@@ -385,7 +460,17 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
 
           {isInstalled && packageDetails.validation.length > 0 && (
             <DescriptionListGroup>
-              <DescriptionListTerm>Validation</DescriptionListTerm>
+              <DescriptionListTerm>
+                Validation{" "}
+                <Popover
+                  headerContent="Package Validation"
+                  bodyContent="How this package was verified at install time. PGP means its signature was checked against the pacman keyring. SHA256 means file integrity was verified via hash. 'none' means no verification was performed."
+                >
+                  <Icon isInline style={{ marginLeft: "0.5em", cursor: "pointer" }}>
+                    <OutlinedQuestionCircleIcon />
+                  </Icon>
+                </Popover>
+              </DescriptionListTerm>
               <DescriptionListDescription>
                 <LabelGroup>
                   {packageDetails.validation.map((v: string) => (

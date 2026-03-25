@@ -44,6 +44,8 @@ import {
 	ModalBody,
 	ModalFooter,
 	Popover,
+	Tooltip,
+	Icon,
 } from '@patternfly/react-core';
 import {
   CheckCircleIcon,
@@ -52,6 +54,7 @@ import {
   SyncAltIcon,
   ArrowUpIcon,
   ArrowDownIcon,
+  OutlinedQuestionCircleIcon,
 } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
@@ -75,7 +78,9 @@ import {
   getCacheInfo,
   getKeyringStatus,
   fetchNews,
+  getSignoffList,
 } from "../api";
+import type { KeyringCredentials } from "../api";
 
 import { sanitizeUrl } from "../utils";
 import { PackageDetailsModal } from "./PackageDetailsModal";
@@ -128,7 +133,12 @@ const SystemOverviewCard: React.FC<{
   cacheSize: number | null;
   keyringStatus: KeyringStatusResponse | null;
   summaryLoading: boolean;
-}> = ({ updates, securityCount, securityLoading, orphanCount, cacheSize, keyringStatus, summaryLoading }) => (
+  onViewOrphans?: () => void;
+  onViewCache?: () => void;
+  onViewKeyring?: () => void;
+  pendingSignoffs?: number | null;
+  onViewSignoffs?: () => void;
+}> = ({ updates, securityCount, securityLoading, orphanCount, cacheSize, keyringStatus, summaryLoading, onViewOrphans, onViewCache, onViewKeyring, pendingSignoffs, onViewSignoffs }) => (
   <Card className="pf-v6-u-mb-md">
     <CardBody>
       <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">System Overview</CardTitle>
@@ -149,18 +159,26 @@ const SystemOverviewCard: React.FC<{
           />
         </FlexItem>
         <FlexItem>
-          <StatBox
-            label="Orphans"
-            value={orphanCount !== null ? formatNumber(orphanCount) : "-"}
-            color={orphanCount && orphanCount > 0 ? "warning" : "default"}
-            isLoading={summaryLoading}
-          />
+          <Tooltip content="Packages installed as dependencies that are no longer required by any other package. Usually safe to remove.">
+            <div>
+              <StatBox
+                label="Orphans"
+                value={orphanCount !== null ? formatNumber(orphanCount) : "-"}
+                color={orphanCount && orphanCount > 0 ? "warning" : "default"}
+                isLoading={summaryLoading}
+                onClick={onViewOrphans}
+                ariaLabel="View orphaned packages"
+              />
+            </div>
+          </Tooltip>
         </FlexItem>
         <FlexItem>
           <StatBox
             label="Cache"
             value={cacheSize !== null ? formatSize(cacheSize) : "-"}
             isLoading={summaryLoading}
+            onClick={onViewCache}
+            ariaLabel="View package cache"
           />
         </FlexItem>
         <FlexItem>
@@ -169,8 +187,25 @@ const SystemOverviewCard: React.FC<{
             value={keyringStatus ? `${keyringStatus.total} keys` : "-"}
             color={keyringStatus?.warnings.length ? "warning" : "default"}
             isLoading={summaryLoading}
+            onClick={onViewKeyring}
+            ariaLabel="View keyring"
           />
         </FlexItem>
+        {pendingSignoffs != null && onViewSignoffs && (
+          <FlexItem>
+            <Tooltip content="Packages in [testing] repositories waiting for Trusted User signoffs before moving to stable.">
+              <div>
+                <StatBox
+                  label="Signoffs"
+                  value={formatNumber(pendingSignoffs)}
+                  color={pendingSignoffs > 0 ? "info" : "default"}
+                  onClick={onViewSignoffs}
+                  ariaLabel="View package signoffs"
+                />
+              </div>
+            </Tooltip>
+          </FlexItem>
+        )}
       </Flex>
     </CardBody>
   </Card>
@@ -179,9 +214,14 @@ const SystemOverviewCard: React.FC<{
 interface UpdatesViewProps {
   onViewDependencies?: (packageName: string) => void;
   onViewHistory?: (packageName: string) => void;
+  onViewOrphans?: () => void;
+  onViewCache?: () => void;
+  onViewKeyring?: () => void;
+  onViewSignoffs?: () => void;
+  signoffCredentials?: KeyringCredentials | null;
 }
 
-export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, onViewHistory }) => {
+export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, onViewHistory, onViewOrphans, onViewCache, onViewKeyring, onViewSignoffs, signoffCredentials }) => {
   const [state, setState] = useState<ViewState>("loading");
   const [updates, setUpdates] = useState<UpdateInfo[]>([]);
   const [log, setLog] = useState("");
@@ -220,6 +260,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
   const [orphanCount, setOrphanCount] = useState<number | null>(null);
   const [cacheSize, setCacheSize] = useState<number | null>(null);
   const [keyringStatus, setKeyringStatus] = useState<KeyringStatusResponse | null>(null);
+  const [pendingSignoffs, setPendingSignoffs] = useState<number | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [securityMap, setSecurityMap] = useState<Map<string, PackageSecurityAdvisory[]>>(new Map());
   const [securityLoading, setSecurityLoading] = useState(true);
@@ -462,6 +503,17 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
   useEffect(() => {
     loadSummary();
   }, [loadSummary]);
+
+  useEffect(() => {
+    if (!signoffCredentials) return;
+    getSignoffList(signoffCredentials)
+      .then((res) => {
+        setPendingSignoffs(res.signoff_groups.filter((g) => !g.approved && !g.known_bad).length);
+      })
+      .catch(() => {
+        setPendingSignoffs(null);
+      });
+  }, [signoffCredentials]);
 
   // Track whether we've done initial selection
   const hasInitializedSelection = useRef(false);
@@ -919,6 +971,11 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
           cacheSize={cacheSize}
           keyringStatus={keyringStatus}
           summaryLoading={summaryLoading}
+          onViewOrphans={onViewOrphans}
+          onViewCache={onViewCache}
+          onViewKeyring={onViewKeyring}
+          onViewSignoffs={onViewSignoffs}
+          pendingSignoffs={pendingSignoffs}
         />
 
         <Card className="pf-v6-u-mb-md">
@@ -1012,6 +1069,11 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
         cacheSize={cacheSize}
         keyringStatus={keyringStatus}
         summaryLoading={summaryLoading}
+        onViewOrphans={onViewOrphans}
+        onViewCache={onViewCache}
+        onViewKeyring={onViewKeyring}
+        onViewSignoffs={onViewSignoffs}
+        pendingSignoffs={pendingSignoffs}
       />
 
       <Card>
@@ -1139,7 +1201,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
               <Th>Version</Th>
               <Th sort={getSortParams("download")}>Download</Th>
               <Th sort={getSortParams("installed")}>Installed</Th>
-              <Th sort={getSortParams("net")}>Net</Th>
+              <Th sort={getSortParams("net")}>Net{" "}<Tooltip content="Change in installed size after this update. Green (down) means the package shrinks, red (up) means it grows."><Icon isInline style={{ cursor: "pointer" }} onClick={(e: React.MouseEvent) => e.stopPropagation()}><OutlinedQuestionCircleIcon /></Icon></Tooltip></Th>
             </Tr>
           </Thead>
           <Tbody>
