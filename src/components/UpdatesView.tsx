@@ -43,10 +43,12 @@ import {
 	ModalHeader,
 	ModalBody,
 	ModalFooter,
+	Popover,
 } from '@patternfly/react-core';
 import {
   CheckCircleIcon,
   ExclamationCircleIcon,
+  ShieldAltIcon,
   SyncAltIcon,
   ArrowUpIcon,
   ArrowDownIcon,
@@ -59,7 +61,9 @@ import {
   RebootStatus,
   KeyringStatusResponse,
   NewsItem,
+  PackageSecurityAdvisory,
   checkUpdates,
+  checkSecurity,
   runUpgrade,
   syncDatabase,
   preflightUpgrade,
@@ -78,6 +82,26 @@ import { PackageDetailsModal } from "./PackageDetailsModal";
 import { StatBox } from "./StatBox";
 import { IgnoredPackagesModal } from "./IgnoredPackagesModal";
 import { ScheduleModal } from "./ScheduleModal";
+
+const SEVERITY_ORDER: Record<string, number> = {
+  Critical: 4,
+  High: 3,
+  Medium: 2,
+  Low: 1,
+  Unknown: 0,
+};
+
+type SeverityColor = "red" | "orange" | "yellow" | "blue" | "grey";
+
+function severityColor(severity: string): SeverityColor {
+  switch (severity) {
+    case "Critical": return "red";
+    case "High": return "orange";
+    case "Medium": return "yellow";
+    case "Low": return "blue";
+    default: return "grey";
+  }
+}
 
 interface UpgradeProgress {
   phase: "preparing" | "downloading" | "installing" | "hooks";
@@ -98,11 +122,13 @@ type ViewState =
 
 const SystemOverviewCard: React.FC<{
   updates: UpdateInfo[];
+  securityCount: number;
+  securityLoading: boolean;
   orphanCount: number | null;
   cacheSize: number | null;
   keyringStatus: KeyringStatusResponse | null;
   summaryLoading: boolean;
-}> = ({ updates, orphanCount, cacheSize, keyringStatus, summaryLoading }) => (
+}> = ({ updates, securityCount, securityLoading, orphanCount, cacheSize, keyringStatus, summaryLoading }) => (
   <Card className="pf-v6-u-mb-md">
     <CardBody>
       <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">System Overview</CardTitle>
@@ -112,6 +138,14 @@ const SystemOverviewCard: React.FC<{
             label="Updates"
             value={formatNumber(updates.length)}
             color={updates.length > 0 ? "danger" : "success"}
+          />
+        </FlexItem>
+        <FlexItem>
+          <StatBox
+            label="Security"
+            value={securityLoading ? "-" : formatNumber(securityCount)}
+            color={securityCount > 0 ? "danger" : "default"}
+            isLoading={securityLoading}
           />
         </FlexItem>
         <FlexItem>
@@ -187,6 +221,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
   const [cacheSize, setCacheSize] = useState<number | null>(null);
   const [keyringStatus, setKeyringStatus] = useState<KeyringStatusResponse | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
+  const [securityMap, setSecurityMap] = useState<Map<string, PackageSecurityAdvisory[]>>(new Map());
+  const [securityLoading, setSecurityLoading] = useState(true);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [newsError, setNewsError] = useState(false);
   const [dismissedNews, setDismissedNews] = useState<Set<string>>(() => {
@@ -281,6 +317,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
     );
   }, [preflightData, acknowledgedRemovals, acknowledgedConflicts, acknowledgedKeyImports, acknowledgedWarnings]);
 
+  const securityUpdateCount = useMemo(() => {
+    return updates.filter((u) => securityMap.has(u.name)).length;
+  }, [updates, securityMap]);
+
   const visibleNews = useMemo(
     () => newsItems.filter((item) => !dismissedNews.has(item.link)),
     [newsItems, dismissedNews]
@@ -320,6 +360,24 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
   const areAllSelected = selectedPackages.size === updates.length && updates.length > 0;
   const areSomeSelected = selectedPackages.size > 0 && selectedPackages.size < updates.length;
 
+  const loadSecurityData = useCallback(async () => {
+    setSecurityLoading(true);
+    try {
+      const response = await checkSecurity();
+      const map = new Map<string, PackageSecurityAdvisory[]>();
+      for (const advisory of response.advisories) {
+        const existing = map.get(advisory.package) ?? [];
+        existing.push(advisory);
+        map.set(advisory.package, existing);
+      }
+      setSecurityMap(map);
+    } catch {
+      setSecurityMap(new Map());
+    } finally {
+      setSecurityLoading(false);
+    }
+  }, []);
+
   const loadUpdates = useCallback(async () => {
     setState("checking");
     setError(null);
@@ -329,11 +387,12 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
       setUpdates(response.updates);
       setWarnings(response.warnings);
       setState(response.updates.length > 0 ? "available" : "uptodate");
+      loadSecurityData();
     } catch (ex) {
       setState("error");
       setError(ex instanceof Error ? ex.message : String(ex));
     }
-  }, []);
+  }, [loadSecurityData]);
 
   useEffect(() => {
     const { cancel } = syncDatabase({
@@ -854,6 +913,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
 
         <SystemOverviewCard
           updates={updates}
+          securityCount={securityUpdateCount}
+          securityLoading={securityLoading}
           orphanCount={orphanCount}
           cacheSize={cacheSize}
           keyringStatus={keyringStatus}
@@ -945,6 +1006,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
 
       <SystemOverviewCard
         updates={updates}
+        securityCount={securityUpdateCount}
+        securityLoading={securityLoading}
         orphanCount={orphanCount}
         cacheSize={cacheSize}
         keyringStatus={keyringStatus}
@@ -1084,12 +1147,23 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
               const netSize = update.new_size - update.current_size;
               const isSelected = selectedPackages.has(update.name);
               const isConfigIgnored = configIgnored.has(update.name);
+              const advisories = securityMap.get(update.name);
+              const hasAdvisories = advisories && advisories.length > 0;
+              const highest = hasAdvisories
+                ? advisories.reduce((a, b) =>
+                    (SEVERITY_ORDER[b.severity] ?? 0) > (SEVERITY_ORDER[a.severity] ?? 0) ? b : a
+                  )
+                : null;
+              const borderColor = highest
+                ? `var(--pf-t--global--color--status--${highest.severity === "Critical" || highest.severity === "High" ? "danger" : "warning"}--default)`
+                : undefined;
               return (
                 <Tr
                   key={update.name}
                   isClickable
                   onRowClick={() => handlePackageClick(update.name)}
                   isRowSelected={isSelected}
+                  style={borderColor ? { borderLeft: `3px solid ${borderColor}` } : undefined}
                 >
                   <Td
                     select={{
@@ -1107,6 +1181,43 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
                       <Label color="orange" className="pf-v6-u-ml-sm" isCompact>
                         ignored
                       </Label>
+                    )}
+                    {hasAdvisories && highest && (
+                      <Popover
+                        headerContent={<>{advisories.length} securit{advisories.length === 1 ? "y advisory" : "y advisories"}</>}
+                        bodyContent={
+                          <div>
+                            {advisories.map((a) => (
+                              <div key={a.avg_name} style={{ marginBottom: "0.5rem" }}>
+                                <a
+                                  href={`https://security.archlinux.org/${a.avg_name}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  {a.avg_name}
+                                </a>
+                                {" "}<Label isCompact color={severityColor(a.severity)}>{a.severity}</Label>
+                                <div style={{ color: "var(--pf-t--global--text--color--subtle)", fontSize: "0.85em" }}>
+                                  {a.advisory_type}
+                                  {a.cve_ids.length > 0 && ` (${a.cve_ids.join(", ")})`}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        }
+                      >
+                        <Label
+                          isCompact
+                          color={severityColor(highest.severity)}
+                          icon={<ShieldAltIcon />}
+                          className="pf-v6-u-ml-sm"
+                          style={{ cursor: "pointer" }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {highest.severity}
+                          {advisories.length > 1 && ` +${advisories.length - 1}`}
+                        </Label>
+                      </Popover>
                     )}
                   </Td>
                   <Td dataLabel="Repository">

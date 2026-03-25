@@ -1,6 +1,7 @@
 node_modules/
 dist/
 backend/target/
+backend/crates/*/target/
 *.log
 *.tsbuildinfo
 .DS_Store

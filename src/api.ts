@@ -318,6 +318,55 @@ export async function checkUpdates(): Promise<UpdatesResponse> {
   return runBackend<UpdatesResponse>("check-updates");
 }
 
+export interface PackageSecurityAdvisory {
+  package: string;
+  severity: string;
+  advisory_type: string;
+  avg_name: string;
+  cve_ids: string[];
+  fixed_version: string | null;
+  status: string;
+}
+
+export interface SecurityResponse {
+  advisories: PackageSecurityAdvisory[];
+}
+
+export interface SecurityInfoAdvisory {
+  name: string;
+  date: string;
+  severity: string;
+  advisory_type: string;
+}
+
+export interface SecurityInfoGroup {
+  name: string;
+  status: string;
+  severity: string;
+}
+
+export interface SecurityInfoIssue {
+  name: string;
+  severity: string;
+  issue_type: string;
+  status: string;
+}
+
+export interface SecurityInfoResponse {
+  name: string;
+  advisories: SecurityInfoAdvisory[];
+  groups: SecurityInfoGroup[];
+  issues: SecurityInfoIssue[];
+}
+
+export async function checkSecurity(): Promise<SecurityResponse> {
+  return runBackend<SecurityResponse>("check-security", [], { superuser: "none" });
+}
+
+export async function getSecurityInfo(name: string): Promise<SecurityInfoResponse> {
+  return runBackend<SecurityInfoResponse>("security-info", [sanitizeSearchInput(name)], { superuser: "none" });
+}
+
 export async function getPackageInfo(name: string): Promise<PackageDetails> {
   return runBackend<PackageDetails>("local-package-info", [name]);
 }

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.4] - 2026-03-25
+
+### Added
+- ArchWeb package signoff support with sign and revoke actions (58ae312)
+- Pagination in the signoffs table (bac7d05)
+- Update frequency and packaging metadata in package details modal (e4b0e09)
+- View history button in package details modal (aade846)
+- Package install from the details modal (b89a33f)
+- Arch Security Tracker integration with severity badges and vulnerable package count (b24ffe9)
+
+### Fixed
+- History search input losing focus during background refetch (bdebb0c)
+- Manage buttons not visible in up-to-date view (6197cb2)
+
 ## [0.3.3] - 2026-03-15
 
 ### Added

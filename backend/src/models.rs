@@ -495,3 +495,51 @@ pub struct SignoffActionResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
+
+#[derive(Serialize)]
+pub struct PackageSecurityAdvisory {
+    pub package: String,
+    pub severity: String,
+    pub advisory_type: String,
+    pub avg_name: String,
+    pub cve_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fixed_version: Option<String>,
+    pub status: String,
+}
+
+#[derive(Serialize)]
+pub struct SecurityResponse {
+    pub advisories: Vec<PackageSecurityAdvisory>,
+}
+
+#[derive(Serialize)]
+pub struct SecurityInfoAdvisory {
+    pub name: String,
+    pub date: String,
+    pub severity: String,
+    pub advisory_type: String,
+}
+
+#[derive(Serialize)]
+pub struct SecurityInfoGroup {
+    pub name: String,
+    pub status: String,
+    pub severity: String,
+}
+
+#[derive(Serialize)]
+pub struct SecurityInfoIssue {
+    pub name: String,
+    pub severity: String,
+    pub issue_type: String,
+    pub status: String,
+}
+
+#[derive(Serialize)]
+pub struct SecurityInfoResponse {
+    pub name: String,
+    pub advisories: Vec<SecurityInfoAdvisory>,
+    pub groups: Vec<SecurityInfoGroup>,
+    pub issues: Vec<SecurityInfoIssue>,
+}

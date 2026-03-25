@@ -144,13 +144,19 @@ fn test_validate_package_name_valid() {
     assert!(validate_package_name("gtk4").is_ok());
     assert!(validate_package_name("xorg-server").is_ok());
     assert!(validate_package_name("Linux").is_ok()); // uppercase ok - ALPM allows it
-    assert!(validate_package_name("foo;bar").is_ok()); // special chars ok
+    assert!(validate_package_name("r8168-lts").is_ok());
+    assert!(validate_package_name("font-awesome@6").is_ok()); // @ is valid
 }
 
 #[test]
 fn test_validate_package_name_invalid() {
     assert!(validate_package_name("").is_err());
     assert!(validate_package_name(&"a".repeat(300)).is_err()); // too long
+    assert!(validate_package_name("foo;bar").is_err()); // shell metachar
+    assert!(validate_package_name("foo/bar").is_err()); // path separator
+    assert!(validate_package_name("../etc/passwd").is_err()); // path traversal
+    assert!(validate_package_name("foo?x=1").is_err()); // query string
+    assert!(validate_package_name("foo bar").is_err()); // space
 }
 
 #[test]

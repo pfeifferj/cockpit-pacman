@@ -7,6 +7,12 @@ pub fn validate_package_name(name: &str) -> Result<()> {
     if name.len() > 256 {
         anyhow::bail!("Package name too long (max 256)");
     }
+    if !name
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b"@._+-".contains(&b))
+    {
+        anyhow::bail!("Package name contains invalid characters");
+    }
     Ok(())
 }
 
