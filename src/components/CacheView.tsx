@@ -36,6 +36,7 @@ import {
   Popover,
   Icon,
   Label,
+  LabelGroup,
 } from "@patternfly/react-core";
 import { TrashIcon, CheckCircleIcon, FolderIcon, ExclamationCircleIcon, OutlinedQuestionCircleIcon } from "@patternfly/react-icons";
 import { PackageDetailsModal } from "./PackageDetailsModal";
@@ -51,6 +52,13 @@ import {
 } from "../api";
 import { sanitizeErrorMessage } from "../utils";
 
+interface GroupedCachePackage {
+  name: string;
+  versions: CachePackage[];
+  latestVersion: string;
+  totalSize: number;
+}
+
 type ViewState = "loading" | "ready" | "cleaning" | "success" | "error";
 
 export const CacheView: React.FC = () => {
@@ -64,7 +72,7 @@ export const CacheView: React.FC = () => {
   const [keepVersions, setKeepVersions] = useState(3);
   const [searchFilter, setSearchFilter] = useState("");
   const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
-  const { page, perPage, onSetPage, onPerPageSelect } = usePagination();
+  const { page, perPage, onSetPage, onPerPageSelect, resetPage } = usePagination();
   const cancelRef = useRef<(() => void) | null>(null);
   const logContainerRef = useAutoScrollLog(log);
   const isMountedRef = useRef(true);
@@ -146,20 +154,26 @@ export const CacheView: React.FC = () => {
   };
 
 
-  const groupedPackages = React.useMemo(() => {
-    if (!cacheData?.packages) return new Map<string, CachePackage[]>();
+  const groupedPackages = useMemo((): GroupedCachePackage[] => {
+    if (!cacheData?.packages) return [];
     const groups = new Map<string, CachePackage[]>();
     for (const pkg of cacheData.packages) {
       const existing = groups.get(pkg.name) || [];
       existing.push(pkg);
       groups.set(pkg.name, existing);
     }
-    return groups;
+    // Backend sorts packages by name asc, then version desc (via alpm::vercmp).
+    // versions[0] is the newest cached version within each group.
+    return Array.from(groups.entries()).map(([name, versions]) => ({
+      name,
+      versions,
+      latestVersion: versions[0].version,
+      totalSize: versions.reduce((sum, v) => sum + v.size, 0),
+    }));
   }, [cacheData]);
 
-  const sortedPackages = React.useMemo(() => {
-    if (!cacheData?.packages) return [];
-    return [...cacheData.packages].sort((a, b) => {
+  const sortedGroups = useMemo(() => {
+    return [...groupedPackages].sort((a, b) => {
       if (activeSortIndex === null) return 0;
       let comparison = 0;
       switch (activeSortIndex) {
@@ -167,32 +181,32 @@ export const CacheView: React.FC = () => {
           comparison = a.name.localeCompare(b.name);
           break;
         case 1:
-          comparison = a.version.localeCompare(b.version);
+          comparison = a.latestVersion.localeCompare(b.latestVersion);
           break;
         case 2:
-          comparison = a.size - b.size;
+          comparison = a.totalSize - b.totalSize;
           break;
         default:
           return 0;
       }
       return activeSortDirection === "asc" ? comparison : -comparison;
     });
-  }, [cacheData, activeSortIndex, activeSortDirection]);
+  }, [groupedPackages, activeSortIndex, activeSortDirection]);
 
-  const filteredPackages = useMemo(() => {
-    if (!searchFilter) return sortedPackages;
+  const filteredGroups = useMemo(() => {
+    if (!searchFilter) return sortedGroups;
     const lower = searchFilter.toLowerCase();
-    return sortedPackages.filter(pkg => pkg.name.toLowerCase().includes(lower));
-  }, [sortedPackages, searchFilter]);
+    return sortedGroups.filter(g => g.name.toLowerCase().includes(lower));
+  }, [sortedGroups, searchFilter]);
 
-  const paginatedPackages = useMemo(() => {
+  const paginatedGroups = useMemo(() => {
     const start = (page - 1) * perPage;
-    return filteredPackages.slice(start, start + perPage);
-  }, [filteredPackages, page, perPage]);
+    return filteredGroups.slice(start, start + perPage);
+  }, [filteredGroups, page, perPage]);
 
-  const uniquePackageCount = groupedPackages.size;
-  const multiVersionPackages = Array.from(groupedPackages.values()).filter(
-    (versions) => versions.length > 1
+  const uniquePackageCount = groupedPackages.length;
+  const multiVersionPackages = groupedPackages.filter(
+    (g) => g.versions.length > 1
   ).length;
 
   if (state === "loading") {
@@ -360,8 +374,8 @@ export const CacheView: React.FC = () => {
               <SearchInput
                 placeholder="Filter cached packages..."
                 value={searchFilter}
-                onChange={(_event, value) => setSearchFilter(value)}
-                onClear={() => setSearchFilter("")}
+                onChange={(_event, value) => { setSearchFilter(value); resetPage(); }}
+                onClear={() => { setSearchFilter(""); resetPage(); }}
                 aria-label="Filter cached packages"
               />
             </ToolbarItem>
@@ -376,7 +390,7 @@ export const CacheView: React.FC = () => {
             </ToolbarItem>
             <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
               <Pagination
-                itemCount={filteredPackages.length}
+                itemCount={filteredGroups.length}
                 perPage={perPage}
                 page={page}
                 onSetPage={onSetPage}
@@ -397,15 +411,23 @@ export const CacheView: React.FC = () => {
             </Tr>
           </Thead>
           <Tbody>
-            {paginatedPackages.map((pkg: CachePackage) => (
-              <Tr key={pkg.filename} isClickable onRowClick={() => handleRowClick(pkg.name)}>
+            {paginatedGroups.map((group) => (
+              <Tr key={group.name} isClickable onRowClick={() => handleRowClick(group.name)}>
                 <Td dataLabel="Package">
                   <Button variant="link" isInline className="pf-v6-u-p-0">
-                    {pkg.name}
+                    {group.name}
                   </Button>
                 </Td>
-                <Td dataLabel="Version"><Label isCompact variant="outline">{pkg.version}</Label></Td>
-                <Td dataLabel="Size">{formatSize(pkg.size)}</Td>
+                <Td dataLabel="Version">
+                  <LabelGroup numLabels={3}>
+                    {group.versions.map((v) => (
+                      <Label key={v.filename} isCompact variant="outline">
+                        {v.version}
+                      </Label>
+                    ))}
+                  </LabelGroup>
+                </Td>
+                <Td dataLabel="Size">{formatSize(group.totalSize)}</Td>
               </Tr>
             ))}
           </Tbody>
@@ -414,7 +436,7 @@ export const CacheView: React.FC = () => {
           <ToolbarContent>
             <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
               <Pagination
-                itemCount={filteredPackages.length}
+                itemCount={filteredGroups.length}
                 perPage={perPage}
                 page={page}
                 onSetPage={onSetPage}

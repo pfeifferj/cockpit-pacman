@@ -125,7 +125,7 @@ describe("CacheView", () => {
     });
 
     const linuxCells = screen.getAllByText("linux");
-    expect(linuxCells.length).toBe(2);
+    expect(linuxCells.length).toBe(1);
     expect(screen.getByText("6.7.0-arch1-1")).toBeInTheDocument();
     expect(screen.getByText("6.6.0-arch1-1")).toBeInTheDocument();
     expect(screen.getByText("2.39-1")).toBeInTheDocument();
@@ -138,8 +138,10 @@ describe("CacheView", () => {
       expect(screen.getByText("Package Cache")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("2")).toBeInTheDocument();
-    expect(screen.getByText("1")).toBeInTheDocument();
+    const uniqueLabel = screen.getByText("Unique Packages");
+    expect(uniqueLabel.parentElement?.querySelector("div")?.textContent).toBe("2");
+    const multiLabel = screen.getByText("Multi-Version");
+    expect(multiLabel.parentElement?.querySelector("div")?.textContent).toBe("1");
   });
 
   it("opens confirmation modal when clicking Clean Cache", async () => {

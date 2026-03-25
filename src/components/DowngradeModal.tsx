@@ -62,8 +62,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
     setError(null);
     try {
       const response = await listDowngrades(packageName);
-      const olderVersions = response.packages.filter((v) => v.is_older);
-      setVersions(olderVersions);
+      setVersions(response.packages);
       setState("select");
     } catch (ex) {
       setState("error");
@@ -141,7 +140,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
   };
 
   const getSortParams = (columnIndex: number): ThProps["sort"] | undefined => {
-    if (columnIndex !== 0 && columnIndex !== 1) return undefined;
+    if (columnIndex !== 0 && columnIndex !== 2) return undefined;
     return {
       sortBy: {
         index: activeSortIndex ?? undefined,
@@ -164,7 +163,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
         case 0:
           comparison = a.version.localeCompare(b.version);
           break;
-        case 1:
+        case 2:
           comparison = a.size - b.size;
           break;
         default:
@@ -193,10 +192,9 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
       case "select":
         if (versions.length === 0) {
           return (
-            <EmptyState headingLevel="h3" titleText="No older versions available">
+            <EmptyState headingLevel="h3" titleText="No cached versions available">
               <EmptyStateBody>
-                No older versions of {packageName} were found in the package cache.
-                Only versions older than {currentVersion} can be used for downgrade.
+                No other versions of {packageName} were found in the package cache.
               </EmptyStateBody>
             </EmptyState>
           );
@@ -211,57 +209,80 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
               <Thead>
                 <Tr>
                   <Th sort={getSortParams(0)}>Version</Th>
-                  <Th sort={getSortParams(1)}>Size</Th>
+                  <Th>Status</Th>
+                  <Th sort={getSortParams(2)}>Size</Th>
                   <Th>Action</Th>
                 </Tr>
               </Thead>
               <Tbody>
-                {sortedVersions.map((v) => (
-                  <Tr key={v.filename}>
-                    <Td dataLabel="Version">
-                      <code>{v.version}</code>
-                    </Td>
-                    <Td dataLabel="Size">{formatSize(v.size)}</Td>
-                    <Td dataLabel="Action">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        icon={<ArrowDownIcon />}
-                        onClick={() => handleSelectVersion(v)}
-                      >
-                        Downgrade
-                      </Button>
-                    </Td>
-                  </Tr>
-                ))}
+                {sortedVersions.map((v) => {
+                  const isCurrent = v.installed_version !== null && v.version === v.installed_version;
+                  const isNotInstalled = v.installed_version === null;
+                  return (
+                    <Tr key={v.filename}>
+                      <Td dataLabel="Version">
+                        <code>{v.version}</code>
+                      </Td>
+                      <Td dataLabel="Status">
+                        {isCurrent ? (
+                          <Label isCompact color="green">installed</Label>
+                        ) : isNotInstalled ? (
+                          <Label isCompact color="grey">cached</Label>
+                        ) : v.is_older ? (
+                          <Label isCompact color="orange">older</Label>
+                        ) : (
+                          <Label isCompact color="blue">newer</Label>
+                        )}
+                      </Td>
+                      <Td dataLabel="Size">{formatSize(v.size)}</Td>
+                      <Td dataLabel="Action">
+                        {!isCurrent && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon={<ArrowDownIcon />}
+                            onClick={() => handleSelectVersion(v)}
+                          >
+                            {isNotInstalled ? "Install" : v.is_older ? "Downgrade" : "Upgrade"}
+                          </Button>
+                        )}
+                      </Td>
+                    </Tr>
+                  );
+                })}
               </Tbody>
             </Table>
           </>
         );
 
-      case "confirm":
+      case "confirm": {
+        const isDowngrade = selectedVersion?.is_older ?? true;
+        const actionWord = isDowngrade ? "downgrade" : "upgrade";
         return (
           <Content>
             <Content component={ContentVariants.p}>
-              Are you sure you want to downgrade <strong>{packageName}</strong>?
+              Are you sure you want to {actionWord} <strong>{packageName}</strong>?
             </Content>
             <Content component={ContentVariants.p} className="pf-v6-u-mt-md">
               <Label isCompact variant="outline">{currentVersion}</Label>
               {" -> "}
-              <Label isCompact color="orange">{selectedVersion?.version}</Label>
+              <Label isCompact color={isDowngrade ? "orange" : "blue"}>{selectedVersion?.version}</Label>
             </Content>
             <Alert variant="warning" title="Warning" className="pf-v6-u-mt-md">
-              Downgrading packages may cause dependency issues or break functionality.
-              Only proceed if you know what you are doing.
+              {isDowngrade
+                ? "Downgrading packages may cause dependency issues or break functionality."
+                : "Installing a different cached version may cause dependency issues."}
+              {" "}Only proceed if you know what you are doing.
             </Alert>
           </Content>
         );
+      }
 
       case "downgrading":
         return (
           <>
             <div className="pf-v6-u-mb-md">
-              <Spinner size="md" /> Downgrading {packageName} to {selectedVersion?.version}...
+              <Spinner size="md" /> {selectedVersion?.is_older ? "Downgrading" : "Upgrading"} {packageName} to {selectedVersion?.version}...
             </div>
             <ExpandableSection
               toggleText={isDetailsExpanded ? "Hide details" : "Show details"}
@@ -277,14 +298,16 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
           </>
         );
 
-      case "success":
+      case "success": {
+        const doneWord = selectedVersion?.is_older ? "downgraded" : "upgraded";
         return (
-          <EmptyState headingLevel="h3" icon={CheckCircleIcon} titleText="Downgrade complete">
+          <EmptyState headingLevel="h3" icon={CheckCircleIcon} titleText="Version change complete">
             <EmptyStateBody>
-              {packageName} has been downgraded to {selectedVersion?.version}.
+              {packageName} has been {doneWord} to {selectedVersion?.version}.
             </EmptyStateBody>
           </EmptyState>
         );
+      }
 
       default:
         return null;
@@ -304,7 +327,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
         return (
           <>
             <Button variant="warning" onClick={handleConfirmDowngrade}>
-              Confirm Downgrade
+              {selectedVersion?.is_older ? "Confirm Downgrade" : "Confirm Upgrade"}
             </Button>
             <Button variant="link" onClick={() => setState("select")}>
               Back
