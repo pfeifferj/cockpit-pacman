@@ -135,4 +135,57 @@ describe("HistoryView", () => {
 
     expect(screen.getByPlaceholderText("Filter by package name...")).toBeInTheDocument();
   });
+
+  it("keeps search input mounted during refetch", async () => {
+    let resolveSecondCall: (value: api.GroupedLogResponse) => void;
+    mockGetGroupedHistory
+      .mockResolvedValueOnce(mockGroupedLogResponse)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSecondCall = resolve; }));
+
+    render(<HistoryView />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Package History")).toBeInTheDocument();
+    });
+
+    const searchInput = screen.getByPlaceholderText("Filter by package name...");
+    fireEvent.change(searchInput, { target: { value: "linux" } });
+
+    // Wait for debounce to trigger the second API call
+    await waitFor(() => {
+      expect(mockGetGroupedHistory).toHaveBeenCalledTimes(2);
+    });
+
+    // Search input must remain in the DOM during the refetch
+    expect(screen.getByPlaceholderText("Filter by package name...")).toBeInTheDocument();
+
+    // Resolve the pending fetch and verify the input is still there
+    resolveSecondCall!(mockGroupedLogResponse);
+    await waitFor(() => {
+      expect(screen.getByText("Package History")).toBeInTheDocument();
+    });
+    expect(screen.getByPlaceholderText("Filter by package name...")).toBeInTheDocument();
+  });
+
+  it("shows inline error when refetch fails after data loaded", async () => {
+    mockGetGroupedHistory
+      .mockResolvedValueOnce(mockGroupedLogResponse)
+      .mockRejectedValueOnce(new Error("Network error"));
+
+    render(<HistoryView />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Package History")).toBeInTheDocument();
+    });
+
+    const searchInput = screen.getByPlaceholderText("Filter by package name...");
+    fireEvent.change(searchInput, { target: { value: "badquery" } });
+
+    // Wait for the refetch error to appear inline (toolbar still mounted)
+    await waitFor(() => {
+      expect(screen.getByText(/Error loading history/i)).toBeInTheDocument();
+    });
+    expect(screen.getByPlaceholderText("Filter by package name...")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Retry/i })).toBeInTheDocument();
+  });
 });

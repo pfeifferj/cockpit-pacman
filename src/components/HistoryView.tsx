@@ -237,7 +237,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
     return labels;
   };
 
-  if (state === "loading") {
+  if (state === "loading" && !groupedData) {
     return (
       <Card>
         <CardBody>
@@ -249,7 +249,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
     );
   }
 
-  if (state === "error") {
+  if (state === "error" && !groupedData) {
     return (
       <Card>
         <CardBody>
@@ -266,7 +266,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
     );
   }
 
-  if (!groupedData?.groups.length && filter === "all" && !searchQuery) {
+  if (!groupedData?.groups.length && filter === "all" && !searchQuery && state !== "loading") {
     return (
       <Card>
         <CardBody>
@@ -384,7 +384,18 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
           </ToolbarContent>
         </Toolbar>
 
-        {!groupedData?.groups.length ? (
+        {state === "loading" ? (
+          <EmptyState headingLevel="h3" icon={Spinner} titleText="Loading history" />
+        ) : state === "error" ? (
+          <EmptyState headingLevel="h3" icon={ExclamationCircleIcon} titleText="Error loading history" status="danger">
+            <EmptyStateBody>{sanitizeErrorMessage(error)}</EmptyStateBody>
+            <EmptyStateFooter>
+              <EmptyStateActions>
+                <Button variant="primary" onClick={loadHistory}>Retry</Button>
+              </EmptyStateActions>
+            </EmptyStateFooter>
+          </EmptyState>
+        ) : !groupedData?.groups.length ? (
           <EmptyState headingLevel="h3" titleText="No matching entries">
             <EmptyStateBody>
               {searchQuery
