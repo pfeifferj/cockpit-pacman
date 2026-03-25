@@ -15,6 +15,16 @@ interface CockpitDBusClient {
   close(): void;
 }
 
+interface CockpitUserInfo {
+  id: number;
+  gid: number;
+  name: string;
+  full: string;
+  groups: string[];
+  home: string;
+  shell: string;
+}
+
 declare const cockpit: {
   spawn(
     args: string[],
@@ -26,9 +36,11 @@ declare const cockpit: {
   dbus(
     name: string,
     options?: {
-      bus?: "session" | "system";
+      bus?: "session" | "system" | "none";
+      address?: string;
       superuser?: "try" | "require";
     },
   ): CockpitDBusClient;
   variant(type: string, value: unknown): { t: string; v: unknown };
+  user(): Promise<CockpitUserInfo>;
 };

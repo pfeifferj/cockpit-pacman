@@ -10,7 +10,12 @@ const SESSION_IFACE = "org.freedesktop.Secret.Session";
 const LOOKUP_ATTRS = { service: "cockpit-pacman", type: "archweb" };
 
 export async function getCredentials(): Promise<KeyringCredentials> {
-  const client = cockpit.dbus(SERVICE_NAME, { bus: "session" });
+  const info = await cockpit.user();
+  const uid = info.id;
+  const client = cockpit.dbus(SERVICE_NAME, {
+    bus: "none",
+    address: `unix:path=/run/user/${uid}/bus`,
+  });
   try {
     const [, sessionPath] = (await client.call(
       SERVICE_PATH,
