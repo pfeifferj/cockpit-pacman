@@ -11,7 +11,7 @@ use crate::alpm::get_handle;
 use crate::models::{CachedVersion, DowngradeResponse, StreamEvent};
 use crate::util::{
     DEFAULT_MUTATION_TIMEOUT_SECS, emit_event, emit_json, get_cache_dir, is_cancelled,
-    iter_cache_packages, parse_package_filename, setup_signal_handler,
+    load_cache_packages, parse_package_filename, setup_signal_handler,
 };
 use crate::validation::{validate_package_name, validate_version};
 
@@ -30,7 +30,7 @@ pub fn list_downgrades(package_name: Option<&str>) -> Result<()> {
 
     let mut packages: Vec<CachedVersion> = Vec::new();
 
-    for (entry, filename, name, version) in iter_cache_packages(cache_path) {
+    for (entry, filename, name, version) in load_cache_packages(&alpm, cache_path) {
         if let Some(filter_name) = package_name
             && name != filter_name
         {

@@ -136,33 +136,50 @@ pub fn get_cache_dir() -> String {
     "/var/cache/pacman/pkg".to_string()
 }
 
-/// Iterate over package files in the pacman cache directory.
-/// Yields (DirEntry, filename, parsed_name, parsed_version) for each valid package file.
-pub fn iter_cache_packages(
+/// Load package metadata from cached .pkg.tar files using alpm.
+/// Skips files that fail to load (corrupted or partial downloads).
+pub fn load_cache_packages(
+    handle: &alpm::Alpm,
     cache_path: &std::path::Path,
-) -> impl Iterator<Item = (std::fs::DirEntry, String, String, String)> {
-    std::fs::read_dir(cache_path)
-        .ok()
-        .into_iter()
-        .flatten()
+) -> Vec<(std::fs::DirEntry, String, String, String)> {
+    let entries = match std::fs::read_dir(cache_path) {
+        Ok(rd) => rd,
+        Err(_) => return Vec::new(),
+    };
+
+    entries
         .filter_map(|entry_result| {
             let entry = entry_result.ok()?;
             let path = entry.path();
-            let ext = path.extension()?;
-            if ext != "zst" && ext != "xz" && ext != "gz" {
+            let filename = path.file_name()?.to_string_lossy().to_string();
+            if !filename.ends_with(".pkg.tar.zst")
+                && !filename.ends_with(".pkg.tar.xz")
+                && !filename.ends_with(".pkg.tar.gz")
+            {
                 return None;
             }
-            let filename = path.file_name()?.to_string_lossy().to_string();
-            let (name, version) = parse_package_filename(&filename)?;
-            Some((entry, filename, name, version))
+
+            let pkg = match handle.pkg_load(path.to_str()?, false, alpm::SigLevel::NONE) {
+                Ok(pkg) => pkg,
+                Err(e) => {
+                    eprintln!("Warning: skipping {}: {}", filename, e);
+                    return None;
+                }
+            };
+
+            Some((
+                entry,
+                filename,
+                pkg.name().to_string(),
+                pkg.version().to_string(),
+            ))
         })
+        .collect()
 }
 
 /// Parse a pacman package filename into (name, version).
-/// Handles .pkg.tar.zst, .pkg.tar.xz, and .pkg.tar.gz extensions.
-/// Pacman filename format: {pkgname}-{pkgver}-{pkgrel}-{arch}.pkg.tar.{ext}
-/// Returns None if the filename cannot be parsed.
-pub fn parse_package_filename(filename: &str) -> Option<(String, String)> {
+/// Used by find_package_file to locate a specific cached package.
+pub(crate) fn parse_package_filename(filename: &str) -> Option<(String, String)> {
     let base = filename
         .strip_suffix(".pkg.tar.zst")
         .or_else(|| filename.strip_suffix(".pkg.tar.xz"))

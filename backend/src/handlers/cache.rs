@@ -2,10 +2,12 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
 
+use crate::alpm::get_handle;
 use crate::models::{CacheInfo, CachePackage, StreamEvent};
-use crate::util::{emit_event, emit_json, get_cache_dir, iter_cache_packages};
+use crate::util::{emit_event, emit_json, get_cache_dir, load_cache_packages};
 
 pub fn get_cache_info() -> Result<()> {
+    let handle = get_handle()?;
     let cache_dir = get_cache_dir();
     let cache_path = Path::new(&cache_dir);
 
@@ -22,7 +24,7 @@ pub fn get_cache_info() -> Result<()> {
     let mut packages: Vec<CachePackage> = Vec::new();
     let mut total_size: i64 = 0;
 
-    for (entry, filename, name, version) in iter_cache_packages(cache_path) {
+    for (entry, filename, name, version) in load_cache_packages(&handle, cache_path) {
         if let Ok(metadata) = entry.metadata() {
             let size = metadata.len() as i64;
             total_size += size;
