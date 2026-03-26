@@ -1,8 +1,10 @@
 # Changelog
 
-## [0.3.4] - 2026-03-25
+## [0.3.4] - 2026-03-26
 
 ### Added
+- Contextual popover explainers and clickable license links (afd4de7)
+- Cache table grouped by package name with version pills (bae0156)
 - ArchWeb package signoff support with sign and revoke actions (58ae312)
 - Pagination in the signoffs table (bac7d05)
 - Update frequency and packaging metadata in package details modal (e4b0e09)
