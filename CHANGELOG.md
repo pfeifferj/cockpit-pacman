@@ -10,7 +10,7 @@
 - Update frequency and packaging metadata in package details modal (e4b0e09)
 - View history button in package details modal (aade846)
 - Package install from the details modal (b89a33f)
-- Arch Security Tracker integration with severity badges and vulnerable package count (b24ffe9)
+- Arch Security Tracker integration with severity badges and vulnerable package count (cc30314)
 
 ### Fixed
 - History search input losing focus during background refetch (bdebb0c)

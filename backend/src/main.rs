@@ -66,8 +66,9 @@ fn print_usage() {
     eprintln!("  add-ignored NAME       Add a package to the ignored list (requires root)");
     eprintln!("  remove-ignored NAME    Remove a package from the ignored list (requires root)");
     eprintln!("  cache-info             Show package cache information and size");
-    eprintln!("  clean-cache [KEEP]     Clean package cache (requires root)");
+    eprintln!("  clean-cache [KEEP] [PKGS]  Clean package cache (requires root)");
     eprintln!("                         KEEP: number of versions to keep (default: 3)");
+    eprintln!("                         PKGS: comma-separated package names to clean");
     eprintln!("  history [offset] [limit] [filter] [search]");
     eprintln!("                         View package history from pacman.log");
     eprintln!("                         filter: all|upgraded|installed|removed");
@@ -260,7 +261,23 @@ fn main() {
         "cache-info" => get_cache_info(),
         "clean-cache" => {
             let keep_versions = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(3);
-            validate_keep_versions(keep_versions).and_then(|_| clean_cache(keep_versions))
+            let filter_pkgs: Vec<String> = args
+                .get(3)
+                .filter(|s| !s.is_empty())
+                .map(|s| {
+                    s.split(',')
+                        .map(|p| p.trim().to_string())
+                        .filter(|p| !p.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            validate_keep_versions(keep_versions)
+                .and_then(|_| {
+                    filter_pkgs
+                        .iter()
+                        .try_for_each(|p| validate_package_name(p))
+                })
+                .and_then(|_| clean_cache(keep_versions, &filter_pkgs))
         }
         "history" => {
             let offset = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);

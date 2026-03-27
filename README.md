@@ -4,6 +4,8 @@
 
 A Cockpit plugin for Arch Linux package management using direct alpm.rs integration.
 
+Mirror: https://gitlab.archlinux.org/pfeifferj/cockpit-pacman
+
 ## Features
 
 ![Check for and apply system updates](docs/img/updates.png)
@@ -44,14 +46,6 @@ Test and configure pacman mirrors
 ```bash
 sudo pacman -S cockpit
 sudo systemctl enable --now cockpit.socket
-```
-
-### Optional dependencies
-
-The plugin is self-contained for most functionality. Cache cleanup requires `paccache` from `pacman-contrib`:
-
-```bash
-sudo pacman -S pacman-contrib
 ```
 
 ## Installation
