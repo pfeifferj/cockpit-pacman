@@ -3,6 +3,8 @@ use chrono::NaiveDateTime;
 use pacman_log::{Action, LogReader};
 use std::collections::HashSet;
 
+use alpm_utils::find_unneeded_classified;
+
 use crate::alpm::{find_available_updates, get_handle, reason_to_string};
 use crate::db::{find_package_repo, get_repo_map};
 use crate::models::{
@@ -420,24 +422,18 @@ pub fn sync_package_info(name: &str, repo: Option<&str>) -> Result<()> {
 
 pub fn list_orphans() -> Result<()> {
     let handle = get_handle()?;
-    let localdb = handle.localdb();
     let repo_map = get_repo_map(&handle);
 
-    let orphans: Vec<OrphanPackage> = localdb
-        .pkgs()
-        .iter()
-        .filter(|pkg| {
-            pkg.reason() == alpm::PackageReason::Depend
-                && pkg.required_by().is_empty()
-                && pkg.optional_for().is_empty()
-        })
-        .map(|pkg| OrphanPackage {
-            name: pkg.name().to_string(),
-            version: pkg.version().to_string(),
-            description: pkg.desc().map(|s| s.to_string()),
-            installed_size: pkg.isize(),
-            install_date: pkg.install_date(),
-            repository: repo_map.get(pkg.name()).map(|s| s.to_string()),
+    let orphans: Vec<OrphanPackage> = find_unneeded_classified(&handle, true)
+        .into_iter()
+        .map(|u| OrphanPackage {
+            name: u.pkg.name().to_string(),
+            version: u.pkg.version().to_string(),
+            description: u.pkg.desc().map(|s| s.to_string()),
+            installed_size: u.pkg.isize(),
+            install_date: u.pkg.install_date(),
+            repository: repo_map.get(u.pkg.name()).map(|s| s.to_string()),
+            direct: u.direct,
         })
         .collect();
 

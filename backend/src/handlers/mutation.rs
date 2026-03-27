@@ -1,4 +1,5 @@
 use alpm::{AnyEvent, AnyQuestion, Event, PackageOperation, Progress, Question, TransFlag};
+use alpm_utils::{find_unneeded, removal_closure};
 use anyhow::Result;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -399,22 +400,21 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
     Ok(())
 }
 
-pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
+pub fn remove_orphans(filter_pkgs: &[String], timeout_secs: Option<u64>) -> Result<()> {
     setup_signal_handler();
     let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
 
     let mut handle = get_handle()?;
 
-    let orphan_names: Vec<String> = {
-        let localdb = handle.localdb();
-        localdb
-            .pkgs()
-            .iter()
-            .filter(|pkg| {
-                pkg.reason() == alpm::PackageReason::Depend
-                    && pkg.required_by().is_empty()
-                    && pkg.optional_for().is_empty()
-            })
+    let orphan_names: Vec<String> = if filter_pkgs.is_empty() {
+        find_unneeded(&handle, true)
+            .into_iter()
+            .map(|pkg| pkg.name().to_string())
+            .collect()
+    } else {
+        let targets: Vec<&str> = filter_pkgs.iter().map(|s| s.as_str()).collect();
+        removal_closure(&handle, &targets, true)
+            .into_iter()
             .map(|pkg| pkg.name().to_string())
             .collect()
     };
@@ -475,8 +475,13 @@ pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
 
     check_cancel_early!(&timeout);
 
+    let flags = if filter_pkgs.is_empty() {
+        TransFlag::RECURSE
+    } else {
+        TransFlag::NONE
+    };
     handle
-        .trans_init(TransFlag::RECURSE)
+        .trans_init(flags)
         .map_err(|e| anyhow::anyhow!("Failed to initialize transaction: {}", e))?;
 
     for name in &orphan_names {

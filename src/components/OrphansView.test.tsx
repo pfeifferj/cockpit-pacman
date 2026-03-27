@@ -24,6 +24,7 @@ const mockOrphanResponse: api.OrphanResponse = {
       installed_size: 5000000,
       install_date: 1704067200,
       repository: "extra",
+      direct: true,
     },
     {
       name: "old-dep",
@@ -32,6 +33,7 @@ const mockOrphanResponse: api.OrphanResponse = {
       installed_size: 12000000,
       install_date: 1700000000,
       repository: "core",
+      direct: false,
     },
   ],
   total_size: 17000000,
