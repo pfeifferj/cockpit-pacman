@@ -1,6 +1,7 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
+use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 use crate::alpm::get_handle;
 use crate::models::{CacheInfo, CachePackage, StreamEvent};
@@ -53,44 +54,104 @@ pub fn get_cache_info() -> Result<()> {
     emit_json(&info)
 }
 
-pub fn clean_cache(keep_versions: u32) -> Result<()> {
+pub fn clean_cache(keep_versions: u32, filter_pkgs: &[String]) -> Result<()> {
+    let handle = get_handle()?;
+    let cache_dir = get_cache_dir();
+    let cache_path = Path::new(&cache_dir);
+
     emit_event(&StreamEvent::Event {
         event: "Starting cache cleanup".to_string(),
         package: None,
     });
 
-    let keep_arg = format!("-k{}", keep_versions);
-    let output = Command::new("paccache")
-        .args(["-r", &keep_arg, "-v"])
-        .output()
-        .context("Failed to run paccache")?;
+    if !cache_path.exists() {
+        emit_event(&StreamEvent::Complete {
+            success: true,
+            message: Some("Cache directory does not exist".to_string()),
+        });
+        return Ok(());
+    }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let filter: HashSet<&str> = filter_pkgs.iter().map(|s| s.as_str()).collect();
 
-    for line in stdout.lines().chain(stderr.lines()) {
-        if !line.trim().is_empty() {
-            emit_event(&StreamEvent::Log {
-                level: "info".to_string(),
-                message: line.to_string(),
-            });
+    let mut groups: HashMap<String, Vec<(fs::DirEntry, String, String)>> = HashMap::new();
+    for (entry, filename, name, version) in load_cache_packages(&handle, cache_path) {
+        if !filter.is_empty() && !filter.contains(name.as_str()) {
+            continue;
+        }
+        groups
+            .entry(name)
+            .or_default()
+            .push((entry, filename, version));
+    }
+
+    let mut removed_count: u32 = 0;
+    let mut freed_bytes: u64 = 0;
+    let keep = keep_versions as usize;
+
+    for versions in groups.values_mut() {
+        versions.sort_by(|a, b| alpm::vercmp(b.2.as_str(), a.2.as_str()));
+
+        for (entry, filename, _) in versions.iter().skip(keep) {
+            let path = entry.path();
+            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+
+            match fs::remove_file(&path) {
+                Ok(()) => {
+                    removed_count += 1;
+                    freed_bytes += size;
+                    emit_event(&StreamEvent::Log {
+                        level: "info".to_string(),
+                        message: format!("Removed {}", filename),
+                    });
+
+                    let sig_path = path.with_file_name(format!("{}.sig", filename));
+                    if sig_path.exists()
+                        && let Err(e) = fs::remove_file(&sig_path)
+                    {
+                        emit_event(&StreamEvent::Log {
+                            level: "warning".to_string(),
+                            message: format!("Failed to remove {}.sig: {}", filename, e),
+                        });
+                    }
+                }
+                Err(e) => {
+                    emit_event(&StreamEvent::Log {
+                        level: "warning".to_string(),
+                        message: format!("Failed to remove {}: {}", filename, e),
+                    });
+                }
+            }
         }
     }
 
-    if output.status.success() {
-        emit_event(&StreamEvent::Complete {
-            success: true,
-            message: Some("Cache cleanup completed".to_string()),
-        });
+    let message = if removed_count == 0 {
+        "No packages to remove".to_string()
     } else {
-        emit_event(&StreamEvent::Complete {
-            success: false,
-            message: Some(format!(
-                "paccache failed with exit code {}",
-                output.status.code().unwrap_or(-1)
-            )),
-        });
-    }
+        format!(
+            "Removed {} package{}, freed {}",
+            removed_count,
+            if removed_count == 1 { "" } else { "s" },
+            format_bytes(freed_bytes)
+        )
+    };
+
+    emit_event(&StreamEvent::Complete {
+        success: true,
+        message: Some(message),
+    });
 
     Ok(())
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB"];
+    let mut size = bytes as f64;
+    for unit in UNITS {
+        if size < 1024.0 {
+            return format!("{:.2} {}", size, unit);
+        }
+        size /= 1024.0;
+    }
+    format!("{:.2} TiB", size)
 }

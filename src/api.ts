@@ -725,8 +725,9 @@ export async function getCacheInfo(): Promise<CacheInfo> {
   return runBackend<CacheInfo>("cache-info");
 }
 
-export function cleanCache(callbacks: UpgradeCallbacks, keepVersions: number = 3): { cancel: () => void } {
-  return runStreamingBackend("clean-cache", [String(keepVersions)], callbacks);
+export function cleanCache(callbacks: UpgradeCallbacks, keepVersions: number = 3, packages?: string[]): { cancel: () => void } {
+  const pkgArg = packages && packages.length > 0 ? packages.map(pkg => sanitizeSearchInput(pkg)).join(",") : "";
+  return runStreamingBackend("clean-cache", [String(keepVersions), pkgArg], callbacks);
 }
 
 export interface LogEntry {
