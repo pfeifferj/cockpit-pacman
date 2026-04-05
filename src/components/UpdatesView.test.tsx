@@ -27,6 +27,8 @@ vi.mock("../api", async () => {
     getCacheInfo: vi.fn(),
     getKeyringStatus: vi.fn(),
     fetchNews: vi.fn(),
+    checkLock: vi.fn(),
+    removeStaleLock: vi.fn(),
   };
 });
 
@@ -41,6 +43,8 @@ const mockListOrphans = vi.mocked(api.listOrphans);
 const mockGetCacheInfo = vi.mocked(api.getCacheInfo);
 const mockGetKeyringStatus = vi.mocked(api.getKeyringStatus);
 const mockFetchNews = vi.mocked(api.fetchNews);
+const mockCheckLock = vi.mocked(api.checkLock);
+const mockRemoveStaleLock = vi.mocked(api.removeStaleLock);
 
 describe("UpdatesView", () => {
   beforeEach(() => {
@@ -72,6 +76,8 @@ describe("UpdatesView", () => {
       warnings: [],
     });
     mockFetchNews.mockResolvedValue(mockNewsResponseEmpty);
+    mockCheckLock.mockResolvedValue({ locked: true, stale: true, lock_path: "/var/lib/pacman/db.lck" });
+    mockRemoveStaleLock.mockResolvedValue({ removed: true });
     mockRunUpgrade.mockReturnValue({ cancel: vi.fn() });
     mockSyncDatabase.mockImplementation((callbacks) => {
       setTimeout(() => callbacks.onComplete(), 0);
@@ -493,14 +499,59 @@ describe("UpdatesView", () => {
       });
     });
 
-    it("displays lock error with special message", async () => {
+    it("displays lock error with stale lock recovery", async () => {
       mockCheckUpdates.mockRejectedValue(new Error("Unable to lock database"));
       render(<UpdatesView />);
 
       await waitFor(() => {
         expect(screen.getByText("Database is locked")).toBeInTheDocument();
       });
-      expect(screen.getByText(/Another package manager operation/)).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText(/stale lock file/)).toBeInTheDocument();
+      });
+      expect(screen.getByRole("button", { name: /Remove stale lock/ })).toBeInTheDocument();
+    });
+
+    it("displays lock error for transaction init failure", async () => {
+      mockCheckUpdates.mockRejectedValue(new Error("Failed to initialize transaction: unable to lock database"));
+      render(<UpdatesView />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Database is locked")).toBeInTheDocument();
+      });
+    });
+
+    it("shows active process when lock is not stale", async () => {
+      mockCheckUpdates.mockRejectedValue(new Error("Unable to lock database"));
+      mockCheckLock.mockResolvedValue({
+        locked: true,
+        stale: false,
+        lock_path: "/var/lib/pacman/db.lck",
+        blocking_process: "pacman (pid 1234)",
+      });
+      render(<UpdatesView />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Database is locked")).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/pacman \(pid 1234\)/)).toBeInTheDocument();
+      });
+    });
+
+    it("auto-retries when lock is already cleared", async () => {
+      mockCheckUpdates.mockRejectedValueOnce(new Error("Unable to lock database"));
+      mockCheckUpdates.mockResolvedValueOnce(mockUpdatesResponse);
+      mockCheckLock.mockResolvedValue({
+        locked: false,
+        stale: false,
+        lock_path: "/var/lib/pacman/db.lck",
+      });
+      render(<UpdatesView />);
+
+      await waitFor(() => {
+        expect(mockCheckUpdates).toHaveBeenCalledTimes(2);
+      });
     });
 
     it("shows retry button on error", async () => {

@@ -318,6 +318,26 @@ export async function checkUpdates(): Promise<UpdatesResponse> {
   return runBackend<UpdatesResponse>("check-updates");
 }
 
+export interface LockStatus {
+  locked: boolean;
+  stale: boolean;
+  lock_path: string;
+  blocking_process?: string;
+}
+
+export interface LockRemoveResult {
+  removed: boolean;
+  error?: string;
+}
+
+export async function checkLock(): Promise<LockStatus> {
+  return runBackend<LockStatus>("check-lock");
+}
+
+export async function removeStaleLock(): Promise<LockRemoveResult> {
+  return runBackend<LockRemoveResult>("remove-stale-lock", [], { superuser: "require" });
+}
+
 export interface PackageSecurityAdvisory {
   package: string;
   severity: string;

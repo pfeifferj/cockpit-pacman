@@ -77,7 +77,7 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
         Ok(tx) => tx,
         Err(e) => {
             let response = PreflightResponse {
-                error: Some(format!("{}", e)),
+                error: Some(format!("{:#}", e)),
                 ..Default::default()
             };
             return emit_json(&response);

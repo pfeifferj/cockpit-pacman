@@ -79,6 +79,8 @@ import {
   getKeyringStatus,
   fetchNews,
   getSignoffList,
+  checkLock,
+  removeStaleLock,
 } from "../api";
 import type { KeyringCredentials } from "../api";
 
@@ -220,6 +222,74 @@ interface UpdatesViewProps {
   onViewSignoffs?: () => void;
   signoffCredentials?: KeyringCredentials | null;
 }
+
+const LockErrorBody: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
+  const [checking, setChecking] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [lockInfo, setLockInfo] = useState<{ stale: boolean; process?: string } | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setChecking(true);
+    checkLock()
+      .then((status) => {
+        if (!status.locked) {
+          onRetry();
+          return;
+        }
+        setLockInfo({ stale: status.stale, process: status.blocking_process });
+      })
+      .catch(() => setLockInfo(null))
+      .finally(() => setChecking(false));
+  }, [onRetry]);
+
+  const handleRemoveLock = async () => {
+    setRemoving(true);
+    setRemoveError(null);
+    try {
+      const result = await removeStaleLock();
+      if (result.removed) {
+        onRetry();
+      } else {
+        setRemoveError(result.error || "Failed to remove lock");
+      }
+    } catch (ex) {
+      setRemoveError(ex instanceof Error ? ex.message : String(ex));
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  if (checking) {
+    return <Content component={ContentVariants.p}>Checking lock status...</Content>;
+  }
+
+  if (lockInfo?.stale === false && lockInfo.process) {
+    return (
+      <Content component={ContentVariants.p}>
+        The database is locked by <strong>{lockInfo.process}</strong>. Wait for it to finish, then retry.
+      </Content>
+    );
+  }
+
+  return (
+    <>
+      <Content component={ContentVariants.p}>
+        A stale lock file is blocking database access. No package manager process is running.
+      </Content>
+      {removeError && (
+        <Content component={ContentVariants.p} className="pf-v6-u-mt-sm pf-v6-u-danger-color-100">
+          {removeError}
+        </Content>
+      )}
+      <Content component={ContentVariants.p} className="pf-v6-u-mt-sm">
+        <Button variant="primary" onClick={handleRemoveLock} isLoading={removing} isDisabled={removing}>
+          Remove stale lock and retry
+        </Button>
+      </Content>
+    </>
+  );
+};
 
 export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, onViewHistory, onViewOrphans, onViewCache, onViewKeyring, onViewSignoffs, signoffCredentials }) => {
   const [state, setState] = useState<ViewState>("loading");
@@ -778,7 +848,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
   }
 
   if (state === "error") {
-    const isLockError = error?.toLowerCase().includes("unable to lock database");
+    const isLockError = error ? /unable to lock database|failed to initialize transaction/i.test(error) : false;
     const isNetworkError = error ? /failed to retrieve|unable to connect|could not resolve|timed\s+out|timeout|dns|connection refused/i.test(error) : false;
     return (
       <Card>
@@ -791,7 +861,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
           >
             <EmptyStateBody>
               {isLockError
-                ? "Another package manager operation is in progress. This could be a system upgrade, package installation, or database sync. Please wait for it to complete before checking for updates."
+                ? <LockErrorBody onRetry={loadUpdates} />
                 : error}
               {isNetworkError && !isLockError && (
                 <Content component={ContentVariants.p} className="pf-v6-u-mt-sm">

@@ -347,7 +347,7 @@ pub fn scheduled_run() -> Result<()> {
                 success: false,
                 packages_checked,
                 packages_upgraded: 0,
-                error: Some(format!("Failed to initialize transaction: {}", e)),
+                error: Some(format!("{:#}", e)),
                 details,
             };
             log_run(&entry)?;
