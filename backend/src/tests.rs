@@ -1,6 +1,6 @@
 use crate::models::{
-    NewsItem, NewsResponse, Package, PackageDetails, PackageListResponse, SearchResult, UpdateInfo,
-    UpdatesResponse,
+    MirrorBackup, MirrorBackupListResponse, NewsItem, NewsResponse, Package, PackageDetails,
+    PackageListResponse, RestoreMirrorBackupResponse, SearchResult, UpdateInfo, UpdatesResponse,
 };
 use crate::util::parse_package_filename;
 use crate::validation::{
@@ -1002,4 +1002,84 @@ mod integration {
         );
         assert!(pkg.isize() >= 0, "Package size should be non-negative");
     }
+}
+
+// --- Mirror backup serialization tests ---
+
+#[test]
+fn test_mirror_backup_serialization() {
+    let backup = MirrorBackup {
+        timestamp: 1704067200,
+        date: "2024-01-01 00:00:00 UTC".to_string(),
+        enabled_count: 3,
+        total_count: 10,
+        size: 2048,
+    };
+
+    let json = serde_json::to_string(&backup).unwrap();
+    assert!(json.contains("\"timestamp\":1704067200"));
+    assert!(json.contains("\"date\":\"2024-01-01 00:00:00 UTC\""));
+    assert!(json.contains("\"enabled_count\":3"));
+    assert!(json.contains("\"total_count\":10"));
+    assert!(json.contains("\"size\":2048"));
+}
+
+#[test]
+fn test_mirror_backup_list_response_serialization() {
+    let response = MirrorBackupListResponse {
+        backups: vec![
+            MirrorBackup {
+                timestamp: 1704067200,
+                date: "2024-01-01 00:00:00 UTC".to_string(),
+                enabled_count: 3,
+                total_count: 10,
+                size: 2048,
+            },
+            MirrorBackup {
+                timestamp: 1704060000,
+                date: "2023-12-31 22:00:00 UTC".to_string(),
+                enabled_count: 5,
+                total_count: 8,
+                size: 1024,
+            },
+        ],
+    };
+
+    let json = serde_json::to_string(&response).unwrap();
+    assert!(json.contains("\"backups\":["));
+    assert!(json.contains("1704067200"));
+    assert!(json.contains("1704060000"));
+}
+
+#[test]
+fn test_mirror_backup_list_response_empty() {
+    let response = MirrorBackupListResponse { backups: vec![] };
+    let json = serde_json::to_string(&response).unwrap();
+    assert_eq!(json, "{\"backups\":[]}");
+}
+
+#[test]
+fn test_restore_mirror_backup_response_serialization() {
+    let response = RestoreMirrorBackupResponse {
+        success: true,
+        backup_path: Some("/etc/pacman.d/mirrorlist.backup.1704067200".to_string()),
+        message: "Restored mirrorlist from backup".to_string(),
+    };
+
+    let json = serde_json::to_string(&response).unwrap();
+    assert!(json.contains("\"success\":true"));
+    assert!(json.contains("\"backup_path\":\"/etc/pacman.d/mirrorlist.backup.1704067200\""));
+    assert!(json.contains("\"message\":\"Restored mirrorlist from backup\""));
+}
+
+#[test]
+fn test_restore_mirror_backup_response_no_backup_path() {
+    let response = RestoreMirrorBackupResponse {
+        success: true,
+        backup_path: None,
+        message: "Restored mirrorlist".to_string(),
+    };
+
+    let json = serde_json::to_string(&response).unwrap();
+    assert!(json.contains("\"backup_path\":null"));
 }

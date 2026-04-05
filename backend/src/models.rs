@@ -432,6 +432,27 @@ pub struct RefreshMirrorsResponse {
     pub last_check: Option<String>,
 }
 
+#[derive(Serialize)]
+pub struct MirrorBackup {
+    pub timestamp: i64,
+    pub date: String,
+    pub enabled_count: usize,
+    pub total_count: usize,
+    pub size: u64,
+}
+
+#[derive(Serialize)]
+pub struct MirrorBackupListResponse {
+    pub backups: Vec<MirrorBackup>,
+}
+
+#[derive(Serialize)]
+pub struct RestoreMirrorBackupResponse {
+    pub success: bool,
+    pub backup_path: Option<String>,
+    pub message: String,
+}
+
 #[derive(Serialize, Clone)]
 pub struct DependencyNode {
     pub id: String,

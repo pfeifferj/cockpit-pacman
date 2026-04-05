@@ -7,8 +7,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::check_cancel_early;
 use crate::models::{
-    MirrorEntry, MirrorListResponse, MirrorStatus, MirrorStatusResponse, MirrorTestResult,
-    RefreshMirrorsResponse, SaveMirrorlistResponse, StreamEvent,
+    MirrorBackup, MirrorBackupListResponse, MirrorEntry, MirrorListResponse, MirrorStatus,
+    MirrorStatusResponse, MirrorTestResult, RefreshMirrorsResponse, RestoreMirrorBackupResponse,
+    SaveMirrorlistResponse, StreamEvent,
 };
 use crate::util::{TimeoutGuard, emit_event, emit_json, setup_signal_handler};
 use crate::validation::validate_mirror_url;
@@ -397,6 +398,130 @@ pub fn save_mirrorlist(mirrors: &[MirrorEntry]) -> Result<()> {
     };
 
     emit_json(&response)
+}
+
+fn count_mirrors_in_file(path: &Path) -> Result<(usize, usize)> {
+    let file = fs::File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut enabled = 0usize;
+    let mut total = 0usize;
+
+    for line in reader.lines() {
+        let line = line?;
+        let trimmed = line.trim();
+
+        if trimmed.starts_with('#') {
+            let content = trimmed.trim_start_matches('#').trim();
+            if content.starts_with("Server") && parse_server_line(content).is_some() {
+                total += 1;
+            }
+            continue;
+        }
+
+        if trimmed.starts_with("Server") && parse_server_line(trimmed).is_some() {
+            enabled += 1;
+            total += 1;
+        }
+    }
+
+    Ok((enabled, total))
+}
+
+pub fn list_mirror_backups() -> Result<()> {
+    let parent = Path::new("/etc/pacman.d");
+    let mut backups: Vec<MirrorBackup> = Vec::new();
+
+    for entry in fs::read_dir(parent)? {
+        let entry = entry?;
+        let name = match entry.file_name().into_string() {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+
+        let timestamp_str = match name.strip_prefix("mirrorlist.backup.") {
+            Some(s) => s,
+            None => continue,
+        };
+
+        let timestamp: i64 = match timestamp_str.parse() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+
+        let metadata = entry.metadata()?;
+        let size = metadata.len();
+
+        let (enabled_count, total_count) = count_mirrors_in_file(&entry.path()).unwrap_or((0, 0));
+
+        let date = chrono::DateTime::from_timestamp(timestamp, 0)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        backups.push(MirrorBackup {
+            timestamp,
+            date,
+            enabled_count,
+            total_count,
+            size,
+        });
+    }
+
+    backups.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+    emit_json(&MirrorBackupListResponse { backups })
+}
+
+pub fn restore_mirror_backup(timestamp: i64) -> Result<()> {
+    let backup_path = format!("{}{}", BACKUP_PREFIX, timestamp);
+    let backup = Path::new(&backup_path);
+
+    if !backup.exists() {
+        anyhow::bail!("Backup not found: {}", backup_path);
+    }
+
+    let mirrorlist = Path::new(MIRRORLIST_PATH);
+
+    // Create a backup of the current mirrorlist before restoring
+    let pre_restore_backup = if mirrorlist.exists() {
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let path = format!("{}{}", BACKUP_PREFIX, ts);
+        fs::copy(mirrorlist, &path)?;
+        Some(path)
+    } else {
+        None
+    };
+
+    fs::copy(backup, mirrorlist)?;
+
+    cleanup_old_backups()?;
+
+    let response = RestoreMirrorBackupResponse {
+        success: true,
+        backup_path: pre_restore_backup,
+        message: format!("Restored mirrorlist from backup {}", backup_path),
+    };
+
+    emit_json(&response)
+}
+
+pub fn delete_mirror_backup(timestamp: i64) -> Result<()> {
+    let backup_path = format!("{}{}", BACKUP_PREFIX, timestamp);
+    let backup = Path::new(&backup_path);
+
+    if !backup.exists() {
+        anyhow::bail!("Backup not found: {}", backup_path);
+    }
+
+    fs::remove_file(backup)?;
+
+    emit_json(&RestoreMirrorBackupResponse {
+        success: true,
+        backup_path: None,
+        message: format!("Deleted backup {}", backup_path),
+    })
 }
 
 fn cleanup_old_backups() -> Result<()> {

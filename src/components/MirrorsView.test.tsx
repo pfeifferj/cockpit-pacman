@@ -11,12 +11,16 @@ vi.mock("../api", async () => {
     fetchMirrorStatus: vi.fn(),
     testMirrors: vi.fn(),
     saveMirrorlist: vi.fn(),
+    listMirrorBackups: vi.fn(),
+    restoreMirrorBackup: vi.fn(),
   };
 });
 
 const mockListMirrors = vi.mocked(api.listMirrors);
 const mockFetchMirrorStatus = vi.mocked(api.fetchMirrorStatus);
 const mockSaveMirrorlist = vi.mocked(api.saveMirrorlist);
+const mockListMirrorBackups = vi.mocked(api.listMirrorBackups);
+const mockRestoreMirrorBackup = vi.mocked(api.restoreMirrorBackup);
 
 const mockMirrorResponse: api.MirrorListResponse = {
   mirrors: [
@@ -241,5 +245,158 @@ describe("MirrorsView", () => {
     expect(moveUpButtons[0]).toBeDisabled();
     // Last mirror's move down should be disabled
     expect(moveDownButtons[moveDownButtons.length - 1]).toBeDisabled();
+  });
+
+  it("shows backup history section", async () => {
+    render(<MirrorsView />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/mirror1\.example\.com/)).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Backup history")).toBeInTheDocument();
+  });
+
+  it("loads backups when expanding backup history", async () => {
+    mockListMirrorBackups.mockResolvedValue({
+      backups: [
+        {
+          timestamp: 1704067200,
+          date: "2024-01-01 00:00:00 UTC",
+          enabled_count: 3,
+          total_count: 10,
+          size: 2048,
+        },
+      ],
+    });
+
+    render(<MirrorsView />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/mirror1\.example\.com/)).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Backup history"));
+    });
+
+    await waitFor(() => {
+      expect(mockListMirrorBackups).toHaveBeenCalled();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("2024-01-01 00:00:00 UTC")).toBeInTheDocument();
+      expect(screen.getByText("3 enabled / 10 total")).toBeInTheDocument();
+    });
+  });
+
+  it("shows empty state when no backups exist", async () => {
+    mockListMirrorBackups.mockResolvedValue({ backups: [] });
+
+    render(<MirrorsView />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/mirror1\.example\.com/)).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Backup history"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/No backups found/)).toBeInTheDocument();
+    });
+  });
+
+  it("shows restore confirmation modal", async () => {
+    mockListMirrorBackups.mockResolvedValue({
+      backups: [
+        {
+          timestamp: 1704067200,
+          date: "2024-01-01 00:00:00 UTC",
+          enabled_count: 3,
+          total_count: 10,
+          size: 2048,
+        },
+      ],
+    });
+
+    render(<MirrorsView />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/mirror1\.example\.com/)).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Backup history"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("2024-01-01 00:00:00 UTC")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Restore/ }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Restore mirrorlist backup?")).toBeInTheDocument();
+    });
+  });
+
+  it("restores backup and reloads mirrors", async () => {
+    mockListMirrorBackups.mockResolvedValue({
+      backups: [
+        {
+          timestamp: 1704067200,
+          date: "2024-01-01 00:00:00 UTC",
+          enabled_count: 3,
+          total_count: 10,
+          size: 2048,
+        },
+      ],
+    });
+    mockRestoreMirrorBackup.mockResolvedValue({
+      success: true,
+      backup_path: "/etc/pacman.d/mirrorlist.backup.1704067201",
+      message: "Restored",
+    });
+
+    render(<MirrorsView />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/mirror1\.example\.com/)).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Backup history"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("2024-01-01 00:00:00 UTC")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Restore/ }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Restore mirrorlist backup?")).toBeInTheDocument();
+    });
+
+    // Click the confirm Restore button in the modal
+    const modalButtons = screen.getAllByRole("button", { name: /^Restore$/ });
+    await act(async () => {
+      fireEvent.click(modalButtons[modalButtons.length - 1]);
+    });
+
+    await waitFor(() => {
+      expect(mockRestoreMirrorBackup).toHaveBeenCalledWith(1704067200);
+    });
+
+    // Should reload mirrors after restore
+    await waitFor(() => {
+      expect(mockListMirrors).toHaveBeenCalledTimes(2);
+    });
   });
 });

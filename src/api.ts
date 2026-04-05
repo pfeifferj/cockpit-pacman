@@ -1045,6 +1045,36 @@ export async function refreshMirrors(params: RefreshMirrorsParams = {}): Promise
   ]);
 }
 
+export interface MirrorBackup {
+  timestamp: number;
+  date: string;
+  enabled_count: number;
+  total_count: number;
+  size: number;
+}
+
+export interface MirrorBackupListResponse {
+  backups: MirrorBackup[];
+}
+
+export interface RestoreMirrorBackupResponse {
+  success: boolean;
+  backup_path: string | null;
+  message: string;
+}
+
+export async function listMirrorBackups(): Promise<MirrorBackupListResponse> {
+  return runBackend<MirrorBackupListResponse>("list-mirror-backups");
+}
+
+export async function restoreMirrorBackup(timestamp: number): Promise<RestoreMirrorBackupResponse> {
+  return runBackend<RestoreMirrorBackupResponse>("restore-mirror-backup", [String(timestamp)], { superuser: "require" });
+}
+
+export async function deleteMirrorBackup(timestamp: number): Promise<RestoreMirrorBackupResponse> {
+  return runBackend<RestoreMirrorBackupResponse>("delete-mirror-backup", [String(timestamp)], { superuser: "require" });
+}
+
 export interface DependencyNode {
   id: string;
   name: string;
