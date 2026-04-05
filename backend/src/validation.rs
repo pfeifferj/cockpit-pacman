@@ -190,6 +190,23 @@ pub fn validate_signoff_arg(value: &str, field: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn validate_refresh_protocol(protocol: &str) -> Result<()> {
+    match protocol {
+        "https" | "http" | "all" => Ok(()),
+        _ => anyhow::bail!(
+            "Invalid protocol '{}' (expected: https, http, all)",
+            protocol
+        ),
+    }
+}
+
+pub fn validate_refresh_sort(sort_by: &str) -> Result<()> {
+    match sort_by {
+        "score" | "delay" | "age" => Ok(()),
+        _ => anyhow::bail!("Invalid sort '{}' (expected: score, delay, age)", sort_by),
+    }
+}
+
 pub fn validate_json_payload_size(payload: &str) -> Result<()> {
     if payload.len() > MAX_JSON_PAYLOAD_BYTES {
         anyhow::bail!(

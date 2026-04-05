@@ -33,6 +33,11 @@ import {
   Select,
   SelectOption,
   SelectList,
+  Form,
+  FormGroup,
+  FormSelect,
+  FormSelectOption,
+  NumberInput,
 } from "@patternfly/react-core";
 import {
   GlobeIcon,
@@ -52,10 +57,14 @@ import {
   MirrorStatus,
   MirrorStatusResponse,
   MirrorTestResult,
+  RefreshMirrorsResponse,
+  RefreshMirrorsProtocol,
+  RefreshMirrorsSortBy,
   listMirrors,
   fetchMirrorStatus,
   testMirrors,
   saveMirrorlist,
+  refreshMirrors,
   formatNumber,
   formatDate,
 } from "../api";
@@ -168,6 +177,15 @@ export const MirrorsView: React.FC = () => {
   const [countryFilterOpen, setCountryFilterOpen] = useState(false);
   const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
   const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
+  const [refreshModalOpen, setRefreshModalOpen] = useState(false);
+  const [refreshLoading, setRefreshLoading] = useState(false);
+  const [refreshPreview, setRefreshPreview] = useState<RefreshMirrorsResponse | null>(null);
+  const [refreshCount, setRefreshCount] = useState(20);
+  const [refreshCountry, setRefreshCountry] = useState("");
+  const [refreshProtocol, setRefreshProtocol] = useState<RefreshMirrorsProtocol>("https");
+  const [refreshSortBy, setRefreshSortBy] = useState<RefreshMirrorsSortBy>("score");
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  useBackdropClose(refreshModalOpen, () => { if (!refreshLoading) setRefreshModalOpen(false); });
   const cancelRef = useRef<(() => void) | null>(null);
   const logContainerRef = useRef<HTMLDivElement | null>(null);
   const initialStatusFetchedRef = useRef(false);
@@ -358,6 +376,42 @@ export const MirrorsView: React.FC = () => {
     setHasChanges(true);
   };
 
+  const handleOpenRefreshModal = () => {
+    setRefreshPreview(null);
+    setRefreshError(null);
+    setRefreshModalOpen(true);
+  };
+
+  const handleRefreshGenerate = async () => {
+    setRefreshLoading(true);
+    setRefreshPreview(null);
+    setRefreshError(null);
+    try {
+      const result = await refreshMirrors({
+        count: refreshCount,
+        country: refreshCountry || undefined,
+        protocol: refreshProtocol,
+        sortBy: refreshSortBy,
+      });
+      setRefreshPreview(result);
+    } catch (ex) {
+      setRefreshError(ex instanceof Error ? ex.message : String(ex));
+    } finally {
+      setRefreshLoading(false);
+    }
+  };
+
+  const handleRefreshApply = () => {
+    if (!refreshPreview) return;
+    const newMirrors: MirrorWithStatus[] = refreshPreview.mirrors.map(m => ({
+      ...m,
+    }));
+    setMirrors(newMirrors);
+    setHasChanges(true);
+    setRefreshModalOpen(false);
+    setRefreshPreview(null);
+  };
+
   const countries = useMemo(() => {
     const countrySet = new Set<string>();
     for (const m of mirrors) {
@@ -367,6 +421,18 @@ export const MirrorsView: React.FC = () => {
     }
     return Array.from(countrySet).sort();
   }, [mirrors]);
+
+  const statusCountries = useMemo(() => {
+    if (!statusData) return [];
+    const countryMap = new Map<string, string>();
+    for (const m of statusData.mirrors) {
+      if (m.country && m.country_code) {
+        countryMap.set(m.country_code, m.country);
+      }
+    }
+    return Array.from(countryMap.entries())
+      .sort((a, b) => a[1].localeCompare(b[1]));
+  }, [statusData]);
 
   // O(1) lookup map for mirror indices
   const mirrorIndexMap = useMemo(() => {
@@ -653,6 +719,16 @@ export const MirrorsView: React.FC = () => {
             </ToolbarItem>
             <ToolbarItem>
               <Button
+                variant="secondary"
+                icon={<GlobeIcon />}
+                onClick={handleOpenRefreshModal}
+                isDisabled={state !== "ready"}
+              >
+                Refresh Mirrorlist
+              </Button>
+            </ToolbarItem>
+            <ToolbarItem>
+              <Button
                 variant="primary"
                 onClick={handleSave}
                 isDisabled={!hasChanges || state !== "ready"}
@@ -788,6 +864,137 @@ export const MirrorsView: React.FC = () => {
             Save Mirrorlist
           </Button>
           <Button key="cancel" variant="link" onClick={() => setConfirmModalOpen(false)}>
+            Cancel
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      <Modal
+        variant={ModalVariant.large}
+        isOpen={refreshModalOpen}
+        onClose={() => { if (!refreshLoading) setRefreshModalOpen(false); }}
+      >
+        <ModalHeader title="Refresh Mirrorlist" />
+        <ModalBody>
+          <Content component={ContentVariants.p} className="pf-v6-u-mb-md">
+            Generate a ranked mirrorlist from the Arch Linux mirror status API.
+            Filters to active, synced mirrors sorted by quality.
+            Applying the result will replace your current mirrorlist.
+          </Content>
+          <Form isHorizontal>
+            <FormGroup label="Number of mirrors" fieldId="refresh-count">
+              <NumberInput
+                id="refresh-count"
+                value={refreshCount}
+                onMinus={() => setRefreshCount(Math.max(1, refreshCount - 5))}
+                onPlus={() => setRefreshCount(Math.min(100, refreshCount + 5))}
+                onChange={(event) => {
+                  const value = parseInt((event.target as HTMLInputElement).value, 10);
+                  if (!isNaN(value) && value >= 1 && value <= 100) setRefreshCount(value);
+                }}
+                min={1}
+                max={100}
+              />
+            </FormGroup>
+            <FormGroup label="Country" fieldId="refresh-country">
+              <FormSelect
+                id="refresh-country"
+                value={refreshCountry}
+                onChange={(_event, value) => setRefreshCountry(value)}
+              >
+                <FormSelectOption value="" label="All countries" />
+                {statusCountries.map(([code, name]) => (
+                  <FormSelectOption key={code} value={code} label={`${name} (${code})`} />
+                ))}
+              </FormSelect>
+            </FormGroup>
+            <FormGroup label="Protocol" fieldId="refresh-protocol">
+              <FormSelect
+                id="refresh-protocol"
+                value={refreshProtocol}
+                onChange={(_event, value) => setRefreshProtocol(value as RefreshMirrorsProtocol)}
+              >
+                <FormSelectOption value="https" label="HTTPS only" />
+                <FormSelectOption value="http" label="HTTP only" />
+                <FormSelectOption value="all" label="All protocols" />
+              </FormSelect>
+            </FormGroup>
+            <FormGroup label="Sort by" fieldId="refresh-sort">
+              <FormSelect
+                id="refresh-sort"
+                value={refreshSortBy}
+                onChange={(_event, value) => setRefreshSortBy(value as RefreshMirrorsSortBy)}
+              >
+                <FormSelectOption value="score" label="Mirror score (lower = better)" />
+                <FormSelectOption value="delay" label="Sync delay (lower = better)" />
+                <FormSelectOption value="age" label="Last sync time (newest first)" />
+              </FormSelect>
+            </FormGroup>
+          </Form>
+
+          <div className="pf-v6-u-mt-lg">
+            <Button
+              variant="secondary"
+              onClick={handleRefreshGenerate}
+              isLoading={refreshLoading}
+              isDisabled={refreshLoading}
+            >
+              {refreshLoading ? "Fetching..." : "Generate Preview"}
+            </Button>
+          </div>
+
+          {refreshError && (
+            <Alert variant="danger" isInline isPlain title={refreshError} className="pf-v6-u-mt-md" />
+          )}
+
+          {refreshPreview && (
+            <div className="pf-v6-u-mt-lg">
+              <Content component={ContentVariants.p}>
+                <strong>{refreshPreview.total}</strong> mirrors found
+                {refreshPreview.last_check && ` (status checked: ${refreshPreview.last_check})`}
+              </Content>
+              <div style={{ maxHeight: "300px", overflow: "auto" }} className="pf-v6-u-mt-sm">
+                <Table aria-label="Preview mirrors" variant="compact">
+                  <Thead>
+                    <Tr>
+                      <Th width={10}>#</Th>
+                      <Th>URL</Th>
+                      <Th width={20}>Country</Th>
+                    </Tr>
+                  </Thead>
+                  <Tbody>
+                    {refreshPreview.mirrors.map((m, i) => (
+                      <Tr key={m.url}>
+                        <Td dataLabel="#">{i + 1}</Td>
+                        <Td dataLabel="URL">
+                          <span style={{ fontFamily: "var(--pf-t--global--font--family--mono)", fontSize: "0.875rem" }}>
+                            {m.url}
+                          </span>
+                        </Td>
+                        <Td dataLabel="Country">{m.comment || "-"}</Td>
+                      </Tr>
+                    ))}
+                  </Tbody>
+                </Table>
+              </div>
+            </div>
+          )}
+        </ModalBody>
+        <ModalFooter>
+          <Button
+            key="apply"
+            variant="primary"
+            onClick={handleRefreshApply}
+            isDisabled={!refreshPreview || refreshLoading}
+          >
+            Apply
+          </Button>
+          <Button
+            key="cancel"
+            variant="link"
+            onClick={() => setRefreshModalOpen(false)}
+            isDisabled={refreshLoading}
+          >
             Cancel
           </Button>
         </ModalFooter>

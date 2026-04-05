@@ -21,7 +21,9 @@ pub use downgrade::{downgrade_package, list_downgrades};
 pub use keyring::{init_keyring, keyring_status, refresh_keyring};
 pub use lock::{check_lock, remove_stale_lock};
 pub use log::{get_grouped_history, get_history};
-pub use mirrors::{fetch_mirror_status, list_mirrors, save_mirrorlist, test_mirrors};
+pub use mirrors::{
+    fetch_mirror_status, list_mirrors, refresh_mirrors, save_mirrorlist, test_mirrors,
+};
 pub use mutation::{
     install_package, preflight_upgrade, remove_orphans, remove_package, run_upgrade, sync_database,
 };

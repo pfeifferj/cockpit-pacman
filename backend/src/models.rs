@@ -425,6 +425,13 @@ pub struct SaveMirrorlistResponse {
     pub message: String,
 }
 
+#[derive(Serialize)]
+pub struct RefreshMirrorsResponse {
+    pub mirrors: Vec<MirrorEntry>,
+    pub total: usize,
+    pub last_check: Option<String>,
+}
+
 #[derive(Serialize, Clone)]
 pub struct DependencyNode {
     pub id: String,

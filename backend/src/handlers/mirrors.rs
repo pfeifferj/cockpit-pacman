@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::check_cancel_early;
 use crate::models::{
     MirrorEntry, MirrorListResponse, MirrorStatus, MirrorStatusResponse, MirrorTestResult,
-    SaveMirrorlistResponse, StreamEvent,
+    RefreshMirrorsResponse, SaveMirrorlistResponse, StreamEvent,
 };
 use crate::util::{TimeoutGuard, emit_event, emit_json, setup_signal_handler};
 use crate::validation::validate_mirror_url;
@@ -150,6 +150,89 @@ pub fn fetch_mirror_status() -> Result<()> {
         .collect();
 
     let response = MirrorStatusResponse {
+        total: mirrors.len(),
+        mirrors,
+        last_check: api_status.last_check,
+    };
+
+    emit_json(&response)
+}
+
+pub fn refresh_mirrors(
+    count: usize,
+    country: Option<&str>,
+    protocol: &str,
+    sort_by: &str,
+) -> Result<()> {
+    let agent = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(30)))
+            .build(),
+    );
+
+    let response = agent.get(MIRROR_STATUS_URL).call()?;
+    let body = response.into_body().read_to_string()?;
+    let api_status: ApiMirrorStatus = serde_json::from_str(&body)?;
+
+    let mut candidates: Vec<ApiMirror> = api_status
+        .urls
+        .into_iter()
+        .filter(|m| m.active.unwrap_or(false))
+        .filter(|m| m.completion_pct.unwrap_or(0.0) >= 0.9)
+        .filter(|m| match protocol {
+            "https" => m.url.starts_with("https://"),
+            "http" => m.url.starts_with("http://") && !m.url.starts_with("https://"),
+            _ => true,
+        })
+        .filter(|m| {
+            country
+                .map(|c| {
+                    m.country_code
+                        .as_deref()
+                        .is_some_and(|cc| cc.eq_ignore_ascii_case(c))
+                        || m.country
+                            .as_deref()
+                            .is_some_and(|cn| cn.eq_ignore_ascii_case(c))
+                })
+                .unwrap_or(true)
+        })
+        .collect();
+
+    match sort_by {
+        "delay" => candidates.sort_by(|a, b| {
+            a.delay
+                .unwrap_or(i64::MAX)
+                .cmp(&b.delay.unwrap_or(i64::MAX))
+        }),
+        "age" => candidates.sort_by(|a, b| {
+            // Newer last_sync = better, so reverse: b before a
+            b.last_sync.cmp(&a.last_sync)
+        }),
+        _ => candidates.sort_by(|a, b| {
+            a.score
+                .unwrap_or(f64::MAX)
+                .partial_cmp(&b.score.unwrap_or(f64::MAX))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }),
+    }
+
+    candidates.truncate(count);
+
+    let mirrors: Vec<MirrorEntry> = candidates
+        .into_iter()
+        .map(|m| {
+            let comment = m.country.clone();
+            let base = m.url.trim_end_matches('/');
+            let url = format!("{base}/$repo/os/$arch");
+            MirrorEntry {
+                url,
+                enabled: true,
+                comment,
+            }
+        })
+        .collect();
+
+    let response = RefreshMirrorsResponse {
         total: mirrors.len(),
         mirrors,
         last_check: api_status.last_check,

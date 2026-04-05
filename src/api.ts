@@ -1019,6 +1019,32 @@ export async function saveMirrorlist(mirrors: MirrorEntry[]): Promise<SaveMirror
   return runBackend<SaveMirrorlistResponse>("save-mirrorlist", [JSON.stringify(mirrors)]);
 }
 
+export type RefreshMirrorsSortBy = "score" | "delay" | "age";
+export type RefreshMirrorsProtocol = "https" | "http" | "all";
+
+export interface RefreshMirrorsParams {
+  count?: number;
+  country?: string;
+  protocol?: RefreshMirrorsProtocol;
+  sortBy?: RefreshMirrorsSortBy;
+}
+
+export interface RefreshMirrorsResponse {
+  mirrors: MirrorEntry[];
+  total: number;
+  last_check: string | null;
+}
+
+export async function refreshMirrors(params: RefreshMirrorsParams = {}): Promise<RefreshMirrorsResponse> {
+  const { count = 20, country = "", protocol = "https", sortBy = "score" } = params;
+  return runBackend<RefreshMirrorsResponse>("refresh-mirrors", [
+    String(count),
+    country,
+    protocol,
+    sortBy,
+  ]);
+}
+
 export interface DependencyNode {
   id: string;
   name: string;

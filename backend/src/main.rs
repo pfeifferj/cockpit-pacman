@@ -5,16 +5,16 @@ use cockpit_pacman_backend::handlers::{
     fetch_mirror_status, fetch_news, get_cache_info, get_dependency_tree, get_grouped_history,
     get_history, get_reboot_status, get_schedule_config, get_scheduled_runs, init_keyring,
     install_package, keyring_status, list_downgrades, list_ignored, list_installed, list_mirrors,
-    list_orphans, local_package_info, preflight_upgrade, refresh_keyring, remove_ignored,
-    remove_orphans, remove_package, remove_stale_lock, run_upgrade, save_mirrorlist, scheduled_run,
-    search, security_info, set_schedule_config, signoff_list, signoff_revoke, signoff_sign,
-    sync_database, sync_package_info, test_mirrors,
+    list_orphans, local_package_info, preflight_upgrade, refresh_keyring, refresh_mirrors,
+    remove_ignored, remove_orphans, remove_package, remove_stale_lock, run_upgrade,
+    save_mirrorlist, scheduled_run, search, security_info, set_schedule_config, signoff_list,
+    signoff_revoke, signoff_sign, sync_database, sync_package_info, test_mirrors,
 };
 use cockpit_pacman_backend::models::MirrorEntry;
 use cockpit_pacman_backend::validation::{
     validate_depth, validate_direction, validate_json_payload_size, validate_keep_versions,
     validate_mirror_timeout, validate_mirror_url, validate_package_name, validate_pagination,
-    validate_search_query, validate_signoff_arg,
+    validate_refresh_protocol, validate_refresh_sort, validate_search_query, validate_signoff_arg,
 };
 
 fn print_usage() {
@@ -96,6 +96,12 @@ fn print_usage() {
     eprintln!("  reboot-status          Check if system reboot is recommended");
     eprintln!("  list-mirrors           List mirrors from /etc/pacman.d/mirrorlist");
     eprintln!("  fetch-mirror-status    Fetch mirror status from archlinux.org API");
+    eprintln!("  refresh-mirrors [count] [country] [protocol] [sort_by]");
+    eprintln!("                         Generate a ranked mirrorlist from archlinux.org API");
+    eprintln!("                         count: number of mirrors (default: 20, max: 100)");
+    eprintln!("                         country: country code or name filter");
+    eprintln!("                         protocol: https|http|all (default: https)");
+    eprintln!("                         sort_by: score|delay|age (default: score)");
     eprintln!("  test-mirrors [urls] [timeout]");
     eprintln!("                         Test mirror speed and latency");
     eprintln!("                         urls: comma-separated list of mirror URLs");
@@ -352,6 +358,24 @@ fn main() {
         "reboot-status" => get_reboot_status(),
         "list-mirrors" => list_mirrors(),
         "fetch-mirror-status" => fetch_mirror_status(),
+        "refresh-mirrors" => {
+            let count = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(20usize);
+            let country = args.get(3).map(|s| s.as_str()).filter(|s| !s.is_empty());
+            let protocol = args
+                .get(4)
+                .map(|s| s.as_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("https");
+            let sort_by = args
+                .get(5)
+                .map(|s| s.as_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("score");
+            let count = count.min(100);
+            validate_refresh_protocol(protocol)
+                .and_then(|_| validate_refresh_sort(sort_by))
+                .and_then(|_| refresh_mirrors(count, country, protocol, sort_by))
+        }
         "test-mirrors" => {
             let urls: Vec<String> = args
                 .get(2)
