@@ -22,7 +22,8 @@ pub use keyring::{init_keyring, keyring_status, refresh_keyring};
 pub use lock::{check_lock, remove_stale_lock};
 pub use log::{get_grouped_history, get_history};
 pub use mirrors::{
-    fetch_mirror_status, list_mirrors, refresh_mirrors, save_mirrorlist, test_mirrors,
+    delete_mirror_backup, fetch_mirror_status, list_mirror_backups, list_mirrors, refresh_mirrors,
+    restore_mirror_backup, save_mirrorlist, test_mirrors,
 };
 pub use mutation::{
     install_package, preflight_upgrade, remove_orphans, remove_package, run_upgrade, sync_database,

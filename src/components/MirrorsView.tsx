@@ -38,6 +38,7 @@ import {
   FormSelect,
   FormSelectOption,
   NumberInput,
+  Checkbox,
 } from "@patternfly/react-core";
 import {
   GlobeIcon,
@@ -48,6 +49,9 @@ import {
   SyncAltIcon,
   OutlinedClockIcon,
   ExclamationCircleIcon,
+  HistoryIcon,
+  UndoIcon,
+  TrashIcon,
 } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
 import { StatBox } from "./StatBox";
@@ -60,13 +64,18 @@ import {
   RefreshMirrorsResponse,
   RefreshMirrorsProtocol,
   RefreshMirrorsSortBy,
+  MirrorBackup,
   listMirrors,
   fetchMirrorStatus,
   testMirrors,
   saveMirrorlist,
   refreshMirrors,
+  listMirrorBackups,
+  restoreMirrorBackup,
+  deleteMirrorBackup,
   formatNumber,
   formatDate,
+  formatSize,
 } from "../api";
 import { sanitizeErrorMessage } from "../utils";
 
@@ -186,6 +195,14 @@ export const MirrorsView: React.FC = () => {
   const [refreshSortBy, setRefreshSortBy] = useState<RefreshMirrorsSortBy>("score");
   const [refreshError, setRefreshError] = useState<string | null>(null);
   useBackdropClose(refreshModalOpen, () => { if (!refreshLoading) setRefreshModalOpen(false); });
+  const [backups, setBackups] = useState<MirrorBackup[]>([]);
+  const [backupsExpanded, setBackupsExpanded] = useState(false);
+  const [backupsLoading, setBackupsLoading] = useState(false);
+  const [restoringTimestamp, setRestoringTimestamp] = useState<number | null>(null);
+  const [selectedBackups, setSelectedBackups] = useState<Set<number>>(new Set());
+  const [deletingBackups, setDeletingBackups] = useState(false);
+  const [restoreConfirmTimestamp, setRestoreConfirmTimestamp] = useState<number | null>(null);
+  useBackdropClose(restoreConfirmTimestamp !== null, () => setRestoreConfirmTimestamp(null));
   const cancelRef = useRef<(() => void) | null>(null);
   const logContainerRef = useRef<HTMLDivElement | null>(null);
   const initialStatusFetchedRef = useRef(false);
@@ -269,6 +286,69 @@ export const MirrorsView: React.FC = () => {
       setState("error");
       setError(ex instanceof Error ? ex.message : String(ex));
     }
+  };
+
+  const loadBackups = useCallback(async () => {
+    setBackupsLoading(true);
+    try {
+      const response = await listMirrorBackups();
+      setBackups(response.backups);
+    } catch {
+      setBackups([]);
+    } finally {
+      setBackupsLoading(false);
+    }
+  }, []);
+
+  const handleBackupsToggle = (_event: React.MouseEvent | undefined, expanded: boolean) => {
+    setBackupsExpanded(expanded);
+    if (expanded && backups.length === 0) {
+      loadBackups();
+    }
+  };
+
+  const handleRestore = async (timestamp: number) => {
+    setRestoreConfirmTimestamp(null);
+    setRestoringTimestamp(timestamp);
+    setError(null);
+    try {
+      await restoreMirrorBackup(timestamp);
+      await loadMirrors();
+      await loadBackups();
+    } catch (ex) {
+      setError(ex instanceof Error ? ex.message : String(ex));
+    } finally {
+      setRestoringTimestamp(null);
+    }
+  };
+
+  const toggleBackupSelection = (timestamp: number) => {
+    setSelectedBackups(prev => {
+      const next = new Set(prev);
+      if (next.has(timestamp)) next.delete(timestamp);
+      else next.add(timestamp);
+      return next;
+    });
+  };
+
+  const selectAllBackups = () => setSelectedBackups(new Set(backups.map(b => b.timestamp)));
+  const deselectAllBackups = () => setSelectedBackups(new Set());
+  const allBackupsSelected = backups.length > 0 && selectedBackups.size === backups.length;
+  const someBackupsSelected = selectedBackups.size > 0 && selectedBackups.size < backups.length;
+
+  const handleDeleteSelected = async () => {
+    if (selectedBackups.size === 0) return;
+    setDeletingBackups(true);
+    const results = await Promise.allSettled(
+      Array.from(selectedBackups).map(ts => deleteMirrorBackup(ts))
+    );
+    const failed = results.filter(r => r.status === "rejected").length;
+    if (failed > 0) {
+      setError(`Failed to delete ${failed} of ${selectedBackups.size} backup${selectedBackups.size !== 1 ? "s" : ""}`);
+    }
+    await loadBackups();
+    setSelectedBackups(new Set());
+    setDeletingBackups(false);
   };
 
   const handleTestMirrors = () => {
@@ -834,6 +914,94 @@ export const MirrorsView: React.FC = () => {
           </Tbody>
         </Table>
 
+        <ExpandableSection
+          toggleText={backupsExpanded ? "Hide backup history" : "Backup history"}
+          onToggle={handleBackupsToggle}
+          isExpanded={backupsExpanded}
+          className="pf-v6-u-mt-lg"
+        >
+          {backupsLoading ? (
+            <Flex alignItems={{ default: "alignItemsCenter" }} spaceItems={{ default: "spaceItemsSm" }} className="pf-v6-u-py-md">
+              <FlexItem><Spinner size="md" /></FlexItem>
+              <FlexItem>Loading backups...</FlexItem>
+            </Flex>
+          ) : backups.length === 0 ? (
+            <Content component={ContentVariants.p} className="pf-v6-u-py-md" style={{ color: "var(--pf-t--global--text--color--subtle)" }}>
+              No backups found. Backups are created automatically when saving the mirrorlist.
+            </Content>
+          ) : (
+            <>
+            <Flex className="pf-v6-u-mb-sm" spaceItems={{ default: "spaceItemsSm" }}>
+              <FlexItem>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  icon={<TrashIcon />}
+                  onClick={handleDeleteSelected}
+                  isDisabled={selectedBackups.size === 0 || deletingBackups || restoringTimestamp !== null}
+                  isLoading={deletingBackups}
+                >
+                  Delete {selectedBackups.size > 0 ? `(${selectedBackups.size})` : "selected"}
+                </Button>
+              </FlexItem>
+            </Flex>
+            <Table aria-label="Mirrorlist backups" variant="compact">
+              <Thead>
+                <Tr>
+                  <Th screenReaderText="Select">
+                    <Checkbox
+                      id="select-all-backups"
+                      isChecked={allBackupsSelected ? true : someBackupsSelected ? null : false}
+                      onChange={(_event, checked) => checked ? selectAllBackups() : deselectAllBackups()}
+                      aria-label="Select all backups"
+                    />
+                  </Th>
+                  <Th>Date</Th>
+                  <Th>Mirrors</Th>
+                  <Th>Size</Th>
+                  <Th width={10}>Actions</Th>
+                </Tr>
+              </Thead>
+              <Tbody>
+                {backups.map((backup) => (
+                  <Tr key={backup.timestamp}>
+                    <Td
+                      select={{
+                        rowIndex: backup.timestamp,
+                        onSelect: () => toggleBackupSelection(backup.timestamp),
+                        isSelected: selectedBackups.has(backup.timestamp),
+                      }}
+                    />
+                    <Td dataLabel="Date">
+                      <Flex alignItems={{ default: "alignItemsCenter" }} spaceItems={{ default: "spaceItemsSm" }}>
+                        <FlexItem><HistoryIcon /></FlexItem>
+                        <FlexItem>{backup.date}</FlexItem>
+                      </Flex>
+                    </Td>
+                    <Td dataLabel="Mirrors">
+                      {backup.enabled_count} enabled / {backup.total_count} total
+                    </Td>
+                    <Td dataLabel="Size">{formatSize(backup.size)}</Td>
+                    <Td dataLabel="Actions">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon={<UndoIcon />}
+                        onClick={() => setRestoreConfirmTimestamp(backup.timestamp)}
+                        isDisabled={restoringTimestamp !== null || deletingBackups}
+                        isLoading={restoringTimestamp === backup.timestamp}
+                      >
+                        Restore
+                      </Button>
+                    </Td>
+                  </Tr>
+                ))}
+              </Tbody>
+            </Table>
+            </>
+          )}
+        </ExpandableSection>
+
         {statusData && (
           <div className="pf-v6-u-mt-md" style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)" }}>
             Mirror status from archlinux.org: {statusData.last_check || "Unknown"}
@@ -995,6 +1163,38 @@ export const MirrorsView: React.FC = () => {
             onClick={() => setRefreshModalOpen(false)}
             isDisabled={refreshLoading}
           >
+            Cancel
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      <Modal
+        variant={ModalVariant.small}
+        isOpen={restoreConfirmTimestamp !== null}
+        onClose={() => setRestoreConfirmTimestamp(null)}
+      >
+        <ModalHeader title="Restore mirrorlist backup?" />
+        <ModalBody>
+          <Content>
+            <Content component={ContentVariants.p}>
+              This will replace the current <code>/etc/pacman.d/mirrorlist</code> with the selected backup.
+              A backup of the current state will be created first.
+            </Content>
+            {restoreConfirmTimestamp !== null && (() => {
+              const b = backups.find(x => x.timestamp === restoreConfirmTimestamp);
+              return b ? (
+                <Content component={ContentVariants.p} className="pf-v6-u-mt-md">
+                  Backup from <strong>{b.date}</strong> with {b.enabled_count} enabled mirrors.
+                </Content>
+              ) : null;
+            })()}
+          </Content>
+        </ModalBody>
+        <ModalFooter>
+          <Button key="confirm" variant="primary" onClick={() => restoreConfirmTimestamp !== null && handleRestore(restoreConfirmTimestamp)}>
+            Restore
+          </Button>
+          <Button key="cancel" variant="link" onClick={() => setRestoreConfirmTimestamp(null)}>
             Cancel
           </Button>
         </ModalFooter>

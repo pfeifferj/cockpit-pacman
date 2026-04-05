@@ -1,14 +1,15 @@
 use std::env;
 
 use cockpit_pacman_backend::handlers::{
-    add_ignored, check_lock, check_security, check_updates, clean_cache, downgrade_package,
-    fetch_mirror_status, fetch_news, get_cache_info, get_dependency_tree, get_grouped_history,
-    get_history, get_reboot_status, get_schedule_config, get_scheduled_runs, init_keyring,
-    install_package, keyring_status, list_downgrades, list_ignored, list_installed, list_mirrors,
-    list_orphans, local_package_info, preflight_upgrade, refresh_keyring, refresh_mirrors,
-    remove_ignored, remove_orphans, remove_package, remove_stale_lock, run_upgrade,
-    save_mirrorlist, scheduled_run, search, security_info, set_schedule_config, signoff_list,
-    signoff_revoke, signoff_sign, sync_database, sync_package_info, test_mirrors,
+    add_ignored, check_lock, check_security, check_updates, clean_cache, delete_mirror_backup,
+    downgrade_package, fetch_mirror_status, fetch_news, get_cache_info, get_dependency_tree,
+    get_grouped_history, get_history, get_reboot_status, get_schedule_config, get_scheduled_runs,
+    init_keyring, install_package, keyring_status, list_downgrades, list_ignored, list_installed,
+    list_mirror_backups, list_mirrors, list_orphans, local_package_info, preflight_upgrade,
+    refresh_keyring, refresh_mirrors, remove_ignored, remove_orphans, remove_package,
+    remove_stale_lock, restore_mirror_backup, run_upgrade, save_mirrorlist, scheduled_run, search,
+    security_info, set_schedule_config, signoff_list, signoff_revoke, signoff_sign, sync_database,
+    sync_package_info, test_mirrors,
 };
 use cockpit_pacman_backend::models::MirrorEntry;
 use cockpit_pacman_backend::validation::{
@@ -108,6 +109,11 @@ fn print_usage() {
     eprintln!("                         timeout: seconds (default: 60)");
     eprintln!("  save-mirrorlist <json> Save mirrorlist (requires root)");
     eprintln!("                         json: JSON array of mirror entries");
+    eprintln!("  list-mirror-backups    List available mirrorlist backups");
+    eprintln!("  restore-mirror-backup <timestamp>");
+    eprintln!("                         Restore a mirrorlist backup (requires root)");
+    eprintln!("  delete-mirror-backup <timestamp>");
+    eprintln!("                         Delete a mirrorlist backup (requires root)");
     eprintln!("  dependency-tree NAME [depth] [direction]");
     eprintln!("                         Get dependency tree for a package");
     eprintln!("                         depth: 1-10 (default: 3)");
@@ -399,6 +405,33 @@ fn main() {
                         .map_err(|e| anyhow::anyhow!("Invalid JSON: {}", e))
                 })
                 .and_then(|mirrors| save_mirrorlist(&mirrors))
+        }
+        "list-mirror-backups" => list_mirror_backups(),
+        "restore-mirror-backup" => {
+            if args.len() < 3 {
+                eprintln!("Error: restore-mirror-backup requires a timestamp");
+                std::process::exit(1);
+            }
+            match args[2].parse::<i64>() {
+                Ok(ts) => restore_mirror_backup(ts),
+                Err(_) => {
+                    eprintln!("Error: invalid timestamp '{}'", args[2]);
+                    std::process::exit(1);
+                }
+            }
+        }
+        "delete-mirror-backup" => {
+            if args.len() < 3 {
+                eprintln!("Error: delete-mirror-backup requires a timestamp");
+                std::process::exit(1);
+            }
+            match args[2].parse::<i64>() {
+                Ok(ts) => delete_mirror_backup(ts),
+                Err(_) => {
+                    eprintln!("Error: invalid timestamp '{}'", args[2]);
+                    std::process::exit(1);
+                }
+            }
         }
         "dependency-tree" => {
             if args.len() < 3 {
