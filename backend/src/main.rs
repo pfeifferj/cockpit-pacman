@@ -1,14 +1,14 @@
 use std::env;
 
 use cockpit_pacman_backend::handlers::{
-    add_ignored, check_security, check_updates, clean_cache, downgrade_package,
+    add_ignored, check_lock, check_security, check_updates, clean_cache, downgrade_package,
     fetch_mirror_status, fetch_news, get_cache_info, get_dependency_tree, get_grouped_history,
     get_history, get_reboot_status, get_schedule_config, get_scheduled_runs, init_keyring,
     install_package, keyring_status, list_downgrades, list_ignored, list_installed, list_mirrors,
     list_orphans, local_package_info, preflight_upgrade, refresh_keyring, remove_ignored,
-    remove_orphans, remove_package, run_upgrade, save_mirrorlist, scheduled_run, search,
-    security_info, set_schedule_config, signoff_list, signoff_revoke, signoff_sign, sync_database,
-    sync_package_info, test_mirrors,
+    remove_orphans, remove_package, remove_stale_lock, run_upgrade, save_mirrorlist, scheduled_run,
+    search, security_info, set_schedule_config, signoff_list, signoff_revoke, signoff_sign,
+    sync_database, sync_package_info, test_mirrors,
 };
 use cockpit_pacman_backend::models::MirrorEntry;
 use cockpit_pacman_backend::validation::{
@@ -116,6 +116,10 @@ fn print_usage() {
     eprintln!("                         CREDS: base64-encoded JSON {{username, password}}");
     eprintln!("  check-security         Check installed packages against Arch Security Tracker");
     eprintln!("  security-info NAME     Get security advisory history for a package");
+    eprintln!(
+        "  check-lock             Check if the pacman database lock exists and if it's stale"
+    );
+    eprintln!("  remove-stale-lock      Remove a stale database lock (requires root)");
 }
 
 fn main() {
@@ -427,6 +431,8 @@ fn main() {
             }
             validate_package_name(&args[2]).and_then(|_| security_info(&args[2]))
         }
+        "check-lock" => check_lock(),
+        "remove-stale-lock" => remove_stale_lock(),
         "help" | "--help" | "-h" => {
             print_usage();
             Ok(())

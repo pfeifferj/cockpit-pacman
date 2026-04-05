@@ -3,6 +3,7 @@ pub mod config;
 pub mod dependency;
 pub mod downgrade;
 pub mod keyring;
+pub mod lock;
 pub mod log;
 pub mod mirrors;
 pub mod mutation;
@@ -18,6 +19,7 @@ pub use config::{add_ignored, list_ignored, remove_ignored};
 pub use dependency::get_dependency_tree;
 pub use downgrade::{downgrade_package, list_downgrades};
 pub use keyring::{init_keyring, keyring_status, refresh_keyring};
+pub use lock::{check_lock, remove_stale_lock};
 pub use log::{get_grouped_history, get_history};
 pub use mirrors::{fetch_mirror_status, list_mirrors, save_mirrorlist, test_mirrors};
 pub use mutation::{
