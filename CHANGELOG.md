@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.5] - 2026-04-XX
+
+### Added
+- Reboot Now button and reboot-on-completion checkbox in post-upgrade flow (ea38b6c)
+- Per-repository mirror servers shown inline with source pills (ada39fe)
+- Auto-run mirror status fetch and latency tests on load (11947da)
+- Mirrorlist refresh using the Arch mirror status API (c81f3fb)
+- Mirrorlist backup history with restore and delete (8393c6e)
+- Added/removed diff view when previewing mirrorlist changes (058d895)
+
+### Changed
+- Unified mirrors table combining global mirrorlist and repo overrides (ada39fe)
+
+### Fixed
+- Dismissed news not persisting across page navigations (55a6464)
+- Stale pacman database lock detection and recovery (2ce5fa8)
+- IPv6 fallback for HTTP mirror requests (4525373)
+- Double-click vs single-click distinction on dependency graph nodes (cae14fb)
+
 ## [0.3.4] - 2026-03-26
 
 ### Added
