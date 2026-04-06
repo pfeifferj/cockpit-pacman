@@ -533,6 +533,32 @@ export const MirrorsView: React.FC = () => {
     });
   }, [mirrors, searchFilter, countryFilter]);
 
+  const refreshDiff = useMemo(() => {
+    if (!refreshPreview) return null;
+    const currentUrls = new Set(
+      mirrors.filter(m => m.enabled).map(m => normalizeMirrorUrl(m.url))
+    );
+    const previewUrls = new Set(
+      refreshPreview.mirrors.map(m => normalizeMirrorUrl(m.url))
+    );
+    const kept: Array<{ url: string; comment: string | null }> = [];
+    const added: Array<{ url: string; comment: string | null }> = [];
+    for (const m of refreshPreview.mirrors) {
+      if (currentUrls.has(normalizeMirrorUrl(m.url))) {
+        kept.push(m);
+      } else {
+        added.push(m);
+      }
+    }
+    const removed: Array<{ url: string; comment: string | null }> = [];
+    for (const m of mirrors) {
+      if (m.enabled && !previewUrls.has(normalizeMirrorUrl(m.url))) {
+        removed.push({ url: m.url, comment: m.status?.country ?? m.comment ?? null });
+      }
+    }
+    return { kept, added, removed };
+  }, [refreshPreview, mirrors]);
+
   const sortedMirrors = useMemo(() => {
     if (activeSortIndex === null) return filteredMirrors;
     return [...filteredMirrors].sort((a, b) => {
@@ -1115,25 +1141,60 @@ export const MirrorsView: React.FC = () => {
             <Alert variant="danger" isInline isPlain title={refreshError} className="pf-v6-u-mt-md" />
           )}
 
-          {refreshPreview && (
+          {refreshPreview && refreshDiff && (
             <div className="pf-v6-u-mt-lg">
               <Content component={ContentVariants.p}>
                 <strong>{refreshPreview.total}</strong> mirrors found
                 {refreshPreview.last_check && ` (status checked: ${refreshPreview.last_check})`}
+                {" \u2014 "}
+                <span style={{ color: "var(--pf-t--global--color--status--success--default)" }}>
+                  +{refreshDiff.added.length} added
+                </span>
+                {", "}
+                <span style={{ color: "var(--pf-t--global--color--status--danger--default)" }}>
+                  &minus;{refreshDiff.removed.length} removed
+                </span>
+                {`, ${refreshDiff.kept.length} kept`}
               </Content>
               <div style={{ maxHeight: "300px", overflow: "auto" }} className="pf-v6-u-mt-sm">
                 <Table aria-label="Preview mirrors" variant="compact">
                   <Thead>
                     <Tr>
-                      <Th width={10}>#</Th>
+                      <Th width={10}></Th>
                       <Th>URL</Th>
                       <Th width={20}>Country</Th>
                     </Tr>
                   </Thead>
                   <Tbody>
-                    {refreshPreview.mirrors.map((m, i) => (
+                    {refreshDiff.added.map((m) => (
+                      <Tr key={m.url} style={{ backgroundColor: "rgba(46, 125, 50, 0.08)" }}>
+                        <Td dataLabel="">
+                          <span style={{ color: "#2e7d32", fontWeight: 600 }}>+</span>
+                        </Td>
+                        <Td dataLabel="URL">
+                          <span style={{ fontFamily: "var(--pf-t--global--font--family--mono)", fontSize: "0.875rem" }}>
+                            {m.url}
+                          </span>
+                        </Td>
+                        <Td dataLabel="Country">{m.comment || "-"}</Td>
+                      </Tr>
+                    ))}
+                    {refreshDiff.removed.map((m) => (
+                      <Tr key={m.url} style={{ backgroundColor: "rgba(198, 40, 40, 0.08)" }}>
+                        <Td dataLabel="">
+                          <span style={{ color: "#c62828", fontWeight: 600 }}>&minus;</span>
+                        </Td>
+                        <Td dataLabel="URL">
+                          <span style={{ fontFamily: "var(--pf-t--global--font--family--mono)", fontSize: "0.875rem", textDecoration: "line-through", opacity: 0.7 }}>
+                            {m.url}
+                          </span>
+                        </Td>
+                        <Td dataLabel="Country">{m.comment || "-"}</Td>
+                      </Tr>
+                    ))}
+                    {refreshDiff.kept.map((m) => (
                       <Tr key={m.url}>
-                        <Td dataLabel="#">{i + 1}</Td>
+                        <Td dataLabel="" />
                         <Td dataLabel="URL">
                           <span style={{ fontFamily: "var(--pf-t--global--font--family--mono)", fontSize: "0.875rem" }}>
                             {m.url}
