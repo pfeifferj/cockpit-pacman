@@ -1,0 +1,14 @@
+[
+  {"type": "log", "level": "info", "message": "Synchronizing package databases"},
+  {"type": "log", "level": "debug", "message": "Reading package database"},
+  {"type": "progress", "operation": "upgrade", "package": "linux", "percent": 0, "current": 0, "total": 2},
+  {"type": "download", "filename": "linux-6.7.1.arch1-1-x86_64.pkg.tar.zst", "event": "started"},
+  {"type": "download", "filename": "linux-6.7.1.arch1-1-x86_64.pkg.tar.zst", "event": "progress", "downloaded": 75000000, "total": 150000000},
+  {"type": "download", "filename": "linux-6.7.1.arch1-1-x86_64.pkg.tar.zst", "event": "completed"},
+  {"type": "progress", "operation": "upgrade", "package": "linux", "percent": 50, "current": 1, "total": 2},
+  {"type": "event", "event": "upgraded", "package": "linux"},
+  {"type": "event", "event": "transaction_done", "package": null},
+  {"type": "mirror_test", "url": "https://mirror.example.com/archlinux/$repo/os/$arch", "current": 1, "total": 3, "result": {"url": "https://mirror.example.com/archlinux/$repo/os/$arch", "success": true, "speed_bps": 10485760, "latency_ms": 48, "error": null}},
+  {"type": "mirror_test", "url": "https://mirror2.example.com/archlinux/$repo/os/$arch", "current": 2, "total": 3, "result": {"url": "https://mirror2.example.com/archlinux/$repo/os/$arch", "success": false, "speed_bps": null, "latency_ms": null, "error": "Connection timed out"}},
+  {"type": "complete", "success": true, "message": null}
+]

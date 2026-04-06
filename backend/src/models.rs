@@ -1,7 +1,7 @@
 use archweb_client::models::Signoff;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct NewsItem {
     pub title: String,
     pub link: String,
@@ -9,12 +9,12 @@ pub struct NewsItem {
     pub summary: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct NewsResponse {
     pub items: Vec<NewsItem>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Package {
     pub name: String,
     pub version: String,
@@ -25,7 +25,7 @@ pub struct Package {
     pub repository: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct PackageListResponse {
     pub packages: Vec<Package>,
     pub total: usize,
@@ -35,13 +35,13 @@ pub struct PackageListResponse {
     pub warnings: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct UpdatesResponse {
     pub updates: Vec<UpdateInfo>,
     pub warnings: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct UpdateInfo {
     pub name: String,
     pub current_version: String,
@@ -52,7 +52,7 @@ pub struct UpdateInfo {
     pub repository: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct PackageDetails {
     pub name: String,
     pub version: String,
@@ -78,7 +78,7 @@ pub struct PackageDetails {
     pub update_stats: Option<UpdateStats>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct UpdateStats {
     pub update_count: usize,
     pub first_installed: Option<String>,
@@ -86,7 +86,7 @@ pub struct UpdateStats {
     pub avg_days_between_updates: Option<f64>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct SearchResult {
     pub name: String,
     pub version: String,
@@ -96,7 +96,7 @@ pub struct SearchResult {
     pub installed_version: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct SearchResponse {
     pub results: Vec<SearchResult>,
     pub total: usize,
@@ -105,7 +105,7 @@ pub struct SearchResponse {
     pub repositories: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct SyncPackageDetails {
     pub name: String,
     pub version: String,
@@ -126,13 +126,13 @@ pub struct SyncPackageDetails {
     pub repository: String,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct KeyInfo {
     pub fingerprint: String,
     pub uid: String,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum WarningSeverity {
     Info,
@@ -140,7 +140,7 @@ pub enum WarningSeverity {
     Danger,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct PreflightWarning {
     pub id: String,
     pub severity: WarningSeverity,
@@ -149,40 +149,40 @@ pub struct PreflightWarning {
     pub packages: Vec<String>,
 }
 
-#[derive(Serialize, Default)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct PreflightResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub conflicts: Vec<ConflictInfo>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub replacements: Vec<ReplacementInfo>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub removals: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub providers: Vec<ProviderChoice>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub import_keys: Vec<KeyInfo>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<PreflightWarning>,
     pub packages_to_upgrade: usize,
     pub total_download_size: i64,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ConflictInfo {
     pub package1: String,
     pub package2: String,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ReplacementInfo {
     pub old_package: String,
     pub new_package: String,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ProviderChoice {
     pub dependency: String,
     pub providers: Vec<String>,
@@ -197,7 +197,7 @@ pub struct PreflightState {
     pub import_keys: Vec<KeyInfo>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum StreamEvent {
     #[serde(rename = "log")]
@@ -238,7 +238,7 @@ pub enum StreamEvent {
     },
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct KeyringKey {
     pub fingerprint: String,
     pub uid: String,
@@ -247,7 +247,7 @@ pub struct KeyringKey {
     pub trust: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct KeyringStatusResponse {
     pub keys: Vec<KeyringKey>,
     pub total: usize,
@@ -255,7 +255,7 @@ pub struct KeyringStatusResponse {
     pub warnings: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct OrphanPackage {
     pub name: String,
     pub version: String,
@@ -265,13 +265,13 @@ pub struct OrphanPackage {
     pub repository: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct OrphanResponse {
     pub orphans: Vec<OrphanPackage>,
     pub total_size: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct CachePackage {
     pub name: String,
     pub version: String,
@@ -279,7 +279,7 @@ pub struct CachePackage {
     pub size: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct CacheInfo {
     pub total_size: i64,
     pub package_count: usize,
@@ -287,7 +287,7 @@ pub struct CacheInfo {
     pub path: String,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct LogEntry {
     pub timestamp: String,
     pub action: String,
@@ -296,7 +296,7 @@ pub struct LogEntry {
     pub new_version: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct LogResponse {
     pub entries: Vec<LogEntry>,
     pub total: usize,
@@ -306,7 +306,7 @@ pub struct LogResponse {
     pub total_other: usize,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct LogGroup {
     pub id: String,
     pub start_time: String,
@@ -319,7 +319,7 @@ pub struct LogGroup {
     pub reinstalled_count: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct GroupedLogResponse {
     pub groups: Vec<LogGroup>,
     pub total_groups: usize,
@@ -329,7 +329,7 @@ pub struct GroupedLogResponse {
     pub total_other: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct CachedVersion {
     pub name: String,
     pub version: String,
@@ -339,13 +339,13 @@ pub struct CachedVersion {
     pub is_older: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct DowngradeResponse {
     pub packages: Vec<CachedVersion>,
     pub total: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ScheduledRunEntry {
     pub timestamp: String,
     pub mode: String,
@@ -356,13 +356,13 @@ pub struct ScheduledRunEntry {
     pub details: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ScheduledRunsResponse {
     pub runs: Vec<ScheduledRunEntry>,
     pub total: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct RebootStatus {
     pub requires_reboot: bool,
     pub reason: String,
@@ -379,7 +379,7 @@ pub struct MirrorEntry {
     pub comment: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct MirrorListResponse {
     pub mirrors: Vec<MirrorEntry>,
     pub total: usize,
@@ -388,7 +388,7 @@ pub struct MirrorListResponse {
     pub last_modified: Option<i64>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct MirrorStatus {
     pub url: String,
     pub country: Option<String>,
@@ -402,14 +402,14 @@ pub struct MirrorStatus {
     pub ipv6: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct MirrorStatusResponse {
     pub mirrors: Vec<MirrorStatus>,
     pub total: usize,
     pub last_check: Option<String>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct MirrorTestResult {
     pub url: String,
     pub success: bool,
@@ -418,21 +418,21 @@ pub struct MirrorTestResult {
     pub error: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct SaveMirrorlistResponse {
     pub success: bool,
     pub backup_path: Option<String>,
     pub message: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct RefreshMirrorsResponse {
     pub mirrors: Vec<MirrorEntry>,
     pub total: usize,
     pub last_check: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct MirrorBackup {
     pub timestamp: i64,
     pub date: String,
@@ -441,19 +441,19 @@ pub struct MirrorBackup {
     pub size: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct MirrorBackupListResponse {
     pub backups: Vec<MirrorBackup>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct RestoreMirrorBackupResponse {
     pub success: bool,
     pub backup_path: Option<String>,
     pub message: String,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct DependencyNode {
     pub id: String,
     pub name: String,
@@ -464,14 +464,14 @@ pub struct DependencyNode {
     pub repository: Option<String>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct DependencyEdge {
     pub source: String,
     pub target: String,
     pub edge_type: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct DependencyTreeResponse {
     pub nodes: Vec<DependencyNode>,
     pub edges: Vec<DependencyEdge>,
@@ -480,7 +480,7 @@ pub struct DependencyTreeResponse {
     pub warnings: Vec<String>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum VersionMatch {
     Match,
@@ -488,7 +488,7 @@ pub enum VersionMatch {
     NotInstalled,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct SignoffGroupWithLocal {
     pub pkgbase: String,
     pub pkgnames: Vec<String>,
@@ -509,13 +509,13 @@ pub struct SignoffGroupWithLocal {
     pub version_match: VersionMatch,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct SignoffListResponse {
     pub signoff_groups: Vec<SignoffGroupWithLocal>,
     pub total: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct SignoffActionResponse {
     pub success: bool,
     pub pkgbase: String,
@@ -524,7 +524,7 @@ pub struct SignoffActionResponse {
     pub error: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct PackageSecurityAdvisory {
     pub package: String,
     pub severity: String,
@@ -536,12 +536,12 @@ pub struct PackageSecurityAdvisory {
     pub status: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct SecurityResponse {
     pub advisories: Vec<PackageSecurityAdvisory>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct SecurityInfoAdvisory {
     pub name: String,
     pub date: String,
@@ -549,14 +549,14 @@ pub struct SecurityInfoAdvisory {
     pub advisory_type: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct SecurityInfoGroup {
     pub name: String,
     pub status: String,
     pub severity: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct SecurityInfoIssue {
     pub name: String,
     pub severity: String,
@@ -564,7 +564,7 @@ pub struct SecurityInfoIssue {
     pub status: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct SecurityInfoResponse {
     pub name: String,
     pub advisories: Vec<SecurityInfoAdvisory>,

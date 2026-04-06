@@ -1,0 +1,23 @@
+{
+  "updates": [
+    {
+      "name": "linux",
+      "current_version": "6.7.0-arch1-1",
+      "new_version": "6.7.1-arch1-1",
+      "download_size": 150000000,
+      "current_size": 142000000,
+      "new_size": 145000000,
+      "repository": "core"
+    },
+    {
+      "name": "glibc",
+      "current_version": "2.38-1",
+      "new_version": "2.39-1",
+      "download_size": 8200000,
+      "current_size": 44000000,
+      "new_size": 45000000,
+      "repository": "core"
+    }
+  ],
+  "warnings": []
+}

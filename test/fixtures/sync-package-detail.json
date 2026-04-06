@@ -1,0 +1,19 @@
+{
+  "name": "linux",
+  "version": "6.7.1-arch1-1",
+  "description": "The Linux kernel and modules",
+  "url": "https://www.kernel.org/",
+  "licenses": ["GPL2"],
+  "groups": [],
+  "provides": ["KERNEL2.6"],
+  "depends": ["coreutils", "kmod", "initramfs"],
+  "optdepends": ["crda: to set the correct wireless channels of your country"],
+  "conflicts": [],
+  "replaces": [],
+  "download_size": 150000000,
+  "installed_size": 145000000,
+  "packager": "Jan Alexander Steffens (heftig) <heftig@archlinux.org>",
+  "architecture": "x86_64",
+  "build_date": 1704153600,
+  "repository": "core"
+}

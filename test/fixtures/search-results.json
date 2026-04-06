@@ -1,0 +1,32 @@
+{
+  "results": [
+    {
+      "name": "linux",
+      "version": "6.7.1-arch1-1",
+      "description": "The Linux kernel and modules",
+      "repository": "core",
+      "installed": true,
+      "installed_version": "6.7.0-arch1-1"
+    },
+    {
+      "name": "linux-lts",
+      "version": "6.6.10-1",
+      "description": "The LTS Linux kernel and modules",
+      "repository": "core",
+      "installed": false,
+      "installed_version": null
+    },
+    {
+      "name": "linux-headers",
+      "version": "6.7.1-arch1-1",
+      "description": null,
+      "repository": "core",
+      "installed": false,
+      "installed_version": null
+    }
+  ],
+  "total": 3,
+  "total_installed": 1,
+  "total_not_installed": 2,
+  "repositories": ["core"]
+}

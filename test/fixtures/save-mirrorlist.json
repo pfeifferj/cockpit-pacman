@@ -1,0 +1,5 @@
+{
+  "success": true,
+  "backup_path": "/etc/pacman.d/mirrorlist.bak",
+  "message": "Mirrorlist saved successfully"
+}

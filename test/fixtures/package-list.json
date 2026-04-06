@@ -1,0 +1,27 @@
+{
+  "packages": [
+    {
+      "name": "linux",
+      "version": "6.7.0-arch1-1",
+      "description": "The Linux kernel and modules",
+      "installed_size": 142000000,
+      "install_date": 1704067200,
+      "reason": "explicit",
+      "repository": "core"
+    },
+    {
+      "name": "glibc",
+      "version": "2.39-1",
+      "description": null,
+      "installed_size": 45000000,
+      "install_date": null,
+      "reason": "dependency",
+      "repository": null
+    }
+  ],
+  "total": 2,
+  "total_explicit": 1,
+  "total_dependency": 1,
+  "repositories": ["core", "extra"],
+  "warnings": []
+}

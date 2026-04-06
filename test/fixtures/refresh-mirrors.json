@@ -1,0 +1,16 @@
+{
+  "mirrors": [
+    {
+      "url": "https://mirror.rackspace.com/archlinux/$repo/os/$arch",
+      "enabled": true,
+      "comment": null
+    },
+    {
+      "url": "https://mirror.leaseweb.net/archlinux/$repo/os/$arch",
+      "enabled": true,
+      "comment": "Leaseweb Amsterdam"
+    }
+  ],
+  "total": 2,
+  "last_check": "2024-01-15T12:00:00+00:00"
+}

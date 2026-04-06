@@ -1,0 +1,29 @@
+{
+  "advisories": [
+    {
+      "package": "openssl",
+      "severity": "High",
+      "advisory_type": "multiple issues",
+      "avg_name": "AVG-2024-1234",
+      "cve_ids": ["CVE-2024-0001", "CVE-2024-0002"],
+      "status": "Fixed"
+    },
+    {
+      "package": "curl",
+      "severity": "Medium",
+      "advisory_type": "information disclosure",
+      "avg_name": "AVG-2024-5678",
+      "cve_ids": ["CVE-2024-0003"],
+      "fixed_version": "8.5.0-1",
+      "status": "Fixed"
+    },
+    {
+      "package": "libpng",
+      "severity": "Low",
+      "advisory_type": "denial of service",
+      "avg_name": "AVG-2024-9999",
+      "cve_ids": [],
+      "status": "Vulnerable"
+    }
+  ]
+}

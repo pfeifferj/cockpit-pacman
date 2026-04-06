@@ -1,0 +1,30 @@
+{
+  "mirrors": [
+    {
+      "url": "https://mirror.example.com/archlinux/$repo/os/$arch",
+      "country": "United States",
+      "country_code": "US",
+      "last_sync": "2024-01-01T00:00:00Z",
+      "delay": 3600,
+      "score": 0.95,
+      "completion_pct": 100.0,
+      "active": true,
+      "ipv4": true,
+      "ipv6": false
+    },
+    {
+      "url": "https://mirror.example.de/archlinux/$repo/os/$arch",
+      "country": "Germany",
+      "country_code": "DE",
+      "last_sync": null,
+      "delay": null,
+      "score": null,
+      "completion_pct": null,
+      "active": false,
+      "ipv4": true,
+      "ipv6": true
+    }
+  ],
+  "total": 2,
+  "last_check": "2024-01-01T06:00:00Z"
+}
