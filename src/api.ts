@@ -663,6 +663,7 @@ export interface OrphanPackage {
   installed_size: number;
   install_date: number | null;
   repository: string | null;
+  direct: boolean;
 }
 
 export interface OrphanResponse {
@@ -696,8 +697,11 @@ export function removePackage(
   return runStreamingBackend("remove-package", args, callbacks);
 }
 
-export function removeOrphans(callbacks: UpgradeCallbacks): { cancel: () => void } {
-  const args: string[] = [];
+export function removeOrphans(callbacks: UpgradeCallbacks, packages?: string[]): { cancel: () => void } {
+  const pkgArg = packages && packages.length > 0
+    ? packages.map(pkg => sanitizeSearchInput(pkg)).join(",")
+    : "";
+  const args: string[] = [pkgArg];
   if (callbacks.timeout !== undefined) {
     args.push(String(callbacks.timeout));
   }

@@ -54,7 +54,7 @@ fn print_usage() {
     eprintln!("  refresh-keyring        Refresh keys from keyserver (requires root)");
     eprintln!("  init-keyring           Initialize and populate keyring (requires root)");
     eprintln!("  list-orphans           List orphan packages (dependencies no longer required)");
-    eprintln!("  remove-orphans [timeout]");
+    eprintln!("  remove-orphans [packages] [timeout]");
     eprintln!("                         Remove all orphan packages (requires root)");
     eprintln!("                         timeout: seconds (default: 300)");
     eprintln!("  install-package NAME [timeout]");
@@ -240,8 +240,21 @@ fn main() {
         "init-keyring" => init_keyring(),
         "list-orphans" => list_orphans(),
         "remove-orphans" => {
-            let timeout = args.get(2).and_then(|s| s.parse().ok());
-            remove_orphans(timeout)
+            let filter_pkgs: Vec<String> = args
+                .get(2)
+                .filter(|s| !s.is_empty())
+                .map(|s| {
+                    s.split(',')
+                        .map(|p| p.trim().to_string())
+                        .filter(|p| !p.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let timeout = args.get(3).and_then(|s| s.parse().ok());
+            filter_pkgs
+                .iter()
+                .try_for_each(|p| validate_package_name(p))
+                .and_then(|_| remove_orphans(&filter_pkgs, timeout))
         }
         "install-package" => {
             if args.len() < 3 {

@@ -928,6 +928,95 @@ fn test_strip_html_only_tags() {
     assert_eq!(strip_html_and_truncate("<br/><hr/>", 300), "");
 }
 
+// --- Orphan detection tests (require local alpm.rs checkout at ../../alpm.rs) ---
+
+#[cfg(feature = "integration-tests")]
+mod orphan_detection {
+    use alpm::Alpm;
+    use alpm_utils::{OrphanExt, is_orphan};
+
+    fn test_handle() -> Alpm {
+        Alpm::new("/", "../../alpm.rs/alpm/tests/unneeded_db").unwrap()
+    }
+
+    #[test]
+    fn explicit_package_is_not_orphan() {
+        let handle = test_handle();
+        let pkg = handle.localdb().pkg("explicit-app").unwrap();
+        assert!(!is_orphan(pkg));
+    }
+
+    #[test]
+    fn needed_dependency_is_not_orphan() {
+        let handle = test_handle();
+        let pkg = handle.localdb().pkg("needed-lib").unwrap();
+        assert!(!is_orphan(pkg));
+    }
+
+    #[test]
+    fn unrequired_dependency_is_orphan() {
+        let handle = test_handle();
+        let pkg = handle.localdb().pkg("orphan-a").unwrap();
+        assert!(is_orphan(pkg));
+    }
+
+    #[test]
+    fn transitive_dependency_is_not_direct_orphan() {
+        let handle = test_handle();
+        // orphan-b is required by orphan-a (itself an orphan), so it's not a direct orphan
+        let pkg = handle.localdb().pkg("orphan-b").unwrap();
+        assert!(!is_orphan(pkg));
+    }
+
+    #[test]
+    fn optional_dep_is_not_orphan() {
+        let handle = test_handle();
+        // opt-dep is optional_for explicit-app
+        let pkg = handle.localdb().pkg("opt-dep").unwrap();
+        assert!(!is_orphan(pkg));
+    }
+
+    #[test]
+    fn find_orphans_returns_only_direct_orphans() {
+        let handle = test_handle();
+        let mut names: Vec<_> = handle.find_orphans().map(|p| p.name()).collect();
+        names.sort();
+        assert_eq!(names, ["orphan-a"]);
+    }
+
+    #[test]
+    fn find_unneeded_includes_transitive_orphans() {
+        let handle = test_handle();
+        let mut names: Vec<_> = handle
+            .find_unneeded(false)
+            .iter()
+            .map(|p| p.name())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["opt-dep", "orphan-a", "orphan-b", "orphan-c"]);
+    }
+
+    #[test]
+    fn find_unneeded_keep_optional_preserves_optdeps() {
+        let handle = test_handle();
+        let mut names: Vec<_> = handle
+            .find_unneeded(true)
+            .iter()
+            .map(|p| p.name())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["orphan-a", "orphan-b", "orphan-c"]);
+    }
+
+    #[test]
+    fn provider_package_is_not_orphan() {
+        let handle = test_handle();
+        // provider-pkg provides virtual-dep, which explicit-app depends on
+        let pkg = handle.localdb().pkg("provider-pkg").unwrap();
+        assert!(!is_orphan(pkg));
+    }
+}
+
 // --- Integration tests (require live pacman system) ---
 
 #[cfg(feature = "integration-tests")]

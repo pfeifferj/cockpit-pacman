@@ -263,6 +263,7 @@ pub struct OrphanPackage {
     pub installed_size: i64,
     pub install_date: Option<i64>,
     pub repository: Option<String>,
+    pub direct: bool,
 }
 
 #[derive(Serialize)]
