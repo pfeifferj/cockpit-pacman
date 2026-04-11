@@ -1075,6 +1075,24 @@ export async function deleteMirrorBackup(timestamp: number): Promise<RestoreMirr
   return runBackend<RestoreMirrorBackupResponse>("delete-mirror-backup", [String(timestamp)], { superuser: "require" });
 }
 
+export interface RepoDirective {
+  directive_type: "Server" | "Include";
+  value: string;
+}
+
+export interface RepoConfig {
+  name: string;
+  directives: RepoDirective[];
+}
+
+export interface RepoMirrorsResponse {
+  repos: RepoConfig[];
+}
+
+export async function listRepoMirrors(): Promise<RepoMirrorsResponse> {
+  return runBackend<RepoMirrorsResponse>("list-repo-mirrors");
+}
+
 export interface DependencyNode {
   id: string;
   name: string;

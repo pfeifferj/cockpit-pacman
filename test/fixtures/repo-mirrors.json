@@ -1,0 +1,23 @@
+{
+  "repos": [
+    {
+      "name": "core",
+      "directives": [
+        { "directive_type": "Include", "value": "/etc/pacman.d/mirrorlist" }
+      ]
+    },
+    {
+      "name": "extra",
+      "directives": [
+        { "directive_type": "Include", "value": "/etc/pacman.d/mirrorlist" }
+      ]
+    },
+    {
+      "name": "multilib",
+      "directives": [
+        { "directive_type": "Server", "value": "https://geo.mirror.pkgbuild.com/$repo/os/$arch" },
+        { "directive_type": "Include", "value": "/etc/pacman.d/mirrorlist" }
+      ]
+    }
+  ]
+}

@@ -8,8 +8,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::check_cancel_early;
 use crate::models::{
     MirrorBackup, MirrorBackupListResponse, MirrorEntry, MirrorListResponse, MirrorStatus,
-    MirrorStatusResponse, MirrorTestResult, RefreshMirrorsResponse, RestoreMirrorBackupResponse,
-    SaveMirrorlistResponse, StreamEvent,
+    MirrorStatusResponse, MirrorTestResult, RefreshMirrorsResponse, RepoConfig, RepoDirective,
+    RepoMirrorsResponse, RestoreMirrorBackupResponse, SaveMirrorlistResponse, StreamEvent,
 };
 use crate::util::{TimeoutGuard, emit_event, emit_json, setup_signal_handler};
 use crate::validation::validate_mirror_url;
@@ -559,4 +559,58 @@ fn cleanup_old_backups() -> Result<()> {
     }
 
     Ok(())
+}
+
+const PACMAN_CONF_PATH: &str = "/etc/pacman.conf";
+
+pub fn list_repo_mirrors() -> Result<()> {
+    let path = Path::new(PACMAN_CONF_PATH);
+    if !path.exists() {
+        anyhow::bail!("pacman.conf not found at {}", PACMAN_CONF_PATH);
+    }
+
+    let file = fs::File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut repos: Vec<RepoConfig> = Vec::new();
+    let mut in_repo = false;
+
+    for line in reader.lines() {
+        let line = line?;
+        let trimmed = line.trim();
+
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            let section = &trimmed[1..trimmed.len() - 1];
+            if section == "options" {
+                in_repo = false;
+            } else {
+                in_repo = true;
+                repos.push(RepoConfig {
+                    name: section.to_string(),
+                    directives: Vec::new(),
+                });
+            }
+        } else if in_repo && let Some(repo_config) = repos.last_mut() {
+            if let Some(value) = trimmed
+                .strip_prefix("Server")
+                .and_then(|s| s.trim_start().strip_prefix('='))
+                .map(|s| s.trim())
+            {
+                repo_config.directives.push(RepoDirective {
+                    directive_type: "Server".to_string(),
+                    value: value.to_string(),
+                });
+            } else if let Some(value) = trimmed
+                .strip_prefix("Include")
+                .and_then(|s| s.trim_start().strip_prefix('='))
+                .map(|s| s.trim())
+            {
+                repo_config.directives.push(RepoDirective {
+                    directive_type: "Include".to_string(),
+                    value: value.to_string(),
+                });
+            }
+        }
+    }
+
+    emit_json(&RepoMirrorsResponse { repos })
 }

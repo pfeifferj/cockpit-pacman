@@ -453,6 +453,23 @@ pub struct RestoreMirrorBackupResponse {
     pub message: String,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct RepoDirective {
+    pub directive_type: String,
+    pub value: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct RepoConfig {
+    pub name: String,
+    pub directives: Vec<RepoDirective>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct RepoMirrorsResponse {
+    pub repos: Vec<RepoConfig>,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct DependencyNode {
     pub id: String,

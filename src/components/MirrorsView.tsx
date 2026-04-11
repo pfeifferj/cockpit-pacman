@@ -39,6 +39,10 @@ import {
   FormSelectOption,
   NumberInput,
   Checkbox,
+  Label,
+  ToggleGroup,
+  ToggleGroupItem,
+  Badge,
 } from "@patternfly/react-core";
 import {
   GlobeIcon,
@@ -65,7 +69,9 @@ import {
   RefreshMirrorsProtocol,
   RefreshMirrorsSortBy,
   MirrorBackup,
+  RepoMirrorsResponse,
   listMirrors,
+  listRepoMirrors,
   fetchMirrorStatus,
   testMirrors,
   saveMirrorlist,
@@ -78,6 +84,22 @@ import {
   formatSize,
 } from "../api";
 import { sanitizeErrorMessage } from "../utils";
+
+const STANDARD_MIRRORLIST = "/etc/pacman.d/mirrorlist";
+
+function extractHostname(serverUrl: string): string {
+  try {
+    return new URL(serverUrl.replace("$repo", "_").replace("$arch", "_")).hostname;
+  } catch {
+    return serverUrl;
+  }
+}
+
+type SourceFilter = "all" | "mirrorlist" | "repo";
+
+type UnifiedRow =
+  | { kind: "mirror"; mirror: MirrorWithStatus; index: number }
+  | { kind: "repo"; repoName: string; url: string };
 
 type ViewState = "loading" | "ready" | "testing" | "saving" | "fetching_status" | "success" | "error";
 
@@ -203,6 +225,8 @@ export const MirrorsView: React.FC = () => {
   const [deletingBackups, setDeletingBackups] = useState(false);
   const [restoreConfirmTimestamp, setRestoreConfirmTimestamp] = useState<number | null>(null);
   useBackdropClose(restoreConfirmTimestamp !== null, () => setRestoreConfirmTimestamp(null));
+  const [repoMirrors, setRepoMirrors] = useState<RepoMirrorsResponse | null>(null);
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const cancelRef = useRef<(() => void) | null>(null);
   const logContainerRef = useRef<HTMLDivElement | null>(null);
   const initialStatusFetchedRef = useRef(false);
@@ -306,6 +330,10 @@ export const MirrorsView: React.FC = () => {
       loadBackups();
     }
   };
+
+  useEffect(() => {
+    listRepoMirrors().then(setRepoMirrors).catch(() => {});
+  }, []);
 
   const handleRestore = async (timestamp: number) => {
     setRestoreConfirmTimestamp(null);
@@ -601,6 +629,35 @@ export const MirrorsView: React.FC = () => {
     };
   };
 
+  const repoRows: UnifiedRow[] = useMemo(() => {
+    if (!repoMirrors) return [];
+    const rows: UnifiedRow[] = [];
+    for (const repo of repoMirrors.repos) {
+      for (const d of repo.directives) {
+        if (d.directive_type === "Server") {
+          rows.push({ kind: "repo", repoName: repo.name, url: d.value });
+        } else if (d.directive_type === "Include" && d.value !== STANDARD_MIRRORLIST) {
+          rows.push({ kind: "repo", repoName: repo.name, url: d.value });
+        }
+      }
+    }
+    return rows.sort((a, b) => {
+      if (a.kind !== "repo" || b.kind !== "repo") return 0;
+      return a.repoName.localeCompare(b.repoName);
+    });
+  }, [repoMirrors]);
+
+  const unifiedRows: UnifiedRow[] = useMemo(() => {
+    const mirrorRows: UnifiedRow[] = sortedMirrors.map(m => ({
+      kind: "mirror",
+      mirror: m,
+      index: mirrorIndexMap.get(m.url) ?? -1,
+    }));
+
+    if (sourceFilter === "mirrorlist") return mirrorRows;
+    if (sourceFilter === "repo") return repoRows;
+    return [...mirrorRows, ...repoRows];
+  }, [sortedMirrors, repoRows, mirrorIndexMap, sourceFilter]);
 
   if (state === "loading") {
     return (
@@ -771,6 +828,27 @@ export const MirrorsView: React.FC = () => {
                 aria-label="Search mirrors"
               />
             </ToolbarItem>
+            {repoRows.length > 0 && (
+              <ToolbarItem>
+                <ToggleGroup aria-label="Source filter">
+                  <ToggleGroupItem
+                    text={<>All <Badge isRead>{mirrors.length + repoRows.length}</Badge></>}
+                    isSelected={sourceFilter === "all"}
+                    onChange={() => setSourceFilter("all")}
+                  />
+                  <ToggleGroupItem
+                    text={<>Mirrorlist <Badge isRead>{mirrors.length}</Badge></>}
+                    isSelected={sourceFilter === "mirrorlist"}
+                    onChange={() => setSourceFilter("mirrorlist")}
+                  />
+                  <ToggleGroupItem
+                    text={<>Repo overrides <Badge isRead>{repoRows.length}</Badge></>}
+                    isSelected={sourceFilter === "repo"}
+                    onChange={() => setSourceFilter("repo")}
+                  />
+                </ToggleGroup>
+              </ToolbarItem>
+            )}
             {countries.length > 0 && (
               <ToolbarItem>
                 <Select
@@ -857,83 +935,113 @@ export const MirrorsView: React.FC = () => {
             </Tr>
           </Thead>
           <Tbody>
-            {sortedMirrors.map((mirror) => {
-              const actualIndex = mirrorIndexMap.get(mirror.url) ?? -1;
-              return (
-                <Tr key={mirror.url}>
-                  <Td dataLabel="Enabled">
-                    <Switch
-                      id={`switch-${actualIndex}`}
-                      isChecked={mirror.enabled}
-                      onChange={() => handleToggleEnabled(mirror.url)}
-                      aria-label={`Enable mirror ${mirror.url}`}
-                    />
-                  </Td>
-                  <Td dataLabel="URL">
-                    <Flex alignItems={{ default: "alignItemsCenter" }} spaceItems={{ default: "spaceItemsSm" }}>
-                      {mirror.testResult && (
+            {unifiedRows.map((row) => {
+              if (row.kind === "mirror") {
+                const { mirror, index: actualIndex } = row;
+                return (
+                  <Tr key={`mirror-${mirror.url}`}>
+                    <Td dataLabel="Enabled">
+                      <Switch
+                        id={`switch-${actualIndex}`}
+                        isChecked={mirror.enabled}
+                        onChange={() => handleToggleEnabled(mirror.url)}
+                        aria-label={`Enable mirror ${mirror.url}`}
+                      />
+                    </Td>
+                    <Td dataLabel="URL">
+                      <Flex alignItems={{ default: "alignItemsCenter" }} spaceItems={{ default: "spaceItemsSm" }}>
+                        {mirror.testResult && (
+                          <FlexItem>
+                            {mirror.testResult.success ? (
+                              <CheckCircleIcon color="var(--pf-t--global--icon--color--status--success--default)" />
+                            ) : (
+                              <TimesCircleIcon color="var(--pf-t--global--icon--color--status--danger--default)" />
+                            )}
+                          </FlexItem>
+                        )}
                         <FlexItem>
-                          {mirror.testResult.success ? (
-                            <CheckCircleIcon color="var(--pf-t--global--icon--color--status--success--default)" />
-                          ) : (
-                            <TimesCircleIcon color="var(--pf-t--global--icon--color--status--danger--default)" />
+                          <Flex alignItems={{ default: "alignItemsCenter" }} spaceItems={{ default: "spaceItemsSm" }}>
+                            <FlexItem>
+                              <span style={{ fontFamily: "var(--pf-t--global--font--family--mono)", fontSize: "0.875rem" }}>
+                                {mirror.url}
+                              </span>
+                            </FlexItem>
+                            <FlexItem>
+                              <Label color="blue" variant="outline" isCompact>mirrorlist</Label>
+                            </FlexItem>
+                          </Flex>
+                          {mirror.comment && (
+                            <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)" }}>
+                              {mirror.comment}
+                            </div>
                           )}
                         </FlexItem>
+                      </Flex>
+                    </Td>
+                    <Td dataLabel="Country">
+                      {mirror.status?.country || "-"}
+                      {mirror.status?.country_code && (
+                        <span style={{ marginLeft: "0.5rem", color: "var(--pf-t--global--text--color--subtle)" }}>
+                          ({mirror.status.country_code})
+                        </span>
                       )}
+                    </Td>
+                    <Td dataLabel="Latency">
+                      {mirror.testResult?.latency_ms !== undefined && mirror.testResult?.latency_ms !== null
+                        ? `${mirror.testResult.latency_ms}ms`
+                        : "-"}
+                    </Td>
+                    <Td dataLabel="Score">
+                      {mirror.status?.score !== undefined && mirror.status?.score !== null
+                        ? mirror.status.score.toFixed(2)
+                        : "-"}
+                    </Td>
+                    <Td dataLabel="Actions">
+                      <Flex spaceItems={{ default: "spaceItemsXs" }}>
+                        <FlexItem>
+                          <Button
+                            variant="plain"
+                            aria-label="Move up"
+                            onClick={() => handleMoveUp(actualIndex)}
+                            isDisabled={actualIndex === 0}
+                          >
+                            <ArrowUpIcon />
+                          </Button>
+                        </FlexItem>
+                        <FlexItem>
+                          <Button
+                            variant="plain"
+                            aria-label="Move down"
+                            onClick={() => handleMoveDown(actualIndex)}
+                            isDisabled={actualIndex === mirrors.length - 1}
+                          >
+                            <ArrowDownIcon />
+                          </Button>
+                        </FlexItem>
+                      </Flex>
+                    </Td>
+                  </Tr>
+                );
+              }
+              return (
+                <Tr key={`repo-${row.repoName}-${row.url}`}>
+                  <Td dataLabel="Enabled">{"-"}</Td>
+                  <Td dataLabel="URL">
+                    <Flex alignItems={{ default: "alignItemsCenter" }} spaceItems={{ default: "spaceItemsSm" }}>
                       <FlexItem>
                         <span style={{ fontFamily: "var(--pf-t--global--font--family--mono)", fontSize: "0.875rem" }}>
-                          {mirror.url}
+                          {extractHostname(row.url)}
                         </span>
-                        {mirror.comment && (
-                          <div style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)" }}>
-                            {mirror.comment}
-                          </div>
-                        )}
+                      </FlexItem>
+                      <FlexItem>
+                        <Label color="orange" isCompact>{row.repoName}</Label>
                       </FlexItem>
                     </Flex>
                   </Td>
-                  <Td dataLabel="Country">
-                    {mirror.status?.country || "-"}
-                    {mirror.status?.country_code && (
-                      <span style={{ marginLeft: "0.5rem", color: "var(--pf-t--global--text--color--subtle)" }}>
-                        ({mirror.status.country_code})
-                      </span>
-                    )}
-                  </Td>
-                  <Td dataLabel="Latency">
-                    {mirror.testResult?.latency_ms !== undefined && mirror.testResult?.latency_ms !== null
-                      ? `${mirror.testResult.latency_ms}ms`
-                      : "-"}
-                  </Td>
-                  <Td dataLabel="Score">
-                    {mirror.status?.score !== undefined && mirror.status?.score !== null
-                      ? mirror.status.score.toFixed(2)
-                      : "-"}
-                  </Td>
-                  <Td dataLabel="Actions">
-                    <Flex spaceItems={{ default: "spaceItemsXs" }}>
-                      <FlexItem>
-                        <Button
-                          variant="plain"
-                          aria-label="Move up"
-                          onClick={() => handleMoveUp(actualIndex)}
-                          isDisabled={actualIndex === 0}
-                        >
-                          <ArrowUpIcon />
-                        </Button>
-                      </FlexItem>
-                      <FlexItem>
-                        <Button
-                          variant="plain"
-                          aria-label="Move down"
-                          onClick={() => handleMoveDown(actualIndex)}
-                          isDisabled={actualIndex === mirrors.length - 1}
-                        >
-                          <ArrowDownIcon />
-                        </Button>
-                      </FlexItem>
-                    </Flex>
-                  </Td>
+                  <Td dataLabel="Country">{"-"}</Td>
+                  <Td dataLabel="Latency">{"-"}</Td>
+                  <Td dataLabel="Score">{"-"}</Td>
+                  <Td dataLabel="Actions" />
                 </Tr>
               );
             })}
@@ -1027,6 +1135,7 @@ export const MirrorsView: React.FC = () => {
             </>
           )}
         </ExpandableSection>
+
 
         {statusData && (
           <div className="pf-v6-u-mt-md" style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)" }}>
