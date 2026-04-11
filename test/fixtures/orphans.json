@@ -1,0 +1,21 @@
+{
+  "orphans": [
+    {
+      "name": "old-lib",
+      "version": "2.1-1",
+      "description": "An old library no longer required by any package",
+      "installed_size": 5000000,
+      "install_date": 1600000000,
+      "repository": "extra"
+    },
+    {
+      "name": "old-dev",
+      "version": "1.0-3",
+      "description": null,
+      "installed_size": 1024,
+      "install_date": null,
+      "repository": null
+    }
+  ],
+  "total_size": 5001024
+}

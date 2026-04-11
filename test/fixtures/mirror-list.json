@@ -1,0 +1,23 @@
+{
+  "mirrors": [
+    {
+      "url": "https://mirror.example.com/archlinux/$repo/os/$arch",
+      "enabled": true,
+      "comment": null
+    },
+    {
+      "url": "https://mirror2.example.com/archlinux/$repo/os/$arch",
+      "enabled": false,
+      "comment": "Disabled for maintenance"
+    },
+    {
+      "url": "https://mirror3.example.org/arch/$repo/os/$arch",
+      "enabled": true,
+      "comment": null
+    }
+  ],
+  "total": 3,
+  "enabled_count": 2,
+  "path": "/etc/pacman.d/mirrorlist",
+  "last_modified": 1704067200
+}

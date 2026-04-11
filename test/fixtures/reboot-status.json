@@ -1,0 +1,8 @@
+{
+  "requires_reboot": true,
+  "reason": "kernel_update",
+  "running_kernel": "6.6.9-1",
+  "installed_kernel": "6.7.0.arch1-1",
+  "kernel_package": "linux",
+  "updated_packages": ["linux", "linux-firmware"]
+}

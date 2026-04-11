@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "title": "grub 2.12-3 requires manual intervention",
+      "link": "https://archlinux.org/news/grub-2123-requires-manual-intervention/",
+      "published": "2024-02-01T00:00:00+00:00",
+      "summary": "Users of grub need to reinstall grub after this update to ensure the system remains bootable."
+    },
+    {
+      "title": "Arch Linux 2024.01.01 released",
+      "link": "https://archlinux.org/news/arch-linux-20240101-released/",
+      "published": "2024-01-01T00:00:00+00:00",
+      "summary": "A new installation medium is available for download."
+    }
+  ]
+}

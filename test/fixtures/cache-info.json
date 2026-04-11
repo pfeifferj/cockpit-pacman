@@ -1,0 +1,25 @@
+{
+  "total_size": 524288000,
+  "package_count": 3,
+  "packages": [
+    {
+      "name": "linux",
+      "version": "6.7.0-arch1-1",
+      "filename": "linux-6.7.0.arch1-1-x86_64.pkg.tar.zst",
+      "size": 142000000
+    },
+    {
+      "name": "linux",
+      "version": "6.6.9-1",
+      "filename": "linux-6.6.9-1-x86_64.pkg.tar.zst",
+      "size": 140000000
+    },
+    {
+      "name": "glibc",
+      "version": "2.39-1",
+      "filename": "glibc-2.39-1-x86_64.pkg.tar.zst",
+      "size": 45000000
+    }
+  ],
+  "path": "/var/cache/pacman/pkg"
+}

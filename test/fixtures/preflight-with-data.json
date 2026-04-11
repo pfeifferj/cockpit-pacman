@@ -1,0 +1,27 @@
+{
+  "success": true,
+  "conflicts": [
+    {"package1": "mesa", "package2": "mesa-amber"}
+  ],
+  "replacements": [
+    {"old_package": "libfoo", "new_package": "libfoo2"}
+  ],
+  "removals": ["old-compat-package"],
+  "providers": [
+    {"dependency": "sh", "providers": ["bash", "dash"]}
+  ],
+  "import_keys": [
+    {"fingerprint": "ABCDEF1234567890ABCDEF1234567890ABCDEF12", "uid": "Packager <pkg@archlinux.org>"}
+  ],
+  "warnings": [
+    {
+      "id": "partial_upgrade_risk",
+      "severity": "warning",
+      "title": "Partial Upgrade Risk",
+      "message": "Upgrading only selected packages may leave the system in an inconsistent state.",
+      "packages": ["mesa"]
+    }
+  ],
+  "packages_to_upgrade": 3,
+  "total_download_size": 200000000
+}

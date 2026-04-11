@@ -1,0 +1,21 @@
+{
+  "keys": [
+    {
+      "fingerprint": "ABCDEF1234567890ABCDEF1234567890ABCDEF12",
+      "uid": "Arch Linux Trusted Key <key@archlinux.org>",
+      "created": "2023-01-01",
+      "expires": null,
+      "trust": "full"
+    },
+    {
+      "fingerprint": "0011223344556677889900112233445566778899",
+      "uid": "Arch Linux Developer <dev@archlinux.org>",
+      "created": "2022-06-15",
+      "expires": "2025-06-15",
+      "trust": "full"
+    }
+  ],
+  "total": 2,
+  "master_key_initialized": true,
+  "warnings": []
+}

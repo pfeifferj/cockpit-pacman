@@ -1,0 +1,61 @@
+{
+  "groups": [
+    {
+      "id": "group-0",
+      "start_time": "2024-01-01T10:00:00+0000",
+      "end_time": "2024-01-01T10:05:00+0000",
+      "entries": [
+        {
+          "timestamp": "2024-01-01T10:05:00+0000",
+          "action": "upgraded",
+          "package": "linux",
+          "old_version": "6.6.9-1",
+          "new_version": "6.7.0-arch1-1"
+        },
+        {
+          "timestamp": "2024-01-01T10:04:00+0000",
+          "action": "upgraded",
+          "package": "glibc",
+          "old_version": "2.38-1",
+          "new_version": "2.39-1"
+        }
+      ],
+      "upgraded_count": 2,
+      "installed_count": 0,
+      "removed_count": 0,
+      "downgraded_count": 0,
+      "reinstalled_count": 0
+    },
+    {
+      "id": "group-1",
+      "start_time": "2023-12-15T09:00:00+0000",
+      "end_time": "2023-12-15T09:00:10+0000",
+      "entries": [
+        {
+          "timestamp": "2023-12-15T09:00:10+0000",
+          "action": "installed",
+          "package": "neovim",
+          "old_version": null,
+          "new_version": "0.9.5-1"
+        },
+        {
+          "timestamp": "2023-12-15T09:00:00+0000",
+          "action": "removed",
+          "package": "vim",
+          "old_version": "9.0.2189-1",
+          "new_version": null
+        }
+      ],
+      "upgraded_count": 0,
+      "installed_count": 1,
+      "removed_count": 1,
+      "downgraded_count": 0,
+      "reinstalled_count": 0
+    }
+  ],
+  "total_groups": 2,
+  "total_upgraded": 2,
+  "total_installed": 1,
+  "total_removed": 1,
+  "total_other": 0
+}
