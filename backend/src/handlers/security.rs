@@ -9,7 +9,7 @@ use crate::models::{PackageSecurityAdvisory, SecurityInfoResponse, SecurityRespo
 use crate::util::emit_json;
 
 pub fn check_security() -> Result<()> {
-    let client = SecurityClient::new();
+    let client = SecurityClient::new(crate::util::detected_ip_family());
     let avgs = match client.fetch_vulnerable() {
         Ok(v) => v,
         Err(e) => {
@@ -84,7 +84,7 @@ pub fn check_security() -> Result<()> {
 }
 
 pub fn security_info(name: &str) -> Result<()> {
-    let client = SecurityClient::new();
+    let client = SecurityClient::new(crate::util::detected_ip_family());
     let info = client.fetch_package(name)?;
 
     let advisories: Vec<_> = info

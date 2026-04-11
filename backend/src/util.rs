@@ -2,10 +2,34 @@ use anyhow::Result;
 use serde::Serialize;
 use std::cmp::Ordering;
 use std::io::{self, Write};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
+use ureq::config::IpFamily;
 
 use crate::models::StreamEvent;
+
+static DETECTED_IP_FAMILY: LazyLock<IpFamily> = LazyLock::new(|| {
+    // Resolve archlinux.org and probe its AAAA record with a short TCP connect.
+    let ipv6_addr = ("archlinux.org", 443)
+        .to_socket_addrs()
+        .ok()
+        .and_then(|addrs| addrs.into_iter().find(SocketAddr::is_ipv6));
+
+    let Some(addr) = ipv6_addr else {
+        return IpFamily::Any;
+    };
+
+    match TcpStream::connect_timeout(&addr, Duration::from_millis(500)) {
+        Ok(_) => IpFamily::Any,
+        Err(_) => IpFamily::Ipv4Only,
+    }
+});
+
+pub fn detected_ip_family() -> IpFamily {
+    *DETECTED_IP_FAMILY
+}
 
 static CANCELLED: AtomicBool = AtomicBool::new(false);
 

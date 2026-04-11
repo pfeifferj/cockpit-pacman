@@ -19,6 +19,7 @@ fn fetch_news_items(days: u32) -> Result<Vec<NewsItem>> {
     let agent = ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(15)))
+            .ip_family(crate::util::detected_ip_family())
             .build(),
     );
 

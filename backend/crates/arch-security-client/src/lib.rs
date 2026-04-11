@@ -15,14 +15,15 @@ pub struct SecurityClient {
 }
 
 impl SecurityClient {
-    pub fn new() -> Self {
-        Self::with_base_url(DEFAULT_BASE_URL)
+    pub fn new(ip_family: ureq::config::IpFamily) -> Self {
+        Self::with_base_url(DEFAULT_BASE_URL, ip_family)
     }
 
-    pub fn with_base_url(url: &str) -> Self {
+    pub fn with_base_url(url: &str, ip_family: ureq::config::IpFamily) -> Self {
         let config = ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(15)))
             .timeout_connect(Some(Duration::from_secs(5)))
+            .ip_family(ip_family)
             .build();
         Self {
             agent: ureq::Agent::new_with_config(config),
@@ -59,12 +60,6 @@ impl SecurityClient {
             .take(MAX_RESPONSE_BYTES)
             .read_to_end(&mut buf)?;
         String::from_utf8(buf).context("response is not valid UTF-8")
-    }
-}
-
-impl Default for SecurityClient {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

@@ -17,13 +17,19 @@ pub struct SignoffSession {
 }
 
 impl SignoffSession {
-    pub fn login(username: &str, password: &str, base_url: &str) -> Result<Self> {
+    pub fn login(
+        username: &str,
+        password: &str,
+        base_url: &str,
+        ip_family: ureq::config::IpFamily,
+    ) -> Result<Self> {
         let config = ureq::Agent::config_builder()
             .timeout_global(Some(std::time::Duration::from_secs(20)))
             .timeout_connect(Some(std::time::Duration::from_secs(10)))
             .timeout_send_body(Some(std::time::Duration::from_secs(10)))
             .timeout_recv_body(Some(std::time::Duration::from_secs(15)))
             .max_redirects(3)
+            .ip_family(ip_family)
             .build();
         let agent = ureq::Agent::new_with_config(config);
         let mut session = Self {
