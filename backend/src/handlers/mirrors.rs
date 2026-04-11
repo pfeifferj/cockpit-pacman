@@ -126,6 +126,7 @@ pub fn fetch_mirror_status() -> Result<()> {
     let agent = ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(30)))
+            .ip_family(crate::util::detected_ip_family())
             .build(),
     );
 
@@ -168,6 +169,7 @@ pub fn refresh_mirrors(
     let agent = ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(30)))
+            .ip_family(crate::util::detected_ip_family())
             .build(),
     );
 
@@ -250,6 +252,7 @@ pub fn test_mirrors(urls: &[String], timeout_secs: u64) -> Result<()> {
     let agent = ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(10)))
+            .ip_family(crate::util::detected_ip_family())
             .build(),
     );
 

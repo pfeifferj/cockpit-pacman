@@ -40,7 +40,12 @@ fn get_local_version(handle: &alpm::Alpm, pkgbase: &str, pkgnames: &[String]) ->
 
 pub fn signoff_list(creds_b64: &str) -> Result<()> {
     let (username, password) = resolve_credentials(creds_b64)?;
-    let session = SignoffSession::login(&username, &password, DEFAULT_BASE_URL)?;
+    let session = SignoffSession::login(
+        &username,
+        &password,
+        DEFAULT_BASE_URL,
+        crate::util::detected_ip_family(),
+    )?;
     let groups = session.get_signoffs()?;
     session.logout();
 
@@ -105,7 +110,12 @@ fn run_signoff_action(
     let pkgbase = &args[1];
 
     let (username, password) = resolve_credentials(&args[0])?;
-    let session = SignoffSession::login(&username, &password, DEFAULT_BASE_URL)?;
+    let session = SignoffSession::login(
+        &username,
+        &password,
+        DEFAULT_BASE_URL,
+        crate::util::detected_ip_family(),
+    )?;
     let spec = SignoffSpec {
         repo: args[2].clone(),
         arch: args[3].clone(),
