@@ -1,6 +1,7 @@
 use crate::models::{
     MirrorBackup, MirrorBackupListResponse, NewsItem, NewsResponse, Package, PackageDetails,
-    PackageListResponse, RestoreMirrorBackupResponse, SearchResult, UpdateInfo, UpdatesResponse,
+    PackageListResponse, RepoConfig, RepoDirective, RepoMirrorsResponse,
+    RestoreMirrorBackupResponse, SearchResult, UpdateInfo, UpdatesResponse,
 };
 use crate::util::parse_package_filename;
 use crate::validation::{
@@ -1082,4 +1083,49 @@ fn test_restore_mirror_backup_response_no_backup_path() {
 
     let json = serde_json::to_string(&response).unwrap();
     assert!(json.contains("\"backup_path\":null"));
+}
+
+#[test]
+fn test_repo_mirrors_response_serialization() {
+    let response = RepoMirrorsResponse {
+        repos: vec![
+            RepoConfig {
+                name: "core".to_string(),
+                directives: vec![RepoDirective {
+                    directive_type: "Include".to_string(),
+                    value: "/etc/pacman.d/mirrorlist".to_string(),
+                }],
+            },
+            RepoConfig {
+                name: "multilib".to_string(),
+                directives: vec![
+                    RepoDirective {
+                        directive_type: "Server".to_string(),
+                        value: "https://geo.mirror.pkgbuild.com/$repo/os/$arch".to_string(),
+                    },
+                    RepoDirective {
+                        directive_type: "Include".to_string(),
+                        value: "/etc/pacman.d/mirrorlist".to_string(),
+                    },
+                ],
+            },
+        ],
+    };
+
+    let json = serde_json::to_string(&response).unwrap();
+    let parsed: RepoMirrorsResponse = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed.repos.len(), 2);
+    assert_eq!(parsed.repos[0].name, "core");
+    assert_eq!(parsed.repos[0].directives.len(), 1);
+    assert_eq!(parsed.repos[0].directives[0].directive_type, "Include");
+    assert_eq!(parsed.repos[1].name, "multilib");
+    assert_eq!(parsed.repos[1].directives.len(), 2);
+    assert_eq!(parsed.repos[1].directives[0].directive_type, "Server");
+}
+
+#[test]
+fn test_repo_mirrors_response_empty() {
+    let response = RepoMirrorsResponse { repos: vec![] };
+    let json = serde_json::to_string(&response).unwrap();
+    assert_eq!(json, "{\"repos\":[]}");
 }

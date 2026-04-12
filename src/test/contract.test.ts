@@ -71,6 +71,7 @@ import {
   fetchNews,
   getScheduledRuns,
   getSyncPackageInfo,
+  listRepoMirrors,
 } from "../api";
 
 // JSON fixtures — vitest resolves these at build time via Vite's JSON import support
@@ -97,6 +98,7 @@ import securityInfoFixture from "../../test/fixtures/security-info.json";
 import newsFixture from "../../test/fixtures/news.json";
 import scheduledRunsFixture from "../../test/fixtures/scheduled-runs.json";
 import syncPackageDetailFixture from "../../test/fixtures/sync-package-detail.json";
+import repoMirrorsFixture from "../../test/fixtures/repo-mirrors.json";
 
 function spawnReturns(data: unknown): void {
   mockSpawn.mockReturnValue(
@@ -417,6 +419,38 @@ describe("listMirrors contract", () => {
     spawnReturns({ ...mirrorListFixture, last_modified: null });
     const withNull = await listMirrors();
     expect(withNull.last_modified).toBeNull();
+  });
+});
+
+
+describe("listRepoMirrors contract", () => {
+  it("parses repo-mirrors fixture into RepoMirrorsResponse shape", async () => {
+    spawnReturns(repoMirrorsFixture);
+    const result = await listRepoMirrors();
+
+    expect(Array.isArray(result.repos)).toBe(true);
+    expect(result.repos.length).toBe(3);
+  });
+
+  it("each repo has name and directives array", async () => {
+    spawnReturns(repoMirrorsFixture);
+    const result = await listRepoMirrors();
+
+    for (const repo of result.repos) {
+      expect(typeof repo.name).toBe("string");
+      expect(Array.isArray(repo.directives)).toBe(true);
+      for (const d of repo.directives) {
+        expect(["Server", "Include"]).toContain(d.directive_type);
+        expect(typeof d.value).toBe("string");
+      }
+    }
+  });
+
+  it("handles empty repos list", async () => {
+    spawnReturns({ repos: [] });
+    const result = await listRepoMirrors();
+
+    expect(result.repos).toEqual([]);
   });
 });
 

@@ -5,11 +5,11 @@ use cockpit_pacman_backend::handlers::{
     downgrade_package, fetch_mirror_status, fetch_news, get_cache_info, get_dependency_tree,
     get_grouped_history, get_history, get_reboot_status, get_schedule_config, get_scheduled_runs,
     init_keyring, install_package, keyring_status, list_downgrades, list_ignored, list_installed,
-    list_mirror_backups, list_mirrors, list_orphans, local_package_info, preflight_upgrade,
-    refresh_keyring, refresh_mirrors, remove_ignored, remove_orphans, remove_package,
-    remove_stale_lock, restore_mirror_backup, run_upgrade, save_mirrorlist, scheduled_run, search,
-    security_info, set_schedule_config, signoff_list, signoff_revoke, signoff_sign, sync_database,
-    sync_package_info, test_mirrors,
+    list_mirror_backups, list_mirrors, list_orphans, list_repo_mirrors, local_package_info,
+    preflight_upgrade, refresh_keyring, refresh_mirrors, remove_ignored, remove_orphans,
+    remove_package, remove_stale_lock, restore_mirror_backup, run_upgrade, save_mirrorlist,
+    scheduled_run, search, security_info, set_schedule_config, signoff_list, signoff_revoke,
+    signoff_sign, sync_database, sync_package_info, test_mirrors,
 };
 use cockpit_pacman_backend::models::MirrorEntry;
 use cockpit_pacman_backend::validation::{
@@ -96,6 +96,7 @@ fn print_usage() {
     eprintln!("  scheduled-run          Execute scheduled operation (called by systemd)");
     eprintln!("  reboot-status          Check if system reboot is recommended");
     eprintln!("  list-mirrors           List mirrors from /etc/pacman.d/mirrorlist");
+    eprintln!("  list-repo-mirrors      List per-repository mirror servers from pacman.conf");
     eprintln!("  fetch-mirror-status    Fetch mirror status from archlinux.org API");
     eprintln!("  refresh-mirrors [count] [country] [protocol] [sort_by]");
     eprintln!("                         Generate a ranked mirrorlist from archlinux.org API");
@@ -363,6 +364,7 @@ fn main() {
         "scheduled-run" => scheduled_run(),
         "reboot-status" => get_reboot_status(),
         "list-mirrors" => list_mirrors(),
+        "list-repo-mirrors" => list_repo_mirrors(),
         "fetch-mirror-status" => fetch_mirror_status(),
         "refresh-mirrors" => {
             let count = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(20usize);
