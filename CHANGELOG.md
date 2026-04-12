@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.3.5] - 2026-04-XX
+## [0.3.5] - 2026-04-12
 
 ### Added
 - Reboot Now button and reboot-on-completion checkbox in post-upgrade flow (ea38b6c)
@@ -12,9 +12,9 @@
 
 ### Changed
 - Unified mirrors table combining global mirrorlist and repo overrides (ada39fe)
+- All timestamps display as relative time with full timestamp on hover (3ef9fa4)
 
 ### Fixed
-- Dismissed news not persisting across page navigations (55a6464)
 - Stale pacman database lock detection and recovery (2ce5fa8)
 - IPv6 fallback for HTTP mirror requests (4525373)
 - Double-click vs single-click distinction on dependency graph nodes (cae14fb)
