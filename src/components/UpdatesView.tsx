@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { ARCH_STATUS_URL, DISMISSED_NEWS_PATH, LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES, NEWS_LOOKBACK_DAYS, REBOOT_PACKAGES } from "../constants";
+import { ARCH_STATUS_URL, LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES, NEWS_LOOKBACK_DAYS, REBOOT_PACKAGES } from "../constants";
 import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
 import { useBackdropClose } from "../hooks/useBackdropClose";
 import { usePackageDetails } from "../hooks/usePackageDetails";
@@ -340,7 +340,14 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
   const [securityLoading, setSecurityLoading] = useState(true);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [newsError, setNewsError] = useState(false);
-  const [dismissedNews, setDismissedNews] = useState<Set<string>>(new Set());
+  const [dismissedNews, setDismissedNews] = useState<Set<string>>(() => {
+    try {
+      const stored = window.localStorage.getItem("cockpit-pacman-dismissed-news");
+      return stored ? new Set(JSON.parse(stored) as string[]) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
 
   const { activeSortKey, activeSortDirection, getSortParams } = useSortableTable({
     columns: { name: 1, repo: 2, download: 4, installed: 5, net: 6 },
@@ -442,7 +449,9 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
     setDismissedNews((prev) => {
       const next = new Set(prev);
       next.add(link);
-      cockpit.file(DISMISSED_NEWS_PATH).replace(JSON.stringify([...next])).catch(() => {});
+      try {
+        window.localStorage.setItem("cockpit-pacman-dismissed-news", JSON.stringify([...next]));
+      } catch { /* localStorage unavailable */ }
       return next;
     });
   }, []);
@@ -531,17 +540,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
   useEffect(() => {
     loadConfigIgnored();
   }, [loadConfigIgnored]);
-
-  useEffect(() => {
-    cockpit.file(DISMISSED_NEWS_PATH).read()
-      .then((content) => {
-        if (content) {
-          const links = JSON.parse(content) as string[];
-          setDismissedNews(new Set(links));
-        }
-      })
-      .catch(() => {});
-  }, []);
 
   const loadRebootStatus = useCallback(async () => {
     try {
