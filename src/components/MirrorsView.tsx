@@ -6,6 +6,7 @@ import {
   CardTitle,
   Button,
   Alert,
+  AlertActionCloseButton,
   EmptyState,
   EmptyStateBody,
   EmptyStateActions,
@@ -223,6 +224,7 @@ export const MirrorsView: React.FC = () => {
   const [isFetchingStatus, setIsFetchingStatus] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testProgress, setTestProgress] = useState<{ current: number; total: number } | null>(null);
+  const [testResultDismissed, setTestResultDismissed] = useState(false);
   const cancelRef = useRef<(() => void) | null>(null);
   const initialAutoRunRef = useRef(false);
 
@@ -376,6 +378,7 @@ export const MirrorsView: React.FC = () => {
 
     setIsTesting(true);
     setTestProgress(null);
+    setTestResultDismissed(false);
 
     const { cancel } = testMirrors(
       {
@@ -857,28 +860,33 @@ export const MirrorsView: React.FC = () => {
         </Toolbar>
 
         {(isFetchingStatus || isTesting) && (
-          <Flex alignItems={{ default: "alignItemsCenter" }} spaceItems={{ default: "spaceItemsSm" }} className="pf-v6-u-mb-sm">
-            <FlexItem><Spinner size="sm" /></FlexItem>
-            <FlexItem>
-              {isFetchingStatus && "Fetching mirror status..."}
-              {isTesting && testProgress
-                ? `Testing mirrors (${testProgress.current}/${testProgress.total})...`
-                : isTesting ? "Starting mirror tests..." : null}
-            </FlexItem>
-            {isTesting && (
-              <FlexItem>
-                <Button variant="link" isInline onClick={handleCancel}>Cancel</Button>
-              </FlexItem>
-            )}
-          </Flex>
+          <Alert
+            variant="info"
+            isInline
+            className="pf-v6-u-mb-sm"
+            customIcon={<Spinner size="sm" />}
+            title={
+              isFetchingStatus
+                ? "Fetching mirror status..."
+                : testProgress
+                  ? `Testing mirrors (${testProgress.current}/${testProgress.total})...`
+                  : "Starting mirror tests..."
+            }
+            actionLinks={
+              isTesting
+                ? <Button variant="link" isInline onClick={handleCancel}>Cancel</Button>
+                : undefined
+            }
+          />
         )}
 
-        {!isTesting && testProgress && (
+        {!isTesting && testProgress && !testResultDismissed && (
           <Alert
             variant="info"
             title={`Tested ${testProgress.total} mirror${testProgress.total !== 1 ? "s" : ""}`}
             isInline
             className="pf-v6-u-mb-sm"
+            actionClose={<AlertActionCloseButton onClose={() => setTestResultDismissed(true)} />}
             actionLinks={
               <Button variant="link" isInline onClick={handleSortByLatency}>
                 Sort by latency

@@ -916,6 +916,16 @@ export async function getRebootStatus(): Promise<RebootStatus> {
   return runBackend<RebootStatus>("reboot-status");
 }
 
+export function rebootSystem(): Promise<void> {
+  const client = cockpit.dbus("org.freedesktop.login1", { bus: "system", superuser: "try" });
+  return client.call(
+    "/org/freedesktop/login1",
+    "org.freedesktop.login1.Manager",
+    "Reboot",
+    [cockpit.variant("b", false)],
+  ).then(() => client.close()) as Promise<void>;
+}
+
 export interface MirrorEntry {
   url: string;
   enabled: boolean;

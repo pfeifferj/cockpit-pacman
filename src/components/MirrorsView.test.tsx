@@ -492,6 +492,38 @@ describe("MirrorsView", () => {
     });
   });
 
+  it("dismisses test result banner when close button is clicked", async () => {
+    let capturedCallbacks: Parameters<typeof api.testMirrors>[0] | null = null;
+    mockTestMirrors.mockImplementation((callbacks) => {
+      capturedCallbacks = callbacks;
+      return { cancel: vi.fn() };
+    });
+
+    render(<MirrorsView />);
+    await waitFor(() => {
+      expect(mockTestMirrors).toHaveBeenCalled();
+    });
+
+    await act(async () => {
+      capturedCallbacks!.onTestResult!(
+        { url: "https://mirror1.example.com/$repo/os/$arch", success: true, latency_ms: 10, speed_bps: null, error: null },
+        1, 1
+      );
+    });
+    await act(async () => {
+      capturedCallbacks!.onComplete!();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Tested 1 mirror\b/)).toBeInTheDocument();
+    });
+
+    const closeButton = screen.getByLabelText("Close Info alert: alert: Tested 1 mirror");
+    fireEvent.click(closeButton);
+
+    expect(screen.queryByText(/Tested 1 mirror\b/)).not.toBeInTheDocument();
+  });
+
   it("re-runs auto-test after retry from error state", async () => {
     mockListMirrors.mockRejectedValueOnce(new Error("network error"));
 

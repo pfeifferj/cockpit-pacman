@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { ARCH_STATUS_URL, LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES, NEWS_LOOKBACK_DAYS } from "../constants";
+import { ARCH_STATUS_URL, LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES, NEWS_LOOKBACK_DAYS, REBOOT_PACKAGES } from "../constants";
 import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
 import { useBackdropClose } from "../hooks/useBackdropClose";
 import { usePackageDetails } from "../hooks/usePackageDetails";
@@ -55,6 +55,7 @@ import {
   ArrowUpIcon,
   ArrowDownIcon,
   OutlinedQuestionCircleIcon,
+  PowerOffIcon,
 } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
@@ -74,6 +75,7 @@ import {
   formatNumber,
   listIgnoredPackages,
   getRebootStatus,
+  rebootSystem,
   listOrphans,
   getCacheInfo,
   getKeyringStatus,
@@ -327,6 +329,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
   const [acknowledgedKeyImports, setAcknowledgedKeyImports] = useState(false);
   const [acknowledgedWarnings, setAcknowledgedWarnings] = useState<Set<string>>(new Set());
   const [rebootStatus, setRebootStatus] = useState<RebootStatus | null>(null);
+  const [rebootOnComplete, setRebootOnComplete] = useState(false);
   const [orphanCount, setOrphanCount] = useState<number | null>(null);
   const [cacheSize, setCacheSize] = useState<number | null>(null);
   const [keyringStatus, setKeyringStatus] = useState<KeyringStatusResponse | null>(null);
@@ -408,6 +411,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
   // Calculate selected updates for summary
   const selectedUpdates = useMemo(() => {
     return updates.filter((u) => selectedPackages.has(u.name));
+  }, [updates, selectedPackages]);
+
+  const upgradeNeedsReboot = useMemo(() => {
+    return updates.some((u) => selectedPackages.has(u.name) && REBOOT_PACKAGES.has(u.name));
   }, [updates, selectedPackages]);
 
   // Check if all required acknowledgments are made for dangerous operations
@@ -745,6 +752,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
         setState("success");
         setUpdates([]);
         cancelRef.current = null;
+        if (rebootOnComplete) {
+          rebootSystem().catch(() => loadRebootStatus());
+          return;
+        }
         loadRebootStatus();
       },
       onError: (err) => {
@@ -818,6 +829,11 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
       variant="warning"
       title="System reboot recommended"
       className="pf-v6-u-mb-md"
+      actionLinks={
+        <Button variant="warning" icon={<PowerOffIcon />} onClick={() => rebootSystem()}>
+          Reboot Now
+        </Button>
+      }
     >
       {rebootStatus.reason === "kernel_update" ? (
         <>
@@ -928,6 +944,16 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
             measureLocation={progressValue !== undefined ? ProgressMeasureLocation.outside : ProgressMeasureLocation.none}
             aria-label="Upgrade progress"
           />
+
+          {upgradeNeedsReboot && (
+            <Checkbox
+              id="reboot-on-complete"
+              label="Reboot when complete"
+              isChecked={rebootOnComplete}
+              onChange={(_event, checked) => setRebootOnComplete(checked)}
+              className="pf-v6-u-mt-md"
+            />
+          )}
 
           <ExpandableSection
             toggleText={isDetailsExpanded ? "Hide details" : "Show details"}
