@@ -86,6 +86,7 @@ export function useForceGraph(
 
     zoomRef.current = zoom;
     svg.call(zoom);
+    svg.on("dblclick.zoom", null);
     svg.call(zoom.transform, d3.zoomIdentity.translate(options.width / 2, options.height / 2));
 
     const simulation = d3.forceSimulation<ForceGraphNode>(graphNodes)
@@ -165,11 +166,21 @@ export function useForceGraph(
       .attr("font-size", "11px")
       .attr("fill", "var(--pf-t--global--text--color--regular)");
 
+    let clickTimer: ReturnType<typeof setTimeout> | null = null;
+
     node.on("click", (_event, d) => {
-      options.onNodeClick?.(d);
+      if (clickTimer) clearTimeout(clickTimer);
+      clickTimer = setTimeout(() => {
+        clickTimer = null;
+        options.onNodeClick?.(d);
+      }, 250);
     });
 
     node.on("dblclick", (_event, d) => {
+      if (clickTimer) {
+        clearTimeout(clickTimer);
+        clickTimer = null;
+      }
       options.onNodeDoubleClick?.(d);
     });
 
@@ -187,6 +198,7 @@ export function useForceGraph(
     });
 
     return () => {
+      if (clickTimer) clearTimeout(clickTimer);
       simulation.stop();
     };
   }, [nodes, edges, rootId, options]);
