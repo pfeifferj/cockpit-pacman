@@ -532,6 +532,17 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
     loadConfigIgnored();
   }, [loadConfigIgnored]);
 
+  useEffect(() => {
+    cockpit.file(DISMISSED_NEWS_PATH).read()
+      .then((content) => {
+        if (content) {
+          const links = JSON.parse(content) as string[];
+          setDismissedNews(new Set(links));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const loadRebootStatus = useCallback(async () => {
     try {
       const status = await getRebootStatus();
@@ -548,20 +559,14 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
   const loadSummary = useCallback(async () => {
     setSummaryLoading(true);
     type NewsResult = { ok: true; items: NewsItem[] } | { ok: false };
-    const [orphans, cache, keyring, newsResult, dismissedRaw] = await Promise.all([
+    const [orphans, cache, keyring, newsResult] = await Promise.all([
       listOrphans().catch(() => null),
       getCacheInfo().catch(() => null),
       getKeyringStatus().catch(() => null),
       fetchNews(NEWS_LOOKBACK_DAYS)
         .then((r): NewsResult => ({ ok: true, items: r.items }))
         .catch((): NewsResult => ({ ok: false })),
-      cockpit.file(DISMISSED_NEWS_PATH).read().catch(() => null),
     ]);
-    if (dismissedRaw) {
-      try {
-        setDismissedNews(new Set(JSON.parse(dismissedRaw) as string[]));
-      } catch { /* malformed JSON */ }
-    }
     setOrphanCount(orphans?.orphans.length ?? null);
     setCacheSize(cache?.total_size ?? null);
     setKeyringStatus(keyring);
