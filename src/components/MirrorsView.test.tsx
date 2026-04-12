@@ -19,6 +19,7 @@ vi.mock("../api", async () => {
 
 const mockListMirrors = vi.mocked(api.listMirrors);
 const mockFetchMirrorStatus = vi.mocked(api.fetchMirrorStatus);
+const mockTestMirrors = vi.mocked(api.testMirrors);
 const mockSaveMirrorlist = vi.mocked(api.saveMirrorlist);
 const mockListMirrorBackups = vi.mocked(api.listMirrorBackups);
 const mockRestoreMirrorBackup = vi.mocked(api.restoreMirrorBackup);
@@ -54,8 +55,11 @@ describe("MirrorsView", () => {
       total: 0,
       last_check: null,
     });
-    // Pre-populate status cache so the auto-fetch effect uses the cache
-    // instead of calling fetchMirrorStatus (which transitions to "fetching_status" state)
+    mockTestMirrors.mockImplementation((callbacks) => {
+      setTimeout(() => callbacks.onComplete?.(), 0);
+      return { cancel: vi.fn() };
+    });
+    // Pre-populate status cache so the auto-fetch effect uses the cache path
     const cached = {
       data: { mirrors: [], total: 0, last_check: null },
       timestamp: Date.now(),
@@ -449,5 +453,67 @@ describe("MirrorsView", () => {
     });
 
     expect(screen.queryByText("Repo overrides")).not.toBeInTheDocument();
+  });
+
+  it("auto-runs mirror test on mount and shows sort suggestion", async () => {
+    let capturedCallbacks: Parameters<typeof api.testMirrors>[0] | null = null;
+    mockTestMirrors.mockImplementation((callbacks) => {
+      capturedCallbacks = callbacks;
+      return { cancel: vi.fn() };
+    });
+
+    render(<MirrorsView />);
+    await waitFor(() => {
+      expect(screen.getByText(/mirror1\.example\.com/)).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(mockTestMirrors).toHaveBeenCalled();
+    });
+
+    expect(screen.getByText(/Starting mirror tests/)).toBeInTheDocument();
+
+    await act(async () => {
+      capturedCallbacks!.onTestResult!(
+        { url: "https://mirror1.example.com/$repo/os/$arch", success: true, latency_ms: 42, speed_bps: null, error: null },
+        1, 1
+      );
+    });
+
+    expect(screen.getByText("42ms")).toBeInTheDocument();
+
+    await act(async () => {
+      capturedCallbacks!.onComplete!();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Tested 1 mirror\b/)).toBeInTheDocument();
+      expect(screen.getByText("Sort by latency")).toBeInTheDocument();
+    });
+  });
+
+  it("re-runs auto-test after retry from error state", async () => {
+    mockListMirrors.mockRejectedValueOnce(new Error("network error"));
+
+    render(<MirrorsView />);
+    await waitFor(() => {
+      expect(screen.getByText(/Error loading mirrors/)).toBeInTheDocument();
+    });
+
+    mockListMirrors.mockResolvedValue(mockMirrorResponse);
+    mockTestMirrors.mockImplementation((callbacks) => {
+      setTimeout(() => callbacks.onComplete?.(), 0);
+      return { cancel: vi.fn() };
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Retry/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/mirror1\.example\.com/)).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(mockTestMirrors).toHaveBeenCalled();
+    });
   });
 });

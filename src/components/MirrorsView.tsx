@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useBackdropClose } from "../hooks/useBackdropClose";
-import { LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES } from "../constants";
 import {
   Card,
   CardBody,
@@ -12,8 +11,6 @@ import {
   EmptyStateActions,
   EmptyStateFooter,
   Spinner,
-  CodeBlock,
-  CodeBlockCode,
   Flex,
   FlexItem,
   ExpandableSection,
@@ -50,8 +47,6 @@ import {
   TimesCircleIcon,
   ArrowUpIcon,
   ArrowDownIcon,
-  SyncAltIcon,
-  OutlinedClockIcon,
   ExclamationCircleIcon,
   HistoryIcon,
   UndoIcon,
@@ -101,7 +96,7 @@ type UnifiedRow =
   | { kind: "mirror"; mirror: MirrorWithStatus; index: number }
   | { kind: "repo"; repoName: string; url: string };
 
-type ViewState = "loading" | "ready" | "testing" | "saving" | "fetching_status" | "success" | "error";
+type ViewState = "loading" | "ready" | "saving" | "success" | "error";
 
 interface MirrorWithStatus extends MirrorEntry {
   status?: MirrorStatus;
@@ -198,8 +193,6 @@ export const MirrorsView: React.FC = () => {
   const [mirrors, setMirrors] = useState<MirrorWithStatus[]>([]);
   const [statusData, setStatusData] = useState<MirrorStatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [log, setLog] = useState("");
-  const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   useBackdropClose(confirmModalOpen, () => setConfirmModalOpen(false));
   const [hasChanges, setHasChanges] = useState(false);
@@ -227,9 +220,11 @@ export const MirrorsView: React.FC = () => {
   useBackdropClose(restoreConfirmTimestamp !== null, () => setRestoreConfirmTimestamp(null));
   const [repoMirrors, setRepoMirrors] = useState<RepoMirrorsResponse | null>(null);
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  const [isFetchingStatus, setIsFetchingStatus] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [testProgress, setTestProgress] = useState<{ current: number; total: number } | null>(null);
   const cancelRef = useRef<(() => void) | null>(null);
-  const logContainerRef = useRef<HTMLDivElement | null>(null);
-  const initialStatusFetchedRef = useRef(false);
+  const initialAutoRunRef = useRef(false);
 
   const applyStatusToMirrors = useCallback((mirrorList: MirrorEntry[], status: MirrorStatusResponse): MirrorWithStatus[] => {
     const statusByUrl = new Map(status.mirrors.map(s => [normalizeMirrorUrl(s.url), s]));
@@ -240,6 +235,7 @@ export const MirrorsView: React.FC = () => {
   }, []);
 
   const loadMirrors = useCallback(async () => {
+    initialAutoRunRef.current = false;
     setState("loading");
     setError(null);
     try {
@@ -275,18 +271,14 @@ export const MirrorsView: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (logContainerRef.current) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-    }
-  }, [log]);
-
-  useEffect(() => {
-    if (state === "ready" && !statusData && !initialStatusFetchedRef.current) {
-      initialStatusFetchedRef.current = true;
-      handleFetchStatus(false);
+    if (state === "ready" && !initialAutoRunRef.current) {
+      initialAutoRunRef.current = true;
+      handleFetchStatus(false).then(() => {
+        handleTestMirrors();
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state, statusData]);
+  }, [state]);
 
   const handleFetchStatus = async (forceRefresh = false) => {
     if (!forceRefresh) {
@@ -298,17 +290,16 @@ export const MirrorsView: React.FC = () => {
       }
     }
 
-    setState("fetching_status");
-    setError(null);
+    setIsFetchingStatus(true);
     try {
       const response = await fetchMirrorStatus();
       setCachedStatus(response);
       setStatusData(response);
       setMirrors(prev => applyStatusToMirrors(prev, response));
-      setState("ready");
     } catch (ex) {
-      setState("error");
       setError(ex instanceof Error ? ex.message : String(ex));
+    } finally {
+      setIsFetchingStatus(false);
     }
   };
 
@@ -381,42 +372,25 @@ export const MirrorsView: React.FC = () => {
 
   const handleTestMirrors = () => {
     const enabledMirrors = mirrors.filter(m => m.enabled).map(m => m.url);
-    if (enabledMirrors.length === 0) {
-      setError("No enabled mirrors to test");
-      return;
-    }
+    if (enabledMirrors.length === 0) return;
 
-    setState("testing");
-    setLog("");
-    setIsDetailsExpanded(true);
+    setIsTesting(true);
+    setTestProgress(null);
 
     const { cancel } = testMirrors(
       {
         onTestResult: (result, current, total) => {
+          setTestProgress({ current, total });
           setMirrors(prev => prev.map(m =>
             m.url === result.url ? { ...m, testResult: result } : m
           ));
-          setLog(prev => {
-            const newLog = prev + `[${current}/${total}] ${result.url}: ${result.success ? `${result.latency_ms}ms` : result.error}\n`;
-            return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
-          });
         },
         onComplete: () => {
-          setState("ready");
+          setIsTesting(false);
           cancelRef.current = null;
-          setMirrors(prev => {
-            const sorted = [...prev].sort((a, b) => {
-              if (!a.testResult?.success && !b.testResult?.success) return 0;
-              if (!a.testResult?.success) return 1;
-              if (!b.testResult?.success) return -1;
-              return (a.testResult.latency_ms ?? Infinity) - (b.testResult.latency_ms ?? Infinity);
-            });
-            return sorted;
-          });
-          setHasChanges(true);
         },
         onError: (err) => {
-          setState("error");
+          setIsTesting(false);
           setError(err);
           cancelRef.current = null;
         },
@@ -431,8 +405,23 @@ export const MirrorsView: React.FC = () => {
     if (cancelRef.current) {
       cancelRef.current();
       cancelRef.current = null;
-      setState("ready");
+      setIsTesting(false);
+      setTestProgress(null);
     }
+  };
+
+  const handleSortByLatency = () => {
+    setMirrors(prev => {
+      const sorted = [...prev].sort((a, b) => {
+        if (!a.testResult?.success && !b.testResult?.success) return 0;
+        if (!a.testResult?.success) return 1;
+        if (!b.testResult?.success) return -1;
+        return (a.testResult.latency_ms ?? Infinity) - (b.testResult.latency_ms ?? Infinity);
+      });
+      return sorted;
+    });
+    setHasChanges(true);
+    setTestProgress(null);
   };
 
   const handleSave = () => {
@@ -647,6 +636,17 @@ export const MirrorsView: React.FC = () => {
     });
   }, [repoMirrors]);
 
+  const filteredRepoRows = useMemo(() => {
+    if (!searchFilter) return repoRows;
+    const lower = searchFilter.toLowerCase();
+    return repoRows.filter(r =>
+      r.kind === "repo" && (
+        extractHostname(r.url).toLowerCase().includes(lower) ||
+        r.repoName.toLowerCase().includes(lower)
+      )
+    );
+  }, [repoRows, searchFilter]);
+
   const unifiedRows: UnifiedRow[] = useMemo(() => {
     const mirrorRows: UnifiedRow[] = sortedMirrors.map(m => ({
       kind: "mirror",
@@ -655,9 +655,9 @@ export const MirrorsView: React.FC = () => {
     }));
 
     if (sourceFilter === "mirrorlist") return mirrorRows;
-    if (sourceFilter === "repo") return repoRows;
-    return [...mirrorRows, ...repoRows];
-  }, [sortedMirrors, repoRows, mirrorIndexMap, sourceFilter]);
+    if (sourceFilter === "repo") return filteredRepoRows;
+    return [...mirrorRows, ...filteredRepoRows];
+  }, [sortedMirrors, filteredRepoRows, mirrorIndexMap, sourceFilter]);
 
   if (state === "loading") {
     return (
@@ -682,53 +682,6 @@ export const MirrorsView: React.FC = () => {
                 <Button variant="primary" onClick={loadMirrors}>Retry</Button>
               </EmptyStateActions>
             </EmptyStateFooter>
-          </EmptyState>
-        </CardBody>
-      </Card>
-    );
-  }
-
-  if (state === "testing") {
-    return (
-      <Card>
-        <CardBody>
-          <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsCenter" }}>
-            <FlexItem>
-              <CardTitle className="pf-v6-u-m-0">Testing Mirrors</CardTitle>
-            </FlexItem>
-            <FlexItem>
-              <Button variant="danger" onClick={handleCancel}>
-                Cancel
-              </Button>
-            </FlexItem>
-          </Flex>
-
-          <div className="pf-v6-u-mt-md pf-v6-u-mb-md">
-            <Spinner size="md" /> Testing mirror latency...
-          </div>
-
-          <ExpandableSection
-            toggleText={isDetailsExpanded ? "Hide details" : "Show details"}
-            onToggle={(_event, expanded) => setIsDetailsExpanded(expanded)}
-            isExpanded={isDetailsExpanded}
-          >
-            <div ref={logContainerRef} style={{ maxHeight: LOG_CONTAINER_HEIGHT, overflow: "auto" }}>
-              <CodeBlock>
-                <CodeBlockCode>{log || "Starting tests..."}</CodeBlockCode>
-              </CodeBlock>
-            </div>
-          </ExpandableSection>
-        </CardBody>
-      </Card>
-    );
-  }
-
-  if (state === "fetching_status") {
-    return (
-      <Card>
-        <CardBody>
-          <EmptyState headingLevel="h2" icon={Spinner} titleText="Fetching mirror status">
-            <EmptyStateBody>Retrieving mirror information from archlinux.org...</EmptyStateBody>
           </EmptyState>
         </CardBody>
       </Card>
@@ -884,29 +837,9 @@ export const MirrorsView: React.FC = () => {
             <ToolbarItem>
               <Button
                 variant="secondary"
-                icon={<SyncAltIcon />}
-                onClick={() => handleFetchStatus(true)}
-                isDisabled={state !== "ready"}
-              >
-                {statusData ? "Refresh Status" : "Fetch Status"}
-              </Button>
-            </ToolbarItem>
-            <ToolbarItem>
-              <Button
-                variant="secondary"
-                icon={<OutlinedClockIcon />}
-                onClick={handleTestMirrors}
-                isDisabled={state !== "ready" || mirrors.filter(m => m.enabled).length === 0}
-              >
-                Test Mirrors
-              </Button>
-            </ToolbarItem>
-            <ToolbarItem>
-              <Button
-                variant="secondary"
                 icon={<GlobeIcon />}
                 onClick={handleOpenRefreshModal}
-                isDisabled={state !== "ready"}
+                isDisabled={state !== "ready" || isTesting || isFetchingStatus}
               >
                 Refresh Mirrorlist
               </Button>
@@ -915,13 +848,44 @@ export const MirrorsView: React.FC = () => {
               <Button
                 variant="primary"
                 onClick={handleSave}
-                isDisabled={!hasChanges || state !== "ready"}
+                isDisabled={!hasChanges || state !== "ready" || isTesting || isFetchingStatus}
               >
                 Save Changes
               </Button>
             </ToolbarItem>
           </ToolbarContent>
         </Toolbar>
+
+        {(isFetchingStatus || isTesting) && (
+          <Flex alignItems={{ default: "alignItemsCenter" }} spaceItems={{ default: "spaceItemsSm" }} className="pf-v6-u-mb-sm">
+            <FlexItem><Spinner size="sm" /></FlexItem>
+            <FlexItem>
+              {isFetchingStatus && "Fetching mirror status..."}
+              {isTesting && testProgress
+                ? `Testing mirrors (${testProgress.current}/${testProgress.total})...`
+                : isTesting ? "Starting mirror tests..." : null}
+            </FlexItem>
+            {isTesting && (
+              <FlexItem>
+                <Button variant="link" isInline onClick={handleCancel}>Cancel</Button>
+              </FlexItem>
+            )}
+          </Flex>
+        )}
+
+        {!isTesting && testProgress && (
+          <Alert
+            variant="info"
+            title={`Tested ${testProgress.total} mirror${testProgress.total !== 1 ? "s" : ""}`}
+            isInline
+            className="pf-v6-u-mb-sm"
+            actionLinks={
+              <Button variant="link" isInline onClick={handleSortByLatency}>
+                Sort by latency
+              </Button>
+            }
+          />
+        )}
 
         <Table aria-label="Mirror list" variant="compact">
           <Thead>
@@ -989,7 +953,9 @@ export const MirrorsView: React.FC = () => {
                     <Td dataLabel="Latency">
                       {mirror.testResult?.latency_ms !== undefined && mirror.testResult?.latency_ms !== null
                         ? `${mirror.testResult.latency_ms}ms`
-                        : "-"}
+                        : isTesting && mirror.enabled && !mirror.testResult
+                          ? <Spinner size="sm" />
+                          : "-"}
                     </Td>
                     <Td dataLabel="Score">
                       {mirror.status?.score !== undefined && mirror.status?.score !== null
@@ -1135,7 +1101,6 @@ export const MirrorsView: React.FC = () => {
             </>
           )}
         </ExpandableSection>
-
 
         {statusData && (
           <div className="pf-v6-u-mt-md" style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)" }}>
