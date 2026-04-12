@@ -20,7 +20,8 @@ import {
 	EmptyStateBody,
 } from '@patternfly/react-core';
 import { OutlinedQuestionCircleIcon, ArrowDownIcon, ExclamationCircleIcon, TopologyIcon, TrashIcon, PlusCircleIcon, HistoryIcon } from "@patternfly/react-icons";
-import { PackageDetails, SyncPackageDetails, formatSize, formatDate } from "../api";
+import { PackageDetails, SyncPackageDetails, formatSize } from "../api";
+import { TimeAgo } from "./TimeAgo";
 import { sanitizeUrl, sanitizeErrorMessage } from "../utils";
 import { DowngradeModal } from "./DowngradeModal";
 import { InstallModal } from "./InstallModal";
@@ -244,7 +245,7 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
           <DescriptionListGroup>
             <DescriptionListTerm>Build Date</DescriptionListTerm>
             <DescriptionListDescription>
-              {formatDate(packageDetails.build_date)}
+              <TimeAgo timestamp={packageDetails.build_date} />
             </DescriptionListDescription>
           </DescriptionListGroup>
 
@@ -253,7 +254,7 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
               <DescriptionListGroup>
                 <DescriptionListTerm>Install Date</DescriptionListTerm>
                 <DescriptionListDescription>
-                  {formatDate(packageDetails.install_date)}
+                  <TimeAgo timestamp={packageDetails.install_date} />
                 </DescriptionListDescription>
               </DescriptionListGroup>
 
@@ -298,7 +299,7 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
                 <DescriptionListGroup>
                   <DescriptionListTerm>First Installed</DescriptionListTerm>
                   <DescriptionListDescription>
-                    {new Date(packageDetails.update_stats.first_installed).toLocaleString()}
+                    <TimeAgo timestamp={packageDetails.update_stats.first_installed} />
                   </DescriptionListDescription>
                 </DescriptionListGroup>
               )}
@@ -307,7 +308,7 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
                 <DescriptionListGroup>
                   <DescriptionListTerm>Last Updated</DescriptionListTerm>
                   <DescriptionListDescription>
-                    {new Date(packageDetails.update_stats.last_updated).toLocaleString()}
+                    <TimeAgo timestamp={packageDetails.update_stats.last_updated} />
                   </DescriptionListDescription>
                 </DescriptionListGroup>
               )}

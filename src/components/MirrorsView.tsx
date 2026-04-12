@@ -76,9 +76,9 @@ import {
   restoreMirrorBackup,
   deleteMirrorBackup,
   formatNumber,
-  formatDate,
   formatSize,
 } from "../api";
+import { TimeAgo } from "./TimeAgo";
 import { sanitizeErrorMessage } from "../utils";
 
 const STANDARD_MIRRORLIST = "/etc/pacman.d/mirrorlist";
@@ -766,7 +766,7 @@ export const MirrorsView: React.FC = () => {
               </FlexItem>
               {mirrorData?.last_modified && (
                 <FlexItem>
-                  <StatBox label="Last Modified" value={formatDate(mirrorData.last_modified)} />
+                  <StatBox label="Last Modified" value={<TimeAgo timestamp={mirrorData.last_modified} />} />
                 </FlexItem>
               )}
             </Flex>
@@ -1083,7 +1083,7 @@ export const MirrorsView: React.FC = () => {
                     <Td dataLabel="Date">
                       <Flex alignItems={{ default: "alignItemsCenter" }} spaceItems={{ default: "spaceItemsSm" }}>
                         <FlexItem><HistoryIcon /></FlexItem>
-                        <FlexItem>{backup.date}</FlexItem>
+                        <FlexItem><TimeAgo timestamp={backup.timestamp} /></FlexItem>
                       </Flex>
                     </Td>
                     <Td dataLabel="Mirrors">

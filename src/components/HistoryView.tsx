@@ -39,6 +39,7 @@ import {
   getGroupedHistory,
   formatNumber,
 } from "../api";
+import { TimeAgo } from "./TimeAgo";
 import { sanitizeErrorMessage, sanitizeSearchInput } from "../utils";
 import { SEARCH_DEBOUNCE_MS } from "../constants";
 
@@ -173,21 +174,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
       }
       return next;
     });
-  };
-
-  const formatTimestamp = (timestamp: string): string => {
-    try {
-      // Handle ISO 8601 timestamps with timezone offsets like +0100, -0500, +0000
-      // Convert compact offset (+0100) to colon format (+01:00) for better browser support
-      const normalized = timestamp.replace(/([+-])(\d{2})(\d{2})$/, "$1$2:$3");
-      const date = new Date(normalized);
-      if (isNaN(date.getTime())) {
-        return timestamp;
-      }
-      return date.toLocaleString();
-    } catch {
-      return timestamp;
-    }
   };
 
   const formatVersion = (entry: LogEntry): string => {
@@ -418,7 +404,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
                       style={{ width: "100%" }}
                     >
                       <FlexItem>
-                        <span style={{ fontWeight: 500 }}>{formatTimestamp(group.start_time)}</span>
+                        <span style={{ fontWeight: 500 }}><TimeAgo timestamp={group.start_time} /></span>
                         {group.entries.length > 1 && (
                           <span style={{ color: "var(--pf-t--global--text--color--subtle)", marginLeft: "0.5rem" }}>
                             ({group.entries.length} packages)
@@ -461,7 +447,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
                                 {entry.action}
                               </Label>
                             </Td>
-                            <Td dataLabel="Time">{formatTimestamp(entry.timestamp)}</Td>
+                            <Td dataLabel="Time"><TimeAgo timestamp={entry.timestamp} /></Td>
                           </Tr>
                         ))}
                       </Tbody>

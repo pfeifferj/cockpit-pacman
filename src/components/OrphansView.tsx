@@ -34,8 +34,8 @@ import {
   listOrphans,
   removeOrphans,
   formatSize,
-  formatDate,
 } from "../api";
+import { TimeAgo } from "./TimeAgo";
 import { LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES } from "../constants";
 
 type ViewState = "loading" | "ready" | "removing" | "success";
@@ -319,7 +319,7 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
               </Td>
               <Td dataLabel="Version">{pkg.version}</Td>
               <Td dataLabel="Size">{formatSize(pkg.installed_size)}</Td>
-              <Td dataLabel="Installed">{formatDate(pkg.install_date)}</Td>
+              <Td dataLabel="Installed"><TimeAgo timestamp={pkg.install_date} /></Td>
               <Td dataLabel="Repository">
                 <Label isCompact color="grey">
                   {pkg.repository || "user"}

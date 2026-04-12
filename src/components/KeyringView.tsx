@@ -41,6 +41,7 @@ import {
   refreshKeyring,
   initKeyring,
 } from "../api";
+import { TimeAgo } from "./TimeAgo";
 import { sanitizeErrorMessage } from "../utils";
 
 type ViewState = "loading" | "ready" | "refreshing" | "initializing" | "error";
@@ -419,8 +420,8 @@ export const KeyringView: React.FC = () => {
                     <Label color={getTrustColor(key.trust)}>{key.trust}</Label>
                   </Tooltip>
                 </Td>
-                <Td dataLabel="Created">{key.created || "-"}</Td>
-                <Td dataLabel="Expires">{key.expires || "-"}</Td>
+                <Td dataLabel="Created"><TimeAgo timestamp={key.created} fallback="-" /></Td>
+                <Td dataLabel="Expires"><TimeAgo timestamp={key.expires} fallback="-" /></Td>
               </Tr>
             ))}
           </Tbody>

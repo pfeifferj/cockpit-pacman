@@ -292,7 +292,7 @@ describe("MirrorsView", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("2024-01-01 00:00:00 UTC")).toBeInTheDocument();
+      expect(screen.getAllByText(/ago$/).length).toBeGreaterThan(0);
       expect(screen.getByText("3 enabled / 10 total")).toBeInTheDocument();
     });
   });
@@ -339,7 +339,7 @@ describe("MirrorsView", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("2024-01-01 00:00:00 UTC")).toBeInTheDocument();
+      expect(screen.getAllByText(/ago$/).length).toBeGreaterThan(0);
     });
 
     await act(async () => {
@@ -380,7 +380,7 @@ describe("MirrorsView", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("2024-01-01 00:00:00 UTC")).toBeInTheDocument();
+      expect(screen.getAllByText(/ago$/).length).toBeGreaterThan(0);
     });
 
     await act(async () => {

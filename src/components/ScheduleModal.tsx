@@ -45,6 +45,7 @@ import {
   getScheduledRuns,
   formatNumber,
 } from "../api";
+import { TimeAgo } from "./TimeAgo";
 import { sanitizeErrorMessage } from "../utils";
 
 interface ScheduleModalProps {
@@ -64,27 +65,6 @@ const MODE_OPTIONS: { value: ScheduleMode; label: string }[] = [
   { value: "upgrade", label: "Auto-upgrade" },
   { value: "check", label: "Check only" },
 ];
-
-const formatTimestamp = (timestamp: string): string => {
-  try {
-    // Handle systemd format: "Wed 2026-01-21 22:03:15 CET"
-    const systemdMatch = timestamp.match(/^\w+\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})/);
-    if (systemdMatch) {
-      const date = new Date(`${systemdMatch[1]}T${systemdMatch[2]}`);
-      if (!isNaN(date.getTime())) {
-        return date.toLocaleString();
-      }
-    }
-    // Handle ISO format and other standard formats
-    const date = new Date(timestamp);
-    if (!isNaN(date.getTime())) {
-      return date.toLocaleString();
-    }
-    return timestamp;
-  } catch {
-    return timestamp;
-  }
-};
 
 export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   isOpen,
@@ -325,7 +305,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                 {config.timer_next_run && (
                   <DescriptionListGroup>
                     <DescriptionListTerm>Next Run</DescriptionListTerm>
-                    <DescriptionListDescription>{formatTimestamp(config.timer_next_run)}</DescriptionListDescription>
+                    <DescriptionListDescription><TimeAgo timestamp={config.timer_next_run} /></DescriptionListDescription>
                   </DescriptionListGroup>
                 )}
               </DescriptionList>
@@ -356,7 +336,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                   <Tbody>
                     {runs.map((run, index) => (
                       <Tr key={`${run.timestamp}-${index}`}>
-                        <Td dataLabel="Timestamp">{formatTimestamp(run.timestamp)}</Td>
+                        <Td dataLabel="Timestamp"><TimeAgo timestamp={run.timestamp} /></Td>
                         <Td dataLabel="Mode">
                           <Label color={run.mode === "upgrade" ? "blue" : "grey"} isCompact>
                             {run.mode}

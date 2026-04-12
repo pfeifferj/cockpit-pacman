@@ -87,6 +87,7 @@ import {
 import type { KeyringCredentials } from "../api";
 
 import { sanitizeUrl } from "../utils";
+import { TimeAgo } from "./TimeAgo";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { StatBox } from "./StatBox";
 import { IgnoredPackagesModal } from "./IgnoredPackagesModal";
@@ -806,7 +807,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
     >
       <Content component={ContentVariants.p}>{item.summary}</Content>
       <Content component={ContentVariants.p}>
-        <small>{new Date(item.published).toLocaleDateString()}</small>
+        <small><TimeAgo timestamp={item.published} dateOnly /></small>
         {" -- "}
         <a href={sanitizeUrl(item.link) ?? "#"} target="_blank" rel="noopener noreferrer">Read more on archlinux.org</a>
       </Content>
