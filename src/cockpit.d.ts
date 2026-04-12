@@ -25,6 +25,12 @@ interface CockpitUserInfo {
   shell: string;
 }
 
+interface CockpitFileHandle {
+  read(): Promise<string | null>;
+  replace(content: string): Promise<void>;
+  modify(callback: (content: string | null) => string): Promise<void>;
+}
+
 declare const cockpit: {
   spawn(
     args: string[],
@@ -41,6 +47,10 @@ declare const cockpit: {
       superuser?: "try" | "require";
     },
   ): CockpitDBusClient;
+  file(
+    path: string,
+    options?: { syntax?: unknown; superuser?: "try" | "require" },
+  ): CockpitFileHandle;
   variant(type: string, value: unknown): { t: string; v: unknown };
   user(): Promise<CockpitUserInfo>;
 };

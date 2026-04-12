@@ -18,6 +18,8 @@ export const NEWS_LOOKBACK_DAYS = 30;
 
 export const ARCH_STATUS_URL = "https://status.archlinux.org/";
 
+export const DISMISSED_NEWS_PATH = ".config/cockpit-pacman/dismissed-news.json";
+
 export const REBOOT_PACKAGES = new Set([
   "linux", "linux-lts", "linux-zen", "linux-hardened",
   "systemd", "linux-firmware", "amd-ucode", "intel-ucode",
