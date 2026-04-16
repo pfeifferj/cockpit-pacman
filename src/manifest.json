@@ -10,6 +10,7 @@
       "order": 50
     }
   },
+  "overview-health": ["pacman"],
   "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'",
   "conditions": [
     {

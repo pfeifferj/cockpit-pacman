@@ -43,4 +43,7 @@ declare const cockpit: {
   ): CockpitDBusClient;
   variant(type: string, value: unknown): { t: string; v: unknown };
   user(): Promise<CockpitUserInfo>;
+  transport: {
+    control(command: string, options: Record<string, unknown>): void;
+  };
 };

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, act, cleanup, within } from "@testing-library/react";
 import { UpdatesView } from "./UpdatesView";
 import * as api from "../api";
+import { mockTransportControl } from "../test/setup";
 import {
   mockUpdatesResponse,
   mockPreflightResponse,
@@ -141,6 +142,74 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(screen.getByText("System is up to date")).toBeInTheDocument();
       });
+    });
+  });
+
+  describe("Overview Health page_status", () => {
+    const notifyCalls = () =>
+      mockTransportControl.mock.calls.filter(([command]) => command === "notify");
+
+    it("publishes 'up to date' when checkUpdates returns no updates", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(
+          notifyCalls().some(([, payload]) => {
+            const status = (payload as { page_status?: { title?: string } }).page_status;
+            return status?.title === "System is up to date";
+          }),
+        ).toBe(true);
+      });
+    });
+
+    it("publishes update count when updates are available", async () => {
+      mockCheckUpdates.mockResolvedValue({
+        updates: [
+          mockUpdatesResponse.updates[0],
+          { ...mockUpdatesResponse.updates[0], name: "glibc" },
+          { ...mockUpdatesResponse.updates[0], name: "curl" },
+        ],
+        warnings: [],
+      });
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(
+          notifyCalls().some(([, payload]) => {
+            const status = (payload as { page_status?: { type?: string; title?: string } }).page_status;
+            return status?.type === "info" && status?.title === "3 updates available";
+          }),
+        ).toBe(true);
+      });
+    });
+
+    it("publishes error status when checkUpdates throws", async () => {
+      mockCheckUpdates.mockRejectedValue(new Error("backend offline"));
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(
+          notifyCalls().some(([, payload]) => {
+            const status = (payload as { page_status?: { type?: string; title?: string } }).page_status;
+            return (
+              status?.type === "error" &&
+              status?.title === "Failed to check for package updates"
+            );
+          }),
+        ).toBe(true);
+      });
+    });
+
+    it("error payload never leaks exception message", async () => {
+      mockCheckUpdates.mockRejectedValue(new Error("secret internal detail"));
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(notifyCalls().length).toBeGreaterThan(0);
+      });
+      for (const [, payload] of notifyCalls()) {
+        const status = (payload as { page_status?: { title?: string } }).page_status;
+        if (status?.title) {
+          expect(status.title).not.toContain("secret internal detail");
+        }
+      }
     });
   });
 

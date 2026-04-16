@@ -126,6 +126,16 @@ function severityColor(severity: string): SeverityColor {
   }
 }
 
+type PageStatus = {
+  type?: "info" | "warning" | "error" | null;
+  title: string;
+  details?: { pficon?: string; link?: false };
+};
+
+function publishPageStatus(status: PageStatus | null): void {
+  cockpit.transport.control("notify", { page_status: status });
+}
+
 interface UpgradeProgress {
   phase: "preparing" | "downloading" | "installing" | "hooks";
   current: number;
@@ -533,15 +543,38 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     setState("checking");
     setError(null);
     setWarnings([]);
+    publishPageStatus({
+      type: null,
+      title: "Checking for package updates\u2026",
+      details: { pficon: "spinner", link: false },
+    });
     try {
       const response = await checkUpdates();
       setUpdates(response.updates);
       setWarnings(response.warnings);
       setState(response.updates.length > 0 ? "available" : "uptodate");
       loadSecurityData();
+      const count = response.updates.length;
+      if (count === 0) {
+        publishPageStatus({
+          type: null,
+          title: "System is up to date",
+          details: { pficon: "check", link: false },
+        });
+      } else {
+        publishPageStatus({
+          type: "info",
+          title: `${count} ${count === 1 ? "update" : "updates"} available`,
+          details: { pficon: "enhancement" },
+        });
+      }
     } catch (ex) {
       setState("error");
       setError(ex instanceof Error ? ex.message : String(ex));
+      publishPageStatus({
+        type: "error",
+        title: "Failed to check for package updates",
+      });
     }
   }, [loadSecurityData]);
 
