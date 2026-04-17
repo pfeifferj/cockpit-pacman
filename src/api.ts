@@ -922,7 +922,7 @@ export function rebootSystem(): Promise<void> {
     "/org/freedesktop/login1",
     "org.freedesktop.login1.Manager",
     "Reboot",
-    [cockpit.variant("b", false)],
+    [false],
   ).then(() => client.close()) as Promise<void>;
 }
 

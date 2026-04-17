@@ -469,7 +469,7 @@ pub fn list_mirror_backups() -> Result<()> {
         });
     }
 
-    backups.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    backups.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
 
     emit_json(&MirrorBackupListResponse { backups })
 }
@@ -548,8 +548,7 @@ fn cleanup_old_backups() -> Result<()> {
         return Ok(());
     }
 
-    // Sort by modification time, newest first
-    backups.sort_by(|a, b| b.1.cmp(&a.1));
+    backups.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     // Remove all but MAX_BACKUPS
     for (path, _) in backups.into_iter().skip(MAX_BACKUPS) {

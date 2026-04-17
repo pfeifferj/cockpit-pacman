@@ -1113,7 +1113,7 @@ fn log_history_fixture_matches_struct_shape() {
     let install_group = &fixture["groups"][1];
     let installed = &install_group["entries"][0];
     assert!(
-        installed.get("old_version").map_or(false, |v| v.is_null()),
+        installed.get("old_version").is_some_and(|v| v.is_null()),
         "installed entry must have old_version: null"
     );
 }
