@@ -172,10 +172,8 @@ fn compute_update_stats(name: &str) -> Option<UpdateStats> {
         let ts_str = entry.timestamp.format("%Y-%m-%dT%H:%M:%S%z").to_string();
 
         match entry.action {
-            Action::Installed => {
-                if first_installed.is_none() {
-                    first_installed = Some(ts_str);
-                }
+            Action::Installed if first_installed.is_none() => {
+                first_installed = Some(ts_str);
             }
             Action::Upgraded => {
                 update_count += 1;

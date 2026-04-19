@@ -922,7 +922,7 @@ export function rebootSystem(): Promise<void> {
     "/org/freedesktop/login1",
     "org.freedesktop.login1.Manager",
     "Reboot",
-    [cockpit.variant("b", false)],
+    [false],
   ).then(() => client.close()) as Promise<void>;
 }
 
@@ -1228,4 +1228,35 @@ export async function revokeSignoff(
   credentials: KeyringCredentials,
 ): Promise<SignoffActionResponse> {
   return runBackend<SignoffActionResponse>("signoff-revoke", [encodeCredentials(credentials), pkgbase, repo, arch], { superuser: "none" });
+}
+
+export interface RepoDirectiveFull {
+  directive_type: "Server" | "Include";
+  value: string;
+  enabled: boolean;
+}
+
+export interface RepoEntry {
+  name: string;
+  enabled: boolean;
+  sig_level: string | null;
+  directives: RepoDirectiveFull[];
+}
+
+export interface ListReposResponse {
+  repos: RepoEntry[];
+}
+
+export interface SaveReposResponse {
+  success: boolean;
+  backup_path: string | null;
+  message: string;
+}
+
+export async function listRepos(): Promise<ListReposResponse> {
+  return runBackend<ListReposResponse>("list-repos", [], { superuser: "require" });
+}
+
+export async function saveRepos(repos: RepoEntry[]): Promise<SaveReposResponse> {
+  return runBackend<SaveReposResponse>("save-repos", [JSON.stringify(repos)], { superuser: "require" });
 }

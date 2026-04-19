@@ -10,6 +10,7 @@ pub mod mutation;
 pub mod news;
 pub mod query;
 pub mod reboot;
+pub mod repos;
 pub mod scheduled;
 pub mod security;
 pub mod signoff;
@@ -33,6 +34,7 @@ pub use query::{
     check_updates, list_installed, list_orphans, local_package_info, search, sync_package_info,
 };
 pub use reboot::get_reboot_status;
+pub use repos::{list_repos, save_repos};
 pub use scheduled::{get_schedule_config, get_scheduled_runs, scheduled_run, set_schedule_config};
 pub use security::{check_security, security_info};
 pub use signoff::{signoff_list, signoff_revoke, signoff_sign};

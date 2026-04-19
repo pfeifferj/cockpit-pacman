@@ -588,3 +588,30 @@ pub struct SecurityInfoResponse {
     pub groups: Vec<SecurityInfoGroup>,
     pub issues: Vec<SecurityInfoIssue>,
 }
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct RepoDirectiveFull {
+    pub directive_type: String,
+    pub value: String,
+    pub enabled: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct RepoEntry {
+    pub name: String,
+    pub enabled: bool,
+    pub sig_level: Option<String>,
+    pub directives: Vec<RepoDirectiveFull>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ListReposResponse {
+    pub repos: Vec<RepoEntry>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SaveReposResponse {
+    pub success: bool,
+    pub backup_path: Option<String>,
+    pub message: String,
+}

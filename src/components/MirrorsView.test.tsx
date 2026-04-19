@@ -13,7 +13,6 @@ vi.mock("../api", async () => {
     saveMirrorlist: vi.fn(),
     listMirrorBackups: vi.fn(),
     restoreMirrorBackup: vi.fn(),
-    listRepoMirrors: vi.fn(),
   };
 });
 
@@ -23,7 +22,6 @@ const mockTestMirrors = vi.mocked(api.testMirrors);
 const mockSaveMirrorlist = vi.mocked(api.saveMirrorlist);
 const mockListMirrorBackups = vi.mocked(api.listMirrorBackups);
 const mockRestoreMirrorBackup = vi.mocked(api.restoreMirrorBackup);
-const mockListRepoMirrors = vi.mocked(api.listRepoMirrors);
 
 const mockMirrorResponse: api.MirrorListResponse = {
   mirrors: [
@@ -49,7 +47,6 @@ describe("MirrorsView", () => {
     vi.clearAllMocks();
     window.localStorage.clear();
     mockListMirrors.mockResolvedValue(mockMirrorResponse);
-    mockListRepoMirrors.mockResolvedValue({ repos: [] });
     mockFetchMirrorStatus.mockResolvedValue({
       mirrors: [],
       total: 0,
@@ -407,53 +404,6 @@ describe("MirrorsView", () => {
     });
   });
 
-  it("shows repo override rows with pills in unified table", async () => {
-    mockListRepoMirrors.mockResolvedValue({
-      repos: [
-        { name: "core", directives: [
-          { directive_type: "Include" as const, value: "/etc/pacman.d/mirrorlist" },
-        ] },
-        { name: "multilib", directives: [
-          { directive_type: "Server" as const, value: "https://geo.mirror.pkgbuild.com/$repo/os/$arch" },
-          { directive_type: "Include" as const, value: "/etc/pacman.d/mirrorlist" },
-        ] },
-      ],
-    });
-
-    render(<MirrorsView />);
-    await waitFor(() => {
-      expect(screen.getByText(/mirror1\.example\.com/)).toBeInTheDocument();
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText("multilib")).toBeInTheDocument();
-      expect(screen.getByText("geo.mirror.pkgbuild.com")).toBeInTheDocument();
-    });
-  });
-
-  it("shows no repo rows when all repos use standard mirrorlist", async () => {
-    mockListRepoMirrors.mockResolvedValue({
-      repos: [
-        { name: "core", directives: [
-          { directive_type: "Include" as const, value: "/etc/pacman.d/mirrorlist" },
-        ] },
-        { name: "extra", directives: [
-          { directive_type: "Include" as const, value: "/etc/pacman.d/mirrorlist" },
-        ] },
-      ],
-    });
-
-    render(<MirrorsView />);
-    await waitFor(() => {
-      expect(screen.getByText(/mirror1\.example\.com/)).toBeInTheDocument();
-    });
-
-    await waitFor(() => {
-      expect(mockListRepoMirrors).toHaveBeenCalled();
-    });
-
-    expect(screen.queryByText("Repo overrides")).not.toBeInTheDocument();
-  });
 
   it("auto-runs mirror test on mount and shows sort suggestion", async () => {
     let capturedCallbacks: Parameters<typeof api.testMirrors>[0] | null = null;

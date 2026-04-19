@@ -13,6 +13,7 @@ import { KeyringView } from "./KeyringView";
 import { CacheView } from "./CacheView";
 import { HistoryView } from "./HistoryView";
 import { MirrorsView } from "./MirrorsView";
+import { RepositoriesView } from "./RepositoriesView";
 import { SignoffsView } from "./SignoffsView";
 import { ErrorBoundary } from "./ErrorBoundary";
 import type { KeyringCredentials } from "../api";
@@ -114,6 +115,11 @@ export const App: React.FC = () => {
           <Tab eventKey={6} title={<TabTitleText>Mirrors</TabTitleText>}>
             <ErrorBoundary fallbackTitle="Error loading mirrors">
               <MirrorsView />
+            </ErrorBoundary>
+          </Tab>
+          <Tab eventKey={8} title={<TabTitleText>Repositories</TabTitleText>}>
+            <ErrorBoundary fallbackTitle="Error loading repositories">
+              <RepositoriesView />
             </ErrorBoundary>
           </Tab>
           {signoffAvailable && (
