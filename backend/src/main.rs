@@ -5,13 +5,13 @@ use cockpit_pacman_backend::handlers::{
     downgrade_package, fetch_mirror_status, fetch_news, get_cache_info, get_dependency_tree,
     get_grouped_history, get_history, get_reboot_status, get_schedule_config, get_scheduled_runs,
     init_keyring, install_package, keyring_status, list_downgrades, list_ignored, list_installed,
-    list_mirror_backups, list_mirrors, list_orphans, list_repo_mirrors, local_package_info,
-    preflight_upgrade, refresh_keyring, refresh_mirrors, remove_ignored, remove_orphans,
-    remove_package, remove_stale_lock, restore_mirror_backup, run_upgrade, save_mirrorlist,
-    scheduled_run, search, security_info, set_schedule_config, signoff_list, signoff_revoke,
-    signoff_sign, sync_database, sync_package_info, test_mirrors,
+    list_mirror_backups, list_mirrors, list_orphans, list_repo_mirrors, list_repos,
+    local_package_info, preflight_upgrade, refresh_keyring, refresh_mirrors, remove_ignored,
+    remove_orphans, remove_package, remove_stale_lock, restore_mirror_backup, run_upgrade,
+    save_mirrorlist, save_repos, scheduled_run, search, security_info, set_schedule_config,
+    signoff_list, signoff_revoke, signoff_sign, sync_database, sync_package_info, test_mirrors,
 };
-use cockpit_pacman_backend::models::MirrorEntry;
+use cockpit_pacman_backend::models::{MirrorEntry, RepoEntry};
 use cockpit_pacman_backend::validation::{
     validate_depth, validate_direction, validate_json_payload_size, validate_keep_versions,
     validate_mirror_timeout, validate_mirror_url, validate_package_name, validate_pagination,
@@ -491,6 +491,19 @@ fn main() {
             validate_package_name(&args[2]).and_then(|_| security_info(&args[2]))
         }
         "check-lock" => check_lock(),
+        "list-repos" => list_repos(),
+        "save-repos" => {
+            if args.len() < 3 {
+                eprintln!("Error: save-repos requires a JSON array of repositories");
+                std::process::exit(1);
+            }
+            validate_json_payload_size(&args[2])
+                .and_then(|_| {
+                    serde_json::from_str::<Vec<RepoEntry>>(&args[2])
+                        .map_err(|e| anyhow::anyhow!("Invalid JSON: {}", e))
+                })
+                .and_then(|repos| save_repos(&repos))
+        }
         "remove-stale-lock" => remove_stale_lock(),
         "help" | "--help" | "-h" => {
             print_usage();

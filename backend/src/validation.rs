@@ -217,3 +217,34 @@ pub fn validate_json_payload_size(payload: &str) -> Result<()> {
     }
     Ok(())
 }
+
+pub fn validate_repo_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        anyhow::bail!("Repository name cannot be empty");
+    }
+    if name.len() > 256 {
+        anyhow::bail!("Repository name too long (max 256)");
+    }
+    if !name
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+    {
+        anyhow::bail!(
+            "Repository name contains invalid characters (allowed: alphanumeric, hyphen, underscore, period)"
+        );
+    }
+    Ok(())
+}
+
+pub fn validate_directive_value(value: &str) -> Result<()> {
+    if value.is_empty() {
+        anyhow::bail!("Directive value cannot be empty");
+    }
+    if value.len() > 2048 {
+        anyhow::bail!("Directive value too long (max 2048)");
+    }
+    if value.chars().any(|c| (c as u32) < 0x20 && c != '\t') {
+        anyhow::bail!("Directive value contains invalid control characters");
+    }
+    Ok(())
+}
