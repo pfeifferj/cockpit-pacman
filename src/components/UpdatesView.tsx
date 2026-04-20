@@ -469,7 +469,13 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
   };
 
   const selectAllPackages = () => {
-    setSelectedPackages(new Set(updates.map((u) => u.name)));
+    setSelectedPackages(
+      new Set(
+        updates
+          .filter((u) => !configIgnored.has(u.name))
+          .map((u) => u.name)
+      )
+    );
   };
 
   const deselectAllPackages = () => {
@@ -605,7 +611,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
     }
 
     if (hasInitializedSelection.current) {
-      // Preserve selections, only remove packages that no longer exist
       setSelectedPackages((prev) => {
         const existingNames = new Set(updates.map((u) => u.name));
         const next = new Set<string>();
@@ -619,7 +624,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
       return;
     }
 
-    // First load: select all non-ignored
     const nonIgnored = updates
       .filter((u) => !configIgnored.has(u.name))
       .map((u) => u.name);
@@ -1329,6 +1333,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
                       rowIndex: 0,
                       onSelect: (_event, _isSelected) => togglePackageSelection(update.name),
                       isSelected,
+                      isDisabled: isConfigIgnored,
                     }}
                     onClick={(e) => e.stopPropagation()}
                   />
@@ -1337,7 +1342,16 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
                       {update.name}
                     </Button>
                     {isConfigIgnored && (
-                      <Label color="orange" className="pf-v6-u-ml-sm" isCompact>
+                      <Label
+                        color="orange"
+                        className="pf-v6-u-ml-sm"
+                        isCompact
+                        onClick={(e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          setIgnoredModalOpen(true);
+                        }}
+                        style={{ cursor: "pointer" }}
+                      >
                         ignored
                       </Label>
                     )}

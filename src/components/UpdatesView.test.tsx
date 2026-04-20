@@ -1181,4 +1181,99 @@ describe("UpdatesView", () => {
       expect(screen.queryByText(/System reboot recommended/)).not.toBeInTheDocument();
     });
   });
+
+  describe("Ignored Packages", () => {
+    beforeEach(() => {
+      mockCheckUpdates.mockResolvedValue({
+        updates: [
+          {
+            name: "linux",
+            current_version: "6.7.0-arch1-1",
+            new_version: "6.7.1-arch1-1",
+            download_size: 150000000,
+            current_size: 142000000,
+            new_size: 145000000,
+            repository: "core",
+          },
+          {
+            name: "firefox",
+            current_version: "120.0-1",
+            new_version: "121.0-1",
+            download_size: 50000000,
+            current_size: 200000000,
+            new_size: 201000000,
+            repository: "extra",
+          },
+        ],
+        warnings: [],
+      });
+      mockListIgnoredPackages.mockResolvedValue({ packages: ["linux"], total: 1 });
+    });
+
+    const getRowCheckbox = (pkgName: string) => {
+      const cell = screen.getByText(pkgName).closest("tr");
+      if (!cell) throw new Error(`row for ${pkgName} not found`);
+      return cell.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    };
+
+    it("disables checkbox for config-ignored packages by default", async () => {
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(getRowCheckbox("linux").disabled).toBe(true);
+      });
+      expect(getRowCheckbox("firefox").disabled).toBe(false);
+    });
+
+    it("excludes ignored packages from initial selection", async () => {
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(getRowCheckbox("linux").checked).toBe(false);
+      });
+      expect(getRowCheckbox("firefox").checked).toBe(true);
+    });
+
+    it("clicking the ignored pill opens the Manage Ignored modal", async () => {
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+      const pill = await screen.findByText("ignored");
+
+      fireEvent.click(pill);
+
+      await waitFor(() => {
+        expect(screen.getByText("Ignored Packages")).toBeInTheDocument();
+      });
+    });
+
+    it("Select All does not select ignored packages", async () => {
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(getRowCheckbox("firefox").checked).toBe(true);
+      });
+
+      fireEvent.click(getRowCheckbox("firefox"));
+      await waitFor(() => {
+        expect(getRowCheckbox("firefox").checked).toBe(false);
+      });
+
+      const selectAll = document.getElementById("select-all-updates") as HTMLInputElement;
+      fireEvent.click(selectAll);
+
+      await waitFor(() => {
+        expect(getRowCheckbox("firefox").checked).toBe(true);
+      });
+      expect(getRowCheckbox("linux").checked).toBe(false);
+      expect(getRowCheckbox("linux").disabled).toBe(true);
+    });
+  });
 });
