@@ -7,17 +7,20 @@ describe("useBackdropClose", () => {
     vi.restoreAllMocks();
   });
 
-  it("calls onClose when clicking outside dialog", () => {
+  it("calls onClose when clicking the PatternFly backdrop", () => {
     const onClose = vi.fn();
+    const backdrop = document.createElement("div");
+    backdrop.classList.add("pf-v6-c-backdrop");
+    document.body.appendChild(backdrop);
+
     renderHook(() => useBackdropClose(true, onClose));
 
     const event = new MouseEvent("mousedown", { bubbles: true });
-    Object.defineProperty(event, "target", {
-      value: document.body,
-    });
+    Object.defineProperty(event, "target", { value: backdrop });
     document.dispatchEvent(event);
 
     expect(onClose).toHaveBeenCalledTimes(1);
+    document.body.removeChild(backdrop);
   });
 
   it("does not call onClose when clicking inside dialog", () => {
@@ -34,6 +37,32 @@ describe("useBackdropClose", () => {
 
     expect(onClose).not.toHaveBeenCalled();
     document.body.removeChild(dialog);
+  });
+
+  it("does not call onClose when clicking a portaled popper (e.g. Select dropdown) outside the dialog", () => {
+    const onClose = vi.fn();
+    const popper = document.createElement("div");
+    document.body.appendChild(popper);
+
+    renderHook(() => useBackdropClose(true, onClose));
+
+    const event = new MouseEvent("mousedown", { bubbles: true });
+    Object.defineProperty(event, "target", { value: popper });
+    document.dispatchEvent(event);
+
+    expect(onClose).not.toHaveBeenCalled();
+    document.body.removeChild(popper);
+  });
+
+  it("does not throw when mousedown target is a non-HTMLElement (e.g. Text node)", () => {
+    const onClose = vi.fn();
+    renderHook(() => useBackdropClose(true, onClose));
+
+    const event = new MouseEvent("mousedown", { bubbles: true });
+    Object.defineProperty(event, "target", { value: document.createTextNode("x") });
+
+    expect(() => document.dispatchEvent(event)).not.toThrow();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("does not attach listener when isOpen is false", () => {

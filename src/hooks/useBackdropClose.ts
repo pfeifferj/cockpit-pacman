@@ -8,8 +8,8 @@ export function useBackdropClose(isOpen: boolean, onClose?: () => void) {
     if (!isOpen || !onCloseRef.current) return;
 
     const handleMouseDown = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (!target.closest('[role="dialog"]')) {
+      const target = event.target;
+      if (target instanceof HTMLElement && target.classList.contains("pf-v6-c-backdrop")) {
         onCloseRef.current?.();
       }
     };
