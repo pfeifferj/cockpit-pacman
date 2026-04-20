@@ -16,6 +16,22 @@ use crate::util::{
     setup_signal_handler,
 };
 
+const KERNEL_PACKAGES: &[&str] = &[
+    "linux",
+    "linux-lts",
+    "linux-zen",
+    "linux-hardened",
+    "linux-rt",
+    "linux-rt-lts",
+];
+
+fn is_kernel_package(
+    name: &str,
+    mut provides_names: impl Iterator<Item = impl AsRef<str>>,
+) -> bool {
+    KERNEL_PACKAGES.contains(&name) || provides_names.any(|p| p.as_ref() == "linux")
+}
+
 pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
     let mut handle = get_handle()?;
 
@@ -134,7 +150,7 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
 
     let has_kernel = upgrade_pkgs
         .iter()
-        .any(|p| p.provides().iter().any(|dep| dep.name() == "linux"));
+        .any(|p| is_kernel_package(p.name(), p.provides().iter().map(|d| d.name().to_string())));
 
     if !firmware_pkgs.is_empty() && !has_kernel {
         warnings.push(PreflightWarning {
@@ -850,4 +866,61 @@ pub fn remove_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kernel_by_name_linux() {
+        assert!(is_kernel_package("linux", std::iter::empty::<&str>()));
+    }
+
+    #[test]
+    fn kernel_by_name_linux_lts() {
+        assert!(is_kernel_package("linux-lts", std::iter::empty::<&str>()));
+    }
+
+    #[test]
+    fn kernel_by_name_linux_zen() {
+        assert!(is_kernel_package("linux-zen", std::iter::empty::<&str>()));
+    }
+
+    #[test]
+    fn kernel_by_name_linux_hardened() {
+        assert!(is_kernel_package(
+            "linux-hardened",
+            std::iter::empty::<&str>()
+        ));
+    }
+
+    #[test]
+    fn kernel_by_name_linux_rt() {
+        assert!(is_kernel_package("linux-rt", std::iter::empty::<&str>()));
+    }
+
+    #[test]
+    fn kernel_by_name_linux_rt_lts() {
+        assert!(is_kernel_package(
+            "linux-rt-lts",
+            std::iter::empty::<&str>()
+        ));
+    }
+
+    #[test]
+    fn kernel_via_provides_linux() {
+        assert!(is_kernel_package(
+            "linux-custom",
+            ["linux", "linux-headers"].iter().copied()
+        ));
+    }
+
+    #[test]
+    fn non_kernel_package() {
+        assert!(!is_kernel_package(
+            "linux-firmware",
+            ["firmware"].iter().copied()
+        ));
+    }
 }
