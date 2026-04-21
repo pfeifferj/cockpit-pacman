@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent, act, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act, cleanup, within } from "@testing-library/react";
 import { RepositoriesView } from "./RepositoriesView";
 import * as api from "../api";
 import type { ListReposResponse } from "../api";
@@ -176,5 +176,110 @@ describe("RepositoriesView", () => {
     expect(savedRepos[0].enabled).toBe(false);
     expect(savedRepos[1].name).toBe("extra");
     expect(savedRepos[1].enabled).toBe(true);
+  });
+
+  it("typing in search with no unsaved changes applies filter immediately without a modal", async () => {
+    render(<RepositoriesView />);
+    await waitFor(() => {
+      expect(screen.getByText("[core]")).toBeInTheDocument();
+    });
+
+    const searchInput = screen.getByPlaceholderText("Search repositories...");
+    await act(async () => {
+      fireEvent.change(searchInput, { target: { value: "core" } });
+    });
+
+    expect(screen.getByText("[core]")).toBeInTheDocument();
+    expect(screen.queryByText("[extra]")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("typing in search when unsaved changes exist opens a confirmation modal without applying the filter", async () => {
+    render(<RepositoriesView />);
+    await waitFor(() => {
+      expect(screen.getByText("[core]")).toBeInTheDocument();
+    });
+
+    const switches = screen.getAllByRole("switch");
+    await act(async () => {
+      fireEvent.click(switches[0]);
+    });
+    expect(screen.getByRole("button", { name: /Save Changes/i })).not.toBeDisabled();
+
+    const searchInput = screen.getByPlaceholderText("Search repositories...");
+    await act(async () => {
+      fireEvent.change(searchInput, { target: { value: "core" } });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+    });
+    expect(screen.getByText("[extra]")).toBeInTheDocument();
+  });
+
+  it("clicking Cancel in the filter-change modal leaves filter and unsaved changes intact", async () => {
+    render(<RepositoriesView />);
+    await waitFor(() => {
+      expect(screen.getByText("[core]")).toBeInTheDocument();
+    });
+
+    const switches = screen.getAllByRole("switch");
+    await act(async () => {
+      fireEvent.click(switches[0]);
+    });
+
+    const searchInput = screen.getByPlaceholderText("Search repositories...");
+    await act(async () => {
+      fireEvent.change(searchInput, { target: { value: "core" } });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+    });
+
+    const dialog = screen.getByRole("dialog");
+    const cancelButton = within(dialog).getByRole("button", { name: "Cancel" });
+    await act(async () => {
+      fireEvent.click(cancelButton);
+    });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText("[core]")).toBeInTheDocument();
+    expect(screen.getByText("[extra]")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Save Changes/i })).not.toBeDisabled();
+  });
+
+  it("clicking 'Discard and switch filter' applies pending filter and clears unsaved changes", async () => {
+    render(<RepositoriesView />);
+    await waitFor(() => {
+      expect(screen.getByText("[core]")).toBeInTheDocument();
+    });
+
+    const switches = screen.getAllByRole("switch");
+    await act(async () => {
+      fireEvent.click(switches[0]);
+    });
+
+    const searchInput = screen.getByPlaceholderText("Search repositories...");
+    await act(async () => {
+      fireEvent.change(searchInput, { target: { value: "core" } });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+    });
+
+    const dialog = screen.getByRole("dialog");
+    const discardButton = within(dialog).getByRole("button", { name: /discard and switch filter/i });
+    await act(async () => {
+      fireEvent.click(discardButton);
+    });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText("[extra]")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("[core]")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Save Changes/i })).toBeDisabled();
   });
 });

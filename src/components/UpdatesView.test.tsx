@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent, act, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act, cleanup, within } from "@testing-library/react";
 import { UpdatesView } from "./UpdatesView";
 import * as api from "../api";
 import {
@@ -33,6 +33,7 @@ vi.mock("../api", async () => {
     fetchNews: vi.fn(),
     checkLock: vi.fn(),
     removeStaleLock: vi.fn(),
+    addIgnoredPackage: vi.fn(),
   };
 });
 
@@ -51,6 +52,7 @@ const mockGetKeyringStatus = vi.mocked(api.getKeyringStatus);
 const mockFetchNews = vi.mocked(api.fetchNews);
 const mockCheckLock = vi.mocked(api.checkLock);
 const mockRemoveStaleLock = vi.mocked(api.removeStaleLock);
+const mockAddIgnoredPackage = vi.mocked(api.addIgnoredPackage);
 
 describe("UpdatesView", () => {
   beforeEach(() => {
@@ -86,6 +88,7 @@ describe("UpdatesView", () => {
     mockFetchNews.mockResolvedValue(mockNewsResponseEmpty);
     mockCheckLock.mockResolvedValue({ locked: true, stale: true, lock_path: "/var/lib/pacman/db.lck" });
     mockRemoveStaleLock.mockResolvedValue({ removed: true });
+    mockAddIgnoredPackage.mockResolvedValue({ success: true, package: "linux", message: "Package ignored" });
     mockRunUpgrade.mockReturnValue({ cancel: vi.fn() });
     mockSyncDatabase.mockImplementation((callbacks) => {
       setTimeout(() => callbacks.onComplete(), 0);
@@ -1352,6 +1355,33 @@ describe("UpdatesView", () => {
       expect(
         screen.queryByText("Running services need to be restarted"),
       ).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Row ignore kebab", () => {
+    it("clicking 'Ignore package' in row kebab calls addIgnoredPackage and reloads updates", async () => {
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+
+      const linuxRow = screen.getByText("linux").closest("tr");
+      const kebabToggle = within(linuxRow!).getByRole("button", { name: /actions/i });
+      await act(async () => {
+        fireEvent.click(kebabToggle);
+      });
+
+      const ignoreItem = screen.getByRole("menuitem", { name: /ignore package/i });
+      await act(async () => {
+        fireEvent.click(ignoreItem);
+      });
+
+      await waitFor(() => {
+        expect(mockAddIgnoredPackage).toHaveBeenCalledWith("linux");
+      });
+      await waitFor(() => {
+        expect(mockCheckUpdates).toHaveBeenCalledTimes(2);
+      });
     });
   });
 });
