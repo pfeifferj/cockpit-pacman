@@ -1129,3 +1129,86 @@ fn test_repo_mirrors_response_empty() {
     let json = serde_json::to_string(&response).unwrap();
     assert_eq!(json, "{\"repos\":[]}");
 }
+
+fn make_update_info(ignored: bool) -> UpdateInfo {
+    UpdateInfo {
+        name: "linux".to_string(),
+        current_version: "6.7.0-arch1-1".to_string(),
+        new_version: "6.7.1-arch1-1".to_string(),
+        download_size: 100_000,
+        current_size: 90_000,
+        new_size: 95_000,
+        repository: "core".to_string(),
+        ignored,
+    }
+}
+
+#[test]
+fn test_update_info_ignored_serializes() {
+    let info = make_update_info(true);
+    let json = serde_json::to_string(&info).unwrap();
+    assert!(json.contains("\"ignored\":true"));
+}
+
+#[test]
+fn test_update_info_not_ignored_serializes() {
+    let info = make_update_info(false);
+    let json = serde_json::to_string(&info).unwrap();
+    assert!(json.contains("\"ignored\":false"));
+}
+
+#[test]
+fn test_update_info_ignored_serde_default() {
+    let json = r#"{"name":"linux","current_version":"6.7.0-arch1-1","new_version":"6.7.1-arch1-1","download_size":100000,"current_size":90000,"new_size":95000,"repository":"core"}"#;
+    let info: UpdateInfo = serde_json::from_str(json).unwrap();
+    assert!(!info.ignored);
+}
+
+#[test]
+fn test_news_dismissal_roundtrip() {
+    use crate::handlers::news::{mark_news_read_to, read_news_state_from};
+    let dir = std::env::temp_dir().join("cockpit-pacman-test-dismissal-roundtrip");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("news-read.json");
+    let url = "https://archlinux.org/news/grub-212/";
+    mark_news_read_to(&path, url).unwrap();
+    let state = read_news_state_from(&path).unwrap();
+    assert!(state.dismissed.contains(&url.to_string()));
+}
+
+#[test]
+fn test_news_dismissal_dedupe() {
+    use crate::handlers::news::{mark_news_read_to, read_news_state_from};
+    let dir = std::env::temp_dir().join("cockpit-pacman-test-dismissal-dedupe");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("news-read.json");
+    let url = "https://archlinux.org/news/grub-212/";
+    mark_news_read_to(&path, url).unwrap();
+    mark_news_read_to(&path, url).unwrap();
+    let state = read_news_state_from(&path).unwrap();
+    assert_eq!(state.dismissed.len(), 1);
+}
+
+#[test]
+fn test_news_dismissal_atomicity() {
+    use crate::handlers::news::{mark_news_read_to, read_news_state_from};
+    let dir = std::env::temp_dir().join("cockpit-pacman-test-dismissal-atomicity");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("news-read.json");
+    let handles: Vec<_> = (0..20)
+        .map(|i| {
+            let p = path.clone();
+            std::thread::spawn(move || {
+                let url = format!("https://archlinux.org/news/{i}");
+                mark_news_read_to(&p, &url).unwrap();
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+    let state = read_news_state_from(&path).unwrap();
+    assert_eq!(state.dismissed.len(), 20);
+    let content = std::fs::read_to_string(&path).unwrap();
+    assert!(serde_json::from_str::<serde_json::Value>(&content).is_ok());
+}
