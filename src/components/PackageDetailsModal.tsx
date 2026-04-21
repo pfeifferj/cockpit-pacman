@@ -19,8 +19,8 @@ import {
 	EmptyState,
 	EmptyStateBody,
 } from '@patternfly/react-core';
-import { OutlinedQuestionCircleIcon, ArrowDownIcon, ExclamationCircleIcon, TopologyIcon, TrashIcon, PlusCircleIcon, HistoryIcon } from "@patternfly/react-icons";
-import { PackageDetails, SyncPackageDetails, formatSize } from "../api";
+import { OutlinedQuestionCircleIcon, ArrowDownIcon, ExclamationCircleIcon, TopologyIcon, TrashIcon, PlusCircleIcon, HistoryIcon, BanIcon } from "@patternfly/react-icons";
+import { PackageDetails, SyncPackageDetails, formatSize, addIgnoredPackage } from "../api";
 import { TimeAgo } from "./TimeAgo";
 import { sanitizeUrl, sanitizeErrorMessage } from "../utils";
 import { DowngradeModal } from "./DowngradeModal";
@@ -42,6 +42,8 @@ interface PackageDetailsModalProps {
   onViewHistory?: (packageName: string) => void;
   onPackageRemoved?: () => void;
   onPackageInstalled?: () => void;
+  isIgnored?: boolean;
+  onIgnored?: () => void;
 }
 
 export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
@@ -53,6 +55,8 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
   onViewHistory,
   onPackageRemoved,
   onPackageInstalled,
+  isIgnored,
+  onIgnored,
 }) => {
   const [downgradeModalOpen, setDowngradeModalOpen] = useState(false);
   const [uninstallTarget, setUninstallTarget] = useState<{ name: string; version: string } | null>(null);
@@ -509,6 +513,23 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
               }}
             >
               View History
+            </Button>
+          )}
+          {!isIgnored && (
+            <Button
+              variant="secondary"
+              icon={<BanIcon />}
+              onClick={async () => {
+                try {
+                  await addIgnoredPackage(packageDetails.name);
+                  onIgnored?.();
+                  onClose();
+                } catch (err) {
+                  console.error("Failed to ignore package:", err);
+                }
+              }}
+            >
+              Ignore
             </Button>
           )}
           {isInstalled ? (

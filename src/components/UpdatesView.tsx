@@ -32,6 +32,9 @@ import {
 	Select,
 	SelectOption,
 	SelectList,
+	Dropdown,
+	DropdownList,
+	DropdownItem,
 	List,
 	ListItem,
 	Content,
@@ -56,6 +59,7 @@ import {
   ArrowDownIcon,
   OutlinedQuestionCircleIcon,
   PowerOffIcon,
+  EllipsisVIcon,
 } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
@@ -85,6 +89,7 @@ import {
   fetchNews,
   getNewsReadState,
   markNewsRead,
+  addIgnoredPackage,
   getSignoffList,
   checkLock,
   removeStaleLock,
@@ -328,6 +333,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
   useBackdropClose(cancelModalOpen, () => setCancelModalOpen(false));
   const [isCancelling, setIsCancelling] = useState(false);
   const [ignoredModalOpen, setIgnoredModalOpen] = useState(false);
+  const [openKebab, setOpenKebab] = useState<string | null>(null);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [acknowledgedRemovals, setAcknowledgedRemovals] = useState(false);
   const [acknowledgedConflicts, setAcknowledgedConflicts] = useState(false);
@@ -1416,6 +1422,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
               <Th sort={getSortParams("download")}>Download</Th>
               <Th sort={getSortParams("installed")}>Installed</Th>
               <Th sort={getSortParams("net")}>Net{" "}<Tooltip content="Change in installed size after this update. Green (down) means the package shrinks, red (up) means it grows."><Icon isInline style={{ cursor: "pointer" }} onClick={(e: React.MouseEvent) => e.stopPropagation()}><OutlinedQuestionCircleIcon /></Icon></Tooltip></Th>
+              <Th screenReaderText="Actions" />
             </Tr>
           </Thead>
           <Tbody>
@@ -1517,6 +1524,45 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
                     {netSize < 0 && <ArrowDownIcon style={{ marginRight: "0.25rem" }} />}
                     {netSize >= 0 ? "+" : ""}{formatSize(netSize)}
                   </Td>
+                  <Td
+                    isActionCell
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {!isIgnored && (
+                      <Dropdown
+                        isOpen={openKebab === update.name}
+                        onOpenChange={(open: boolean) => setOpenKebab(open ? update.name : null)}
+                        onSelect={() => setOpenKebab(null)}
+                        popperProps={{ position: "right" }}
+                        toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+                          <MenuToggle
+                            ref={toggleRef}
+                            variant="plain"
+                            aria-label={`Actions for ${update.name}`}
+                            isExpanded={openKebab === update.name}
+                            onClick={() => setOpenKebab(openKebab === update.name ? null : update.name)}
+                          >
+                            <EllipsisVIcon />
+                          </MenuToggle>
+                        )}
+                      >
+                        <DropdownList>
+                          <DropdownItem
+                            onClick={async () => {
+                              try {
+                                await addIgnoredPackage(update.name);
+                                loadUpdates();
+                              } catch (err) {
+                                console.error("Failed to ignore package:", err);
+                              }
+                            }}
+                          >
+                            Ignore package
+                          </DropdownItem>
+                        </DropdownList>
+                      </Dropdown>
+                    )}
+                  </Td>
                 </Tr>
               );
             })}
@@ -1533,6 +1579,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
         onViewDependencies={onViewDependencies}
         onViewHistory={onViewHistory}
         onPackageRemoved={loadUpdates}
+        isIgnored={selectedPackage ? updates.find((u) => u.name === selectedPackage.name)?.ignored ?? false : false}
+        onIgnored={loadUpdates}
       />
 
       <Modal
