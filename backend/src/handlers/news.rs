@@ -1,13 +1,23 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Utc;
-use std::io::Read;
+use serde::{Deserialize, Serialize};
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+use fs2::FileExt;
 
 use crate::models::{NewsItem, NewsResponse};
 use crate::util::emit_json;
 
 const ARCH_NEWS_URL: &str = "https://archlinux.org/feeds/news/";
 const MAX_RSS_BYTES: u64 = 512 * 1024;
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct NewsReadState {
+    pub dismissed: Vec<String>,
+}
 
 pub fn fetch_news(days: u32) -> Result<()> {
     let days = days.min(365);
@@ -60,6 +70,104 @@ fn fetch_news_items(days: u32) -> Result<Vec<NewsItem>> {
     }
 
     Ok(items)
+}
+
+pub fn read_news_state_from(path: &Path) -> Result<NewsReadState> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory {:?}", parent))?;
+    }
+    match std::fs::read_to_string(path) {
+        Ok(content) => {
+            if content.trim().is_empty() {
+                return Ok(NewsReadState::default());
+            }
+            let state: NewsReadState = serde_json::from_str(&content)
+                .with_context(|| format!("Failed to parse news state from {:?}", path))?;
+            Ok(state)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(NewsReadState::default()),
+        Err(e) => Err(e).with_context(|| format!("Failed to read news state from {:?}", path)),
+    }
+}
+
+pub fn mark_news_read_to(path: &Path, link: &str) -> Result<()> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory {:?}", parent))?;
+    }
+
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("Invalid news state path: {:?}", path))?;
+
+    let mut lock_name = file_name.to_os_string();
+    lock_name.push(".lock");
+    let lock_path = path.with_file_name(lock_name);
+
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .with_context(|| format!("Failed to open lock file {:?}", lock_path))?;
+    lock_file
+        .lock_exclusive()
+        .with_context(|| format!("Failed to acquire lock on {:?}", lock_path))?;
+
+    let mut state = read_news_state_from(path)?;
+    if !state.dismissed.iter().any(|u| u == link) {
+        state.dismissed.push(link.to_string());
+    }
+    let content = serde_json::to_string_pretty(&state).context("Failed to serialize news state")?;
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_nanos();
+    let tid: String = format!("{:?}", std::thread::current().id())
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    let base = file_name.to_string_lossy();
+    let tmp_path = path.with_file_name(format!("{base}.{nanos}.{tid}.tmp"));
+
+    {
+        let mut tmp = File::create(&tmp_path)
+            .with_context(|| format!("Failed to create temp file {:?}", tmp_path))?;
+        tmp.write_all(content.as_bytes())
+            .with_context(|| format!("Failed to write temp file {:?}", tmp_path))?;
+        let _ = tmp.sync_all();
+    }
+
+    std::fs::rename(&tmp_path, path)
+        .with_context(|| format!("Failed to rename {:?} to {:?}", tmp_path, path))?;
+
+    Ok(())
+}
+
+fn news_state_path() -> Result<PathBuf> {
+    let home = std::env::var("HOME").context("HOME environment variable is not set")?;
+    Ok(PathBuf::from(home).join(".config/cockpit-pacman/news-read.json"))
+}
+
+pub fn read_news_state() -> Result<()> {
+    let path = news_state_path()?;
+    let state = read_news_state_from(&path)?;
+    emit_json(&state)
+}
+
+pub fn mark_news_read(link: &str) -> Result<()> {
+    crate::validation::validate_mirror_url(link)?;
+    let path = news_state_path()?;
+    mark_news_read_to(&path, link)?;
+    let state = read_news_state_from(&path)?;
+    emit_json(&state)
 }
 
 pub(crate) fn strip_html_and_truncate(html: &str, max_len: usize) -> String {

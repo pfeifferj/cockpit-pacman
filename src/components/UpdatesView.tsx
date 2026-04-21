@@ -83,6 +83,8 @@ import {
   getCacheInfo,
   getKeyringStatus,
   fetchNews,
+  getNewsReadState,
+  markNewsRead,
   getSignoffList,
   checkLock,
   removeStaleLock,
@@ -344,14 +346,19 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
   const [securityLoading, setSecurityLoading] = useState(true);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [newsError, setNewsError] = useState(false);
-  const [dismissedNews, setDismissedNews] = useState<Set<string>>(() => {
-    try {
-      const stored = window.localStorage.getItem("cockpit-pacman-dismissed-news");
-      return stored ? new Set(JSON.parse(stored) as string[]) : new Set();
-    } catch {
-      return new Set();
-    }
-  });
+  const [dismissedNews, setDismissedNews] = useState<Set<string>>(new Set<string>());
+
+  useEffect(() => {
+    let cancelled = false;
+    getNewsReadState()
+      .then((data) => {
+        if (!cancelled) {
+          setDismissedNews(new Set(data.dismissed));
+        }
+      })
+      .catch(() => { /* ignore: persistence unavailable */ });
+    return () => { cancelled = true; };
+  }, []);
 
   const { activeSortKey, activeSortDirection, getSortParams } = useSortableTable({
     columns: { name: 1, repo: 2, download: 4, installed: 5, net: 6 },
@@ -453,11 +460,9 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
     setDismissedNews((prev) => {
       const next = new Set(prev);
       next.add(link);
-      try {
-        window.localStorage.setItem("cockpit-pacman-dismissed-news", JSON.stringify([...next]));
-      } catch { /* localStorage unavailable */ }
       return next;
     });
+    void markNewsRead(link).catch(() => { /* ignore: persistence unavailable */ });
   }, []);
 
   const togglePackageSelection = (pkgName: string) => {

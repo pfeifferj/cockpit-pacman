@@ -1188,6 +1188,18 @@ export async function fetchNews(days: number = 30): Promise<NewsResponse> {
   return runBackend<NewsResponse>("fetch-news", [String(days)]);
 }
 
+export interface NewsReadState {
+  dismissed: string[];
+}
+
+export async function getNewsReadState(): Promise<NewsReadState> {
+  return runBackend<NewsReadState>("news-read-state", [], { superuser: "none" });
+}
+
+export async function markNewsRead(link: string): Promise<void> {
+  await runBackend<NewsReadState>("news-mark-read", [link], { superuser: "none" });
+}
+
 export type DependencyDirection = "forward" | "reverse" | "both";
 
 export interface DependencyTreeParams {
