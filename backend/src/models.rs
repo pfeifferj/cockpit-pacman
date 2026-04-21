@@ -372,6 +372,30 @@ pub struct RebootStatus {
     pub updated_packages: Vec<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RestartBlocked {
+    SessionCritical,
+    CockpitSession,
+    CockpitTransport,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ServiceRestart {
+    pub name: String,
+    pub pid: u32,
+    pub affected_packages: Vec<String>,
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restart_blocked: Option<RestartBlocked>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ServicesStatus {
+    pub restart_required: bool,
+    pub services: Vec<ServiceRestart>,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct MirrorEntry {
     pub url: String,

@@ -13,6 +13,7 @@ pub mod reboot;
 pub mod repos;
 pub mod scheduled;
 pub mod security;
+pub mod services;
 pub mod signoff;
 
 pub use cache::{clean_cache, get_cache_info};
@@ -37,4 +38,5 @@ pub use reboot::get_reboot_status;
 pub use repos::{list_repos, save_repos};
 pub use scheduled::{get_schedule_config, get_scheduled_runs, scheduled_run, set_schedule_config};
 pub use security::{check_security, security_info};
+pub use services::get_services_status;
 pub use signoff::{signoff_list, signoff_revoke, signoff_sign};

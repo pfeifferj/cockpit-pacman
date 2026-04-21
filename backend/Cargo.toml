@@ -24,6 +24,7 @@ ureq = "3"
 arch-security-client = { path = "crates/arch-security-client" }
 archweb-client = { path = "crates/archweb-client" }
 base64 = "0.22"
+zbus = "5"
 
 [profile.release]
 lto = true
