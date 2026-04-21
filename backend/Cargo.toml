@@ -20,6 +20,7 @@ pacman-key = "0.1.2"
 pacman-log = "0.1.0"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 rss = "2"
+html2text = "0.12"
 ureq = "3"
 arch-security-client = { path = "crates/arch-security-client" }
 archweb-client = { path = "crates/archweb-client" }

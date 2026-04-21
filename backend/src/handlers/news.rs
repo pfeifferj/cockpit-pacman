@@ -58,7 +58,7 @@ fn fetch_news_items(days: u32) -> Result<Vec<NewsItem>> {
         let link = item.link().unwrap_or("").to_string();
         let summary = item
             .description()
-            .map(|d| strip_html_and_truncate(d, 300))
+            .map(|d| parse_rss_body(d, 300))
             .unwrap_or_default();
 
         items.push(NewsItem {
@@ -170,6 +170,20 @@ pub fn mark_news_read(link: &str) -> Result<()> {
     emit_json(&state)
 }
 
+pub(crate) fn parse_rss_body(html: &str, max: usize) -> String {
+    let text = html2text::from_read(html.as_bytes(), usize::MAX);
+    let trimmed = text.trim_end().to_string();
+    if trimmed.len() <= max {
+        return trimmed;
+    }
+    let truncated = &trimmed[..max];
+    match truncated.rfind(' ') {
+        Some(pos) if pos > max / 2 => format!("{}...", &truncated[..pos]),
+        _ => format!("{}...", truncated),
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn strip_html_and_truncate(html: &str, max_len: usize) -> String {
     let mut result = String::with_capacity(html.len());
     let mut in_tag = false;
@@ -230,6 +244,7 @@ pub(crate) fn strip_html_and_truncate(html: &str, max_len: usize) -> String {
     }
 }
 
+#[cfg(test)]
 fn decode_entity(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
     let mut entity = String::new();
     let mut terminated = false;
