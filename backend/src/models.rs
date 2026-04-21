@@ -80,7 +80,7 @@ pub struct PackageDetails {
     pub update_stats: Option<UpdateStats>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct UpdateStats {
     pub update_count: usize,
     pub first_installed: Option<String>,

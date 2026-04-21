@@ -1,15 +1,22 @@
 use anyhow::Result;
 use chrono::NaiveDateTime;
-use pacman_log::{Action, LogReader};
-use std::collections::HashSet;
+use pacman_log::LogReader;
+use std::collections::{HashMap, HashSet};
+use std::sync::Mutex;
+use std::time::SystemTime;
 
 use crate::alpm::{find_available_updates, get_handle, reason_to_string};
 use crate::db::{find_package_repo, get_repo_map};
 use crate::models::{
-    OrphanPackage, OrphanResponse, Package, PackageDetails, PackageListResponse, SearchResponse,
-    SearchResult, SyncPackageDetails, UpdateStats, UpdatesResponse,
+    LogEntry, OrphanPackage, OrphanResponse, Package, PackageDetails, PackageListResponse,
+    SearchResponse, SearchResult, SyncPackageDetails, UpdateStats, UpdatesResponse,
 };
 use crate::util::{emit_json, sort_with_direction};
+
+const PACMAN_LOG_PATH: &str = "/var/log/pacman.log";
+
+static UPDATE_STATS_CACHE: Mutex<Option<(SystemTime, HashMap<String, UpdateStats>)>> =
+    Mutex::new(None);
 
 pub fn list_installed(
     offset: usize,
@@ -151,62 +158,103 @@ fn split_licenses(license: &str) -> Vec<String> {
         .collect()
 }
 
-fn compute_update_stats(name: &str) -> Option<UpdateStats> {
-    let reader = LogReader::system();
-    let name_lower = name.to_lowercase();
+pub(crate) fn build_update_stats_map(
+    entries: impl IntoIterator<Item = LogEntry>,
+) -> HashMap<String, UpdateStats> {
+    struct Accum {
+        first_installed: Option<String>,
+        last_updated: Option<String>,
+        update_count: usize,
+        upgrade_timestamps: Vec<NaiveDateTime>,
+    }
 
-    let mut upgrade_timestamps: Vec<NaiveDateTime> = Vec::new();
-    let mut first_installed: Option<String> = None;
-    let mut last_updated: Option<String> = None;
-    let mut update_count = 0usize;
-
-    for result in reader.into_iter() {
-        let entry = match result {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-
-        if entry.package.to_lowercase() != name_lower {
-            continue;
-        }
-
-        let ts_str = entry.timestamp.format("%Y-%m-%dT%H:%M:%S%z").to_string();
-
-        match entry.action {
-            Action::Installed if first_installed.is_none() => {
-                first_installed = Some(ts_str);
+    let mut per_pkg: HashMap<String, Accum> = HashMap::new();
+    for entry in entries {
+        let key = entry.package.to_lowercase();
+        let acc = per_pkg.entry(key).or_insert_with(|| Accum {
+            first_installed: None,
+            last_updated: None,
+            update_count: 0,
+            upgrade_timestamps: Vec::new(),
+        });
+        match entry.action.as_str() {
+            "installed" if acc.first_installed.is_none() => {
+                acc.first_installed = Some(entry.timestamp);
             }
-            Action::Upgraded => {
-                update_count += 1;
-                last_updated = Some(ts_str.clone());
-                if let Ok(dt) = NaiveDateTime::parse_from_str(&ts_str, "%Y-%m-%dT%H:%M:%S%z") {
-                    upgrade_timestamps.push(dt);
+            "upgraded" => {
+                acc.update_count += 1;
+                acc.last_updated = Some(entry.timestamp.clone());
+                if let Ok(dt) =
+                    NaiveDateTime::parse_from_str(&entry.timestamp, "%Y-%m-%dT%H:%M:%S%z")
+                {
+                    acc.upgrade_timestamps.push(dt);
                 }
             }
             _ => {}
         }
     }
 
-    if update_count == 0 && first_installed.is_none() {
-        return None;
-    }
+    per_pkg
+        .into_iter()
+        .filter_map(|(name, acc)| {
+            if acc.update_count == 0 && acc.first_installed.is_none() {
+                return None;
+            }
+            let avg_days = if acc.upgrade_timestamps.len() >= 2 {
+                let total_days: f64 = acc
+                    .upgrade_timestamps
+                    .windows(2)
+                    .map(|w| (w[1] - w[0]).num_seconds().abs() as f64 / 86400.0)
+                    .sum();
+                Some(total_days / (acc.upgrade_timestamps.len() - 1) as f64)
+            } else {
+                None
+            };
+            Some((
+                name,
+                UpdateStats {
+                    update_count: acc.update_count,
+                    first_installed: acc.first_installed,
+                    last_updated: acc.last_updated,
+                    avg_days_between_updates: avg_days,
+                },
+            ))
+        })
+        .collect()
+}
 
-    let avg_days = if upgrade_timestamps.len() >= 2 {
-        let total_days: f64 = upgrade_timestamps
-            .windows(2)
-            .map(|w| (w[1] - w[0]).num_seconds().abs() as f64 / 86400.0)
-            .sum();
-        Some(total_days / (upgrade_timestamps.len() - 1) as f64)
-    } else {
-        None
+fn compute_update_stats(name: &str) -> Option<UpdateStats> {
+    let name_lower = name.to_lowercase();
+    let current_mtime = std::fs::metadata(PACMAN_LOG_PATH)
+        .and_then(|m| m.modified())
+        .ok();
+
+    let Ok(mut cache) = UPDATE_STATS_CACHE.lock() else {
+        return None;
     };
 
-    Some(UpdateStats {
-        update_count,
-        first_installed,
-        last_updated,
-        avg_days_between_updates: avg_days,
-    })
+    if let Some((cached_mtime, map)) = cache.as_ref()
+        && current_mtime.as_ref() == Some(cached_mtime)
+    {
+        return map.get(&name_lower).cloned();
+    }
+
+    let entries = LogReader::system()
+        .into_iter()
+        .filter_map(|r| r.ok())
+        .map(|entry| LogEntry {
+            timestamp: entry.timestamp.format("%Y-%m-%dT%H:%M:%S%z").to_string(),
+            action: entry.action.to_string(),
+            package: entry.package,
+            old_version: entry.old_version,
+            new_version: entry.new_version,
+        });
+    let map = build_update_stats_map(entries);
+    let result = map.get(&name_lower).cloned();
+    if let Some(mtime) = current_mtime {
+        *cache = Some((mtime, map));
+    }
+    result
 }
 
 pub fn local_package_info(name: &str) -> Result<()> {
