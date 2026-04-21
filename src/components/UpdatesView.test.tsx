@@ -10,6 +10,8 @@ import {
   mockSyncPackageDetails,
   mockNewsResponse,
   mockNewsResponseEmpty,
+  mockServicesStatus,
+  mockServicesStatusMixed,
 } from "../test/mocks";
 
 vi.mock("../api", async () => {
@@ -23,6 +25,8 @@ vi.mock("../api", async () => {
     getSyncPackageInfo: vi.fn(),
     listIgnoredPackages: vi.fn(),
     getRebootStatus: vi.fn(),
+    getServicesStatus: vi.fn(),
+    restartServices: vi.fn(),
     listOrphans: vi.fn(),
     getCacheInfo: vi.fn(),
     getKeyringStatus: vi.fn(),
@@ -39,6 +43,8 @@ const mockSyncDatabase = vi.mocked(api.syncDatabase);
 const mockGetSyncPackageInfo = vi.mocked(api.getSyncPackageInfo);
 const mockListIgnoredPackages = vi.mocked(api.listIgnoredPackages);
 const mockGetRebootStatus = vi.mocked(api.getRebootStatus);
+const mockGetServicesStatus = vi.mocked(api.getServicesStatus);
+const mockRestartServices = vi.mocked(api.restartServices);
 const mockListOrphans = vi.mocked(api.listOrphans);
 const mockGetCacheInfo = vi.mocked(api.getCacheInfo);
 const mockGetKeyringStatus = vi.mocked(api.getKeyringStatus);
@@ -62,6 +68,8 @@ describe("UpdatesView", () => {
       kernel_package: null,
       updated_packages: [],
     });
+    mockGetServicesStatus.mockResolvedValue(mockServicesStatus);
+    mockRestartServices.mockResolvedValue(undefined);
     mockListOrphans.mockResolvedValue({ orphans: [], total_size: 0 });
     mockGetCacheInfo.mockResolvedValue({
       total_size: 1024 * 1024 * 1024,
@@ -1274,6 +1282,74 @@ describe("UpdatesView", () => {
       });
       expect(getRowCheckbox("linux").checked).toBe(false);
       expect(getRowCheckbox("linux").disabled).toBe(true);
+    });
+  });
+
+  describe("Services restart alert", () => {
+    const originalHostname = window.location.hostname;
+
+    const setHostname = (host: string) => {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: { ...window.location, hostname: host },
+      });
+    };
+
+    afterEach(() => {
+      setHostname(originalHostname);
+    });
+
+    it("renders the alert with both sections and tags blocked rows", async () => {
+      setHostname("fronker.example");
+      mockGetServicesStatus.mockResolvedValue(mockServicesStatusMixed);
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("Running services need to be restarted")).toBeInTheDocument();
+      });
+      expect(screen.getByText("Safe to restart from Cockpit:")).toBeInTheDocument();
+      expect(screen.getByText("Cockpit can't restart these safely:")).toBeInTheDocument();
+      expect(
+        screen.getAllByText("Restarting this would disconnect your Cockpit session.").length,
+      ).toBeGreaterThanOrEqual(2);
+      expect(
+        screen.getByText("Restarting this would log out the desktop session."),
+      ).toBeInTheDocument();
+    });
+
+    it("local cockpit promotes cockpit_transport rows to safe", async () => {
+      setHostname("localhost");
+      mockGetServicesStatus.mockResolvedValue(mockServicesStatusMixed);
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /Restart safe \(2\)/ })).toBeInTheDocument();
+      });
+      expect(
+        screen.queryByText(
+          (_, el) => el?.tagName === "STRONG" && el.textContent === "wpa_supplicant.service",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("Restart safe button passes only unblocked unit names", async () => {
+      setHostname("fronker.example");
+      mockGetServicesStatus.mockResolvedValue(mockServicesStatusMixed);
+      render(<UpdatesView />);
+      const btn = await screen.findByRole("button", { name: /Restart safe \(1\)/ });
+      fireEvent.click(btn);
+      await waitFor(() => {
+        expect(mockRestartServices).toHaveBeenCalledWith(["nginx.service"]);
+      });
+    });
+
+    it("does not render the alert when no services need restart", async () => {
+      mockGetServicesStatus.mockResolvedValue(mockServicesStatus);
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(mockCheckUpdates).toHaveBeenCalled();
+      });
+      expect(
+        screen.queryByText("Running services need to be restarted"),
+      ).not.toBeInTheDocument();
     });
   });
 });

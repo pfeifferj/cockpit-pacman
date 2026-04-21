@@ -48,6 +48,7 @@ import type {
   NewsItem,
   NewsResponse,
   ScheduledRunEntry,
+  ServicesStatus,
 } from "../api";
 import {
   listInstalled,
@@ -72,6 +73,7 @@ import {
   getScheduledRuns,
   getSyncPackageInfo,
   listRepoMirrors,
+  getServicesStatus,
 } from "../api";
 
 // JSON fixtures — vitest resolves these at build time via Vite's JSON import support
@@ -99,6 +101,7 @@ import newsFixture from "../../test/fixtures/news.json";
 import scheduledRunsFixture from "../../test/fixtures/scheduled-runs.json";
 import syncPackageDetailFixture from "../../test/fixtures/sync-package-detail.json";
 import repoMirrorsFixture from "../../test/fixtures/repo-mirrors.json";
+import servicesStatusFixture from "../../test/fixtures/services-status.json";
 
 function spawnReturns(data: unknown): void {
   mockSpawn.mockReturnValue(
@@ -1122,5 +1125,42 @@ describe("fixture files are valid JSON objects", () => {
     );
     expect(hasFixed).toBe(true);
     expect(lacksFixed).toBe(true);
+  });
+});
+
+
+describe("getServicesStatus contract", () => {
+  it("parses empty services-status fixture into ServicesStatus shape", async () => {
+    spawnReturns((servicesStatusFixture as { empty: ServicesStatus }).empty);
+    const result = await getServicesStatus();
+
+    expect(typeof result.restart_required).toBe("boolean");
+    expect(Array.isArray(result.services)).toBe(true);
+    expect(result.restart_required).toBe(false);
+    expect(result.services).toHaveLength(0);
+  });
+
+  it("parses two-services fixture with correct service entry shapes", async () => {
+    spawnReturns((servicesStatusFixture as Record<string, unknown>)["two-services"]);
+    const result = await getServicesStatus();
+
+    expect(result.restart_required).toBe(true);
+    expect(result.services).toHaveLength(2);
+
+    const svc = result.services[0];
+    expect(typeof svc.name).toBe("string");
+    expect(typeof svc.pid).toBe("number");
+    expect(Array.isArray(svc.affected_packages)).toBe(true);
+    expect(typeof svc.reason).toBe("string");
+    expect(svc.name).toBe("nginx.service");
+  });
+
+  it("service with empty affected_packages is still present", async () => {
+    spawnReturns((servicesStatusFixture as Record<string, unknown>)["two-services"]);
+    const result = await getServicesStatus();
+
+    const noPackages = result.services.find((s) => s.affected_packages.length === 0);
+    expect(noPackages).toBeDefined();
+    expect(noPackages!.name).toBe("sshd.service");
   });
 });

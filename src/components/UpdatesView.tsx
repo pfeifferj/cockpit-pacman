@@ -63,6 +63,8 @@ import {
   PreflightResponse,
   StreamEvent,
   RebootStatus,
+  ServiceRestart,
+  ServicesStatus,
   KeyringStatusResponse,
   NewsItem,
   PackageSecurityAdvisory,
@@ -76,6 +78,8 @@ import {
   listIgnoredPackages,
   getRebootStatus,
   rebootSystem,
+  getServicesStatus,
+  restartServices,
   listOrphans,
   getCacheInfo,
   getKeyringStatus,
@@ -331,6 +335,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
   const [acknowledgedWarnings, setAcknowledgedWarnings] = useState<Set<string>>(new Set());
   const [rebootStatus, setRebootStatus] = useState<RebootStatus | null>(null);
   const [rebootOnComplete, setRebootOnComplete] = useState(false);
+  const [servicesStatus, setServicesStatus] = useState<ServicesStatus | null>(null);
+  const [restartServicesOnComplete, setRestartServicesOnComplete] = useState(false);
   const [orphanCount, setOrphanCount] = useState<number | null>(null);
   const [cacheSize, setCacheSize] = useState<number | null>(null);
   const [keyringStatus, setKeyringStatus] = useState<KeyringStatusResponse | null>(null);
@@ -556,9 +562,21 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
     }
   }, []);
 
+  const loadServicesStatus = useCallback(async () => {
+    try {
+      const status = await getServicesStatus();
+      setServicesStatus(status);
+      return status;
+    } catch {
+      setServicesStatus(null);
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     loadRebootStatus();
-  }, [loadRebootStatus]);
+    loadServicesStatus();
+  }, [loadRebootStatus, loadServicesStatus]);
 
   const loadSummary = useCallback(async () => {
     setSummaryLoading(true);
@@ -762,6 +780,16 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
           return;
         }
         loadRebootStatus();
+        loadServicesStatus().then((status) => {
+          if (restartServicesOnComplete && status?.restart_required) {
+            const units = status.services
+              .filter((s) => !effectiveBlock(s))
+              .map((s) => s.name);
+            if (units.length > 0) {
+              restartServices(units).catch(() => loadServicesStatus());
+            }
+          }
+        });
       },
       onError: (err) => {
         setState("error");
@@ -849,6 +877,82 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
         <>
           Critical system packages were updated since boot: {rebootStatus.updated_packages.join(", ")}.
           A reboot is recommended to apply these changes.
+        </>
+      )}
+    </Alert>
+  ) : null;
+
+  const isLocalCockpit = useMemo(
+    () => ["localhost", "127.0.0.1", "::1", ""].includes(window.location.hostname),
+    [],
+  );
+  const effectiveBlock = useCallback(
+    (svc: ServiceRestart) =>
+      svc.restart_blocked === "cockpit_transport" && isLocalCockpit
+        ? undefined
+        : svc.restart_blocked,
+    [isLocalCockpit],
+  );
+  const safeServices = useMemo(
+    () => servicesStatus?.services.filter((s) => !effectiveBlock(s)) ?? [],
+    [servicesStatus, effectiveBlock],
+  );
+  const blockedServices = useMemo(
+    () => servicesStatus?.services.filter((s) => effectiveBlock(s)) ?? [],
+    [servicesStatus, effectiveBlock],
+  );
+  const servicesAlert = servicesStatus?.restart_required ? (
+    <Alert
+      variant="warning"
+      title="Running services need to be restarted"
+      className="pf-v6-u-mb-md"
+      actionLinks={
+        safeServices.length > 0 ? (
+          <Button
+            variant="warning"
+            onClick={() =>
+              restartServices(safeServices.map((s) => s.name))
+                .then(() => loadServicesStatus())
+                .catch(() => loadServicesStatus())
+            }
+          >
+            Restart safe ({safeServices.length})
+          </Button>
+        ) : undefined
+      }
+    >
+      {safeServices.length > 0 && (
+        <>
+          <div className="pf-v6-u-mb-sm">Safe to restart from Cockpit:</div>
+          <List>
+            {safeServices.map((svc) => (
+              <ListItem key={svc.name}>
+                <strong>{svc.name}</strong>
+                {svc.affected_packages.length > 0 && ` (${svc.affected_packages.join(", ")})`}
+              </ListItem>
+            ))}
+          </List>
+        </>
+      )}
+      {blockedServices.length > 0 && (
+        <>
+          <div className="pf-v6-u-mt-md">Cockpit can&apos;t restart these safely:</div>
+          <List>
+            {blockedServices.map((svc) => {
+              const blk = effectiveBlock(svc);
+              const note =
+                blk === "session_critical"
+                  ? "Restarting this would log out the desktop session."
+                  : "Restarting this would disconnect your Cockpit session.";
+              return (
+                <ListItem key={svc.name} className="pf-v6-u-color-200">
+                  <strong>{svc.name}</strong>
+                  {svc.affected_packages.length > 0 && ` (${svc.affected_packages.join(", ")})`}
+                  <div className="pf-v6-u-font-size-sm">{note}</div>
+                </ListItem>
+              );
+            })}
+          </List>
         </>
       )}
     </Alert>
@@ -960,6 +1064,16 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
             />
           )}
 
+          {servicesStatus?.restart_required && !upgradeNeedsReboot && (
+            <Checkbox
+              id="restart-services-on-complete"
+              label="Restart affected services when complete"
+              isChecked={restartServicesOnComplete}
+              onChange={(_event, checked) => setRestartServicesOnComplete(checked)}
+              className="pf-v6-u-mt-md"
+            />
+          )}
+
           <ExpandableSection
             toggleText={isDetailsExpanded ? "Hide details" : "Show details"}
             onToggle={(_event, expanded) => setIsDetailsExpanded(expanded)}
@@ -1018,6 +1132,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
       <Card>
         <CardBody>
           {rebootAlert}
+          {servicesAlert}
           <EmptyState  headingLevel="h2" icon={CheckCircleIcon}  titleText="System Updated">
             <EmptyStateBody>
               All packages have been updated successfully.
@@ -1046,6 +1161,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
     return (
       <>
         {rebootAlert}
+        {servicesAlert}
         {warnings.length > 0 && (
           <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
             <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">
@@ -1139,6 +1255,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
   return (
     <>
       {rebootAlert}
+      {servicesAlert}
       {warnings.length > 0 && (
         <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
           <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">
