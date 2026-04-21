@@ -613,3 +613,53 @@ pub fn list_repo_mirrors() -> Result<()> {
 
     emit_json(&RepoMirrorsResponse { repos })
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::parse_server_line;
+
+    #[test]
+    fn well_formed_server_line_returns_trimmed_url() {
+        assert_eq!(
+            parse_server_line("Server = https://mirror.example/$repo/os/$arch"),
+            Some("https://mirror.example/$repo/os/$arch".to_string())
+        );
+    }
+
+    #[test]
+    fn line_without_equals_returns_none() {
+        assert_eq!(parse_server_line("Server https://mirror.example/"), None);
+    }
+
+    #[test]
+    fn empty_value_after_equals_returns_some_empty_string() {
+        assert_eq!(parse_server_line("Key = "), Some("".to_string()));
+    }
+
+    #[test]
+    fn leading_trailing_whitespace_around_value_is_trimmed() {
+        assert_eq!(
+            parse_server_line("Server =   https://mirror.example/   "),
+            Some("https://mirror.example/".to_string())
+        );
+    }
+
+    #[test]
+    fn commented_server_line_returns_value_after_equals() {
+        // splitn(2, '=') has no '#' filter; the '#' ends up in the key half,
+        // so the value after '=' is returned as-is.
+        assert_eq!(
+            parse_server_line("#Server = https://mirror.example/"),
+            Some("https://mirror.example/".to_string())
+        );
+    }
+
+    #[test]
+    fn url_with_equals_in_query_param_preserves_full_value() {
+        assert_eq!(
+            parse_server_line("Server = https://example.com/?token=abc"),
+            Some("https://example.com/?token=abc".to_string())
+        );
+    }
+}
