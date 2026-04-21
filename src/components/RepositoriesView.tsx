@@ -351,9 +351,6 @@ export const RepositoriesView: React.FC = () => {
               </FlexItem>
             </Flex>
           </FlexItem>
-          <FlexItem>
-            <Button variant="primary" onClick={handleSave} isDisabled={!hasChanges}>Save Changes</Button>
-          </FlexItem>
         </Flex>
 
         <Toolbar>
@@ -378,6 +375,11 @@ export const RepositoriesView: React.FC = () => {
                 }}
                 aria-label="Search repositories"
               />
+            </ToolbarItem>
+            <ToolbarItem>
+              <Button variant="primary" onClick={handleSave} isDisabled={!hasChanges}>
+                Save Changes
+              </Button>
             </ToolbarItem>
           </ToolbarContent>
         </Toolbar>
