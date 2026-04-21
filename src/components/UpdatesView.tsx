@@ -102,6 +102,7 @@ import { PackageDetailsModal } from "./PackageDetailsModal";
 import { StatBox } from "./StatBox";
 import { IgnoredPackagesModal } from "./IgnoredPackagesModal";
 import { ScheduleModal } from "./ScheduleModal";
+import { useNavigation } from "../contexts/NavigationContext";
 
 const SEVERITY_ORDER: Record<string, number> = {
   Critical: 4,
@@ -148,12 +149,10 @@ const SystemOverviewCard: React.FC<{
   cacheSize: number | null;
   keyringStatus: KeyringStatusResponse | null;
   summaryLoading: boolean;
-  onViewOrphans?: () => void;
-  onViewCache?: () => void;
-  onViewKeyring?: () => void;
   pendingSignoffs?: number | null;
-  onViewSignoffs?: () => void;
-}> = ({ updates, securityCount, securityLoading, orphanCount, cacheSize, keyringStatus, summaryLoading, onViewOrphans, onViewCache, onViewKeyring, pendingSignoffs, onViewSignoffs }) => (
+}> = ({ updates, securityCount, securityLoading, orphanCount, cacheSize, keyringStatus, summaryLoading, pendingSignoffs }) => {
+  const { onViewOrphans, onViewCache, onViewKeyring, onViewSignoffs } = useNavigation();
+  return (
   <Card className="pf-v6-u-mb-md">
     <CardBody>
       <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">System Overview</CardTitle>
@@ -224,15 +223,10 @@ const SystemOverviewCard: React.FC<{
       </Flex>
     </CardBody>
   </Card>
-);
+  );
+};
 
 interface UpdatesViewProps {
-  onViewDependencies?: (packageName: string) => void;
-  onViewHistory?: (packageName: string) => void;
-  onViewOrphans?: () => void;
-  onViewCache?: () => void;
-  onViewKeyring?: () => void;
-  onViewSignoffs?: () => void;
   signoffCredentials?: KeyringCredentials | null;
 }
 
@@ -304,7 +298,8 @@ const LockErrorBody: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
   );
 };
 
-export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, onViewHistory, onViewOrphans, onViewCache, onViewKeyring, onViewSignoffs, signoffCredentials }) => {
+export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) => {
+  const { onViewDependencies, onViewHistory } = useNavigation();
   const [state, setState] = useState<ViewState>("loading");
   const [updates, setUpdates] = useState<UpdateInfo[]>([]);
   const [log, setLog] = useState("");
@@ -1167,7 +1162,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
         {warnings.length > 0 && (
           <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
             <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">
-              {warnings.map((w, i) => <li key={i}>{w}</li>)}
+              {warnings.map((w) => <li key={w}>{w}</li>)}
             </ul>
           </Alert>
         )}
@@ -1178,8 +1173,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
             The pacman keyring is not initialized. Package signature verification may fail.
           </Alert>
         )}
-        {keyringStatus?.warnings.map((w, i) => (
-          <Alert key={i} variant="warning" title={w} isInline className="pf-v6-u-mb-md" />
+        {keyringStatus?.warnings.map((w) => (
+          <Alert key={w} variant="warning" title={w} isInline className="pf-v6-u-mb-md" />
         ))}
 
         <SystemOverviewCard
@@ -1190,10 +1185,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
           cacheSize={cacheSize}
           keyringStatus={keyringStatus}
           summaryLoading={summaryLoading}
-          onViewOrphans={onViewOrphans}
-          onViewCache={onViewCache}
-          onViewKeyring={onViewKeyring}
-          onViewSignoffs={onViewSignoffs}
           pendingSignoffs={pendingSignoffs}
         />
 
@@ -1261,7 +1252,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
       {warnings.length > 0 && (
         <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
           <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">
-            {warnings.map((w, i) => <li key={i}>{w}</li>)}
+            {warnings.map((w) => <li key={w}>{w}</li>)}
           </ul>
         </Alert>
       )}
@@ -1272,8 +1263,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
           The pacman keyring is not initialized. Package signature verification may fail.
         </Alert>
       )}
-      {keyringStatus?.warnings.map((w, i) => (
-        <Alert key={i} variant="warning" title={w} isInline className="pf-v6-u-mb-md" />
+      {keyringStatus?.warnings.map((w) => (
+        <Alert key={w} variant="warning" title={w} isInline className="pf-v6-u-mb-md" />
       ))}
       {ignoredPackages.length > 0 && (
         <Alert variant="warning" title="Partial upgrade" isInline className="pf-v6-u-mb-md">
@@ -1289,10 +1280,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
         cacheSize={cacheSize}
         keyringStatus={keyringStatus}
         summaryLoading={summaryLoading}
-        onViewOrphans={onViewOrphans}
-        onViewCache={onViewCache}
-        onViewKeyring={onViewKeyring}
-        onViewSignoffs={onViewSignoffs}
         pendingSignoffs={pendingSignoffs}
       />
 
@@ -1602,8 +1589,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
                     The following packages will be removed to resolve dependencies:
                   </Content>
                   <List>
-                    {preflightData.removals!.map((pkg, i) => (
-                      <ListItem key={i}>{pkg}</ListItem>
+                    {preflightData.removals!.map((pkg) => (
+                      <ListItem key={pkg}>{pkg}</ListItem>
                     ))}
                   </List>
                   <Checkbox
@@ -1622,8 +1609,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
                     The following conflicts will be resolved automatically:
                   </Content>
                   <List>
-                    {preflightData.conflicts!.map((c, i) => (
-                      <ListItem key={i}>
+                    {preflightData.conflicts!.map((c) => (
+                      <ListItem key={`${c.package1}-${c.package2}`}>
                         {c.package1} conflicts with {c.package2}
                       </ListItem>
                     ))}
@@ -1644,8 +1631,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
                     The following keys will be imported to verify package signatures:
                   </Content>
                   <List>
-                    {preflightData.import_keys!.map((k, i) => (
-                      <ListItem key={i}>
+                    {preflightData.import_keys!.map((k) => (
+                      <ListItem key={k.fingerprint}>
                         {k.uid} ({k.fingerprint})
                       </ListItem>
                     ))}
@@ -1671,8 +1658,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
                   <Content component={ContentVariants.p}>{w.message}</Content>
                   {w.packages.length > 0 && (
                     <List>
-                      {w.packages.map((pkg, i) => (
-                        <ListItem key={i}>{pkg}</ListItem>
+                      {w.packages.map((pkg) => (
+                        <ListItem key={`${w.id}-${pkg}`}>{pkg}</ListItem>
                       ))}
                     </List>
                   )}
@@ -1704,8 +1691,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
                     The following packages will be replaced:
                   </Content>
                   <List>
-                    {preflightData.replacements!.map((r, i) => (
-                      <ListItem key={i}>
+                    {preflightData.replacements!.map((r) => (
+                      <ListItem key={`${r.old_package}-${r.new_package}`}>
                         {r.old_package} will be replaced by {r.new_package}
                       </ListItem>
                     ))}
@@ -1719,8 +1706,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
                     The first available provider will be selected for the following dependencies:
                   </Content>
                   <List>
-                    {preflightData.providers!.map((p, i) => (
-                      <ListItem key={i}>
+                    {preflightData.providers!.map((p) => (
+                      <ListItem key={p.dependency}>
                         {p.dependency}: {p.providers[0]} (from: {p.providers.join(", ")})
                       </ListItem>
                     ))}

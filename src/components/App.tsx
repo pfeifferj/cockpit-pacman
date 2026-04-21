@@ -18,6 +18,7 @@ import { SignoffsView } from "./SignoffsView";
 import { ErrorBoundary } from "./ErrorBoundary";
 import type { KeyringCredentials } from "../api";
 import { getCredentials } from "../keyring";
+import { NavigationProvider } from "../contexts/NavigationContext";
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string | number>(0);
@@ -67,7 +68,17 @@ export const App: React.FC = () => {
     setActiveTab(3);
   };
 
+  const navHandlers = {
+    onViewDependencies: handleViewDependencies,
+    onViewHistory: handleViewHistory,
+    onViewOrphans: handleViewOrphans,
+    onViewCache: handleViewCache,
+    onViewKeyring: handleViewKeyring,
+    onViewSignoffs: signoffAvailable ? handleViewSignoffs : undefined,
+  };
+
   return (
+    <NavigationProvider value={navHandlers}>
     <Page className="no-masthead-sidebar pf-m-no-sidebar">
       <PageSection hasBodyWrapper={false} >
         <Tabs
@@ -76,25 +87,17 @@ export const App: React.FC = () => {
         >
           <Tab eventKey={0} title={<TabTitleText>Updates</TabTitleText>}>
             <ErrorBoundary fallbackTitle="Error loading updates">
-              <UpdatesView
-                onViewDependencies={handleViewDependencies}
-                onViewHistory={handleViewHistory}
-                onViewOrphans={handleViewOrphans}
-                onViewCache={handleViewCache}
-                onViewSignoffs={signoffAvailable ? handleViewSignoffs : undefined}
-                onViewKeyring={handleViewKeyring}
-                signoffCredentials={signoffCredentials}
-              />
+              <UpdatesView signoffCredentials={signoffCredentials} />
             </ErrorBoundary>
           </Tab>
           <Tab eventKey={1} title={<TabTitleText>Installed Packages</TabTitleText>}>
             <ErrorBoundary fallbackTitle="Error loading packages">
-              <PackageList graphPackage={graphPackage} initialFilter={orphanFilter} onGraphPackageChange={setGraphPackage} onViewHistory={handleViewHistory} />
+              <PackageList graphPackage={graphPackage} initialFilter={orphanFilter} onGraphPackageChange={setGraphPackage} />
             </ErrorBoundary>
           </Tab>
           <Tab eventKey={2} title={<TabTitleText>Search Packages</TabTitleText>}>
             <ErrorBoundary fallbackTitle="Error loading search">
-              <SearchView onViewDependencies={handleViewDependencies} onViewHistory={handleViewHistory} />
+              <SearchView />
             </ErrorBoundary>
           </Tab>
           <Tab eventKey={3} title={<TabTitleText>History</TabTitleText>}>
@@ -132,5 +135,6 @@ export const App: React.FC = () => {
         </Tabs>
       </PageSection>
     </Page>
+    </NavigationProvider>
   );
 };

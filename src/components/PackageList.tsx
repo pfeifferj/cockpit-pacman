@@ -41,15 +41,16 @@ import {
 import { sanitizeSearchInput } from "../utils";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { PER_PAGE_OPTIONS, SEARCH_DEBOUNCE_MS } from "../constants";
+import { useNavigation } from "../contexts/NavigationContext";
 
 interface PackageListProps {
   graphPackage?: string;
   initialFilter?: { filter: FilterType; key: number };
   onGraphPackageChange?: (packageName: string | undefined) => void;
-  onViewHistory?: (packageName: string) => void;
 }
 
-export const PackageList: React.FC<PackageListProps> = ({ graphPackage, initialFilter, onGraphPackageChange, onViewHistory }) => {
+export const PackageList: React.FC<PackageListProps> = ({ graphPackage, initialFilter, onGraphPackageChange }) => {
+  const { onViewHistory } = useNavigation();
   const [packages, setPackages] = useState<Package[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

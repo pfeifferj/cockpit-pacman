@@ -26,6 +26,7 @@ import { sanitizeUrl, sanitizeErrorMessage } from "../utils";
 import { DowngradeModal } from "./DowngradeModal";
 import { InstallModal } from "./InstallModal";
 import { UninstallModal } from "./UninstallModal";
+import { useNavigation } from "../contexts/NavigationContext";
 
 type PackageInfo = PackageDetails | SyncPackageDetails;
 
@@ -51,13 +52,16 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
   isLoading,
   onClose,
   error,
-  onViewDependencies,
-  onViewHistory,
+  onViewDependencies: onViewDependenciesProp,
+  onViewHistory: onViewHistoryProp,
   onPackageRemoved,
   onPackageInstalled,
   isIgnored,
   onIgnored,
 }) => {
+  const nav = useNavigation();
+  const onViewDependencies = onViewDependenciesProp ?? nav.onViewDependencies;
+  const onViewHistory = onViewHistoryProp ?? nav.onViewHistory;
   const [downgradeModalOpen, setDowngradeModalOpen] = useState(false);
   const [uninstallTarget, setUninstallTarget] = useState<{ name: string; version: string } | null>(null);
   const [installTarget, setInstallTarget] = useState<{ name: string; version: string } | null>(null);

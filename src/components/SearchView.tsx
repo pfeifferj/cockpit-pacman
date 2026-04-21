@@ -36,12 +36,7 @@ import { PER_PAGE_OPTIONS, SEARCH_DEBOUNCE_MS } from "../constants";
 
 const MIN_SEARCH_LENGTH = 1;
 
-interface SearchViewProps {
-  onViewDependencies?: (packageName: string) => void;
-  onViewHistory?: (packageName: string) => void;
-}
-
-export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies, onViewHistory }) => {
+export const SearchView: React.FC = () => {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -490,8 +485,6 @@ export const SearchView: React.FC<SearchViewProps> = ({ onViewDependencies, onVi
           isLoading={detailsLoading}
           onClose={clearDetails}
           error={detailsError}
-          onViewDependencies={onViewDependencies}
-          onViewHistory={onViewHistory}
           onPackageRemoved={() => {
             if (currentQuery) {
               fetchResults(currentQuery, page, perPage, installedFilter, true, activeSortIndex, activeSortDirection);
