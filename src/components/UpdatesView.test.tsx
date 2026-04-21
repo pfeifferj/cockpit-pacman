@@ -12,6 +12,7 @@ import {
   mockNewsResponseEmpty,
   mockServicesStatus,
   mockServicesStatusMixed,
+  mockServicesStatusWithServices,
 } from "../test/mocks";
 
 vi.mock("../api", async () => {
@@ -31,6 +32,8 @@ vi.mock("../api", async () => {
     getCacheInfo: vi.fn(),
     getKeyringStatus: vi.fn(),
     fetchNews: vi.fn(),
+    getNewsReadState: vi.fn(),
+    markNewsRead: vi.fn(),
     checkLock: vi.fn(),
     removeStaleLock: vi.fn(),
     addIgnoredPackage: vi.fn(),
@@ -53,6 +56,8 @@ const mockFetchNews = vi.mocked(api.fetchNews);
 const mockCheckLock = vi.mocked(api.checkLock);
 const mockRemoveStaleLock = vi.mocked(api.removeStaleLock);
 const mockAddIgnoredPackage = vi.mocked(api.addIgnoredPackage);
+const mockGetNewsReadState = vi.mocked(api.getNewsReadState);
+const mockMarkNewsRead = vi.mocked(api.markNewsRead);
 
 describe("UpdatesView", () => {
   beforeEach(() => {
@@ -89,6 +94,8 @@ describe("UpdatesView", () => {
     mockCheckLock.mockResolvedValue({ locked: true, stale: true, lock_path: "/var/lib/pacman/db.lck" });
     mockRemoveStaleLock.mockResolvedValue({ removed: true });
     mockAddIgnoredPackage.mockResolvedValue({ success: true, package: "linux", message: "Package ignored" });
+    mockGetNewsReadState.mockResolvedValue({ dismissed: [] });
+    mockMarkNewsRead.mockResolvedValue(undefined);
     mockRunUpgrade.mockReturnValue({ cancel: vi.fn() });
     mockSyncDatabase.mockImplementation((callbacks) => {
       setTimeout(() => callbacks.onComplete(), 0);
@@ -1382,6 +1389,176 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(mockCheckUpdates).toHaveBeenCalledTimes(2);
       });
+    });
+  });
+
+  describe("News dismissal", () => {
+    it("dismissing a news item calls markNewsRead with its link and removes it from view", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
+      mockFetchNews.mockResolvedValue(mockNewsResponse);
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("grub 2:2.12-3 requires manual intervention")).toBeInTheDocument();
+      });
+
+      const closeButtons = screen.getAllByRole("button").filter(
+        (btn) => btn.getAttribute("aria-label")?.includes("grub")
+      );
+      expect(closeButtons.length).toBeGreaterThan(0);
+      await act(async () => {
+        fireEvent.click(closeButtons[0]);
+      });
+
+      expect(mockMarkNewsRead).toHaveBeenCalledWith("https://archlinux.org/news/grub-2212-3/");
+      expect(screen.queryByText("grub 2:2.12-3 requires manual intervention")).not.toBeInTheDocument();
+    });
+
+    it("hides dismissed item locally even when markNewsRead rejects", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
+      mockFetchNews.mockResolvedValue(mockNewsResponse);
+      mockMarkNewsRead.mockRejectedValue(new Error("persistence unavailable"));
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("grub 2:2.12-3 requires manual intervention")).toBeInTheDocument();
+      });
+
+      const closeButtons = screen.getAllByRole("button").filter(
+        (btn) => btn.getAttribute("aria-label")?.includes("grub")
+      );
+      await act(async () => {
+        fireEvent.click(closeButtons[0]);
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByText("grub 2:2.12-3 requires manual intervention")).not.toBeInTheDocument();
+      });
+      expect(screen.queryByText(/persistence unavailable/i)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Services restart flow", () => {
+    const nonRebootUpdate = {
+      updates: [{
+        name: "openresty",
+        current_version: "1.21.4-1",
+        new_version: "1.25.3-1",
+        download_size: 5000000,
+        current_size: 10000000,
+        new_size: 12000000,
+        repository: "extra",
+      }],
+      warnings: [],
+    };
+
+    it("Restart safe button in success view calls restartServices with all unblocked units", async () => {
+      mockCheckUpdates.mockResolvedValue(nonRebootUpdate);
+      mockGetServicesStatus.mockResolvedValue(mockServicesStatusWithServices);
+      mockRunUpgrade.mockImplementation((callbacks) => {
+        setTimeout(() => {
+          callbacks.onEvent?.({ type: "complete", success: true });
+          callbacks.onComplete();
+        }, 0);
+        return { cancel: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("openresty")).toBeInTheDocument();
+      });
+
+      const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
+      await act(async () => {
+        fireEvent.click(applyButton);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("System Updated")).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /Restart safe \(2\)/ })).toBeInTheDocument();
+      });
+
+      const restartBtn = screen.getByRole("button", { name: /Restart safe \(2\)/ });
+      await act(async () => {
+        fireEvent.click(restartBtn);
+      });
+
+      await waitFor(() => {
+        expect(mockRestartServices).toHaveBeenCalledWith(["nginx.service", "sshd.service"]);
+      });
+    });
+
+    it("does not call restartServices after upgrade when checkbox is unchecked", async () => {
+      mockCheckUpdates.mockResolvedValue(nonRebootUpdate);
+      mockGetServicesStatus.mockResolvedValue(mockServicesStatusWithServices);
+      mockRunUpgrade.mockImplementation((callbacks) => {
+        setTimeout(() => {
+          callbacks.onEvent?.({ type: "complete", success: true });
+          callbacks.onComplete();
+        }, 0);
+        return { cancel: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("openresty")).toBeInTheDocument();
+      });
+
+      const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
+      await act(async () => {
+        fireEvent.click(applyButton);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("System Updated")).toBeInTheDocument();
+      });
+
+      expect(mockRestartServices).not.toHaveBeenCalled();
+    });
+
+    it("when Restart safe fails in success view, services alert remains visible and no unhandled error", async () => {
+      mockCheckUpdates.mockResolvedValue(nonRebootUpdate);
+      mockGetServicesStatus.mockResolvedValue(mockServicesStatusWithServices);
+      mockRestartServices.mockRejectedValue(new Error("systemd unreachable"));
+      mockRunUpgrade.mockImplementation((callbacks) => {
+        setTimeout(() => {
+          callbacks.onEvent?.({ type: "complete", success: true });
+          callbacks.onComplete();
+        }, 0);
+        return { cancel: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("openresty")).toBeInTheDocument();
+      });
+
+      const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
+      await act(async () => {
+        fireEvent.click(applyButton);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("System Updated")).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /Restart safe \(2\)/ })).toBeInTheDocument();
+      });
+
+      const restartBtn = screen.getByRole("button", { name: /Restart safe \(2\)/ });
+      await act(async () => {
+        fireEvent.click(restartBtn);
+      });
+
+      await waitFor(() => {
+        expect(mockRestartServices).toHaveBeenCalled();
+      });
+      await waitFor(() => {
+        expect(screen.getByText("Running services need to be restarted")).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/systemd unreachable/i)).not.toBeInTheDocument();
     });
   });
 });
