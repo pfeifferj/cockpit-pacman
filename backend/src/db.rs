@@ -17,7 +17,9 @@ pub fn find_package_repo(handle: &Alpm, pkg_name: &str) -> Option<String> {
 }
 
 pub fn get_repo_map(handle: &Alpm) -> Arc<RepoMap> {
-    let mut cache = REPO_MAP_CACHE.lock().unwrap();
+    let mut cache = REPO_MAP_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(ref map) = *cache {
         return Arc::clone(map);
     }
@@ -28,7 +30,9 @@ pub fn get_repo_map(handle: &Alpm) -> Arc<RepoMap> {
 }
 
 pub fn invalidate_repo_map_cache() {
-    let mut cache = REPO_MAP_CACHE.lock().unwrap();
+    let mut cache = REPO_MAP_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     *cache = None;
 }
 

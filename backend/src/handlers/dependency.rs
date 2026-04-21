@@ -27,12 +27,9 @@ pub fn get_dependency_tree(name: &str, depth: u32, direction: &str) -> Result<()
 
     let (root_name, root_version, root_installed, root_reason, root_repo) = match root_pkg {
         Some(pkg) => {
-            let is_installed = localdb.pkg(pkg.name()).is_ok();
-            let reason = if is_installed {
-                Some(reason_to_string(localdb.pkg(pkg.name()).unwrap().reason()).to_string())
-            } else {
-                None
-            };
+            let local_pkg = localdb.pkg(pkg.name()).ok();
+            let is_installed = local_pkg.is_some();
+            let reason = local_pkg.map(|lp| reason_to_string(lp.reason()).to_string());
             let repo = repo_map.get(pkg.name()).map(|s| s.to_string()).or_else(|| {
                 handle
                     .syncdbs()
@@ -207,12 +204,9 @@ fn add_dependency(
 
     let (resolved_name, version, installed, reason, repository) = match &dep_pkg {
         Some(pkg) => {
-            let is_installed = localdb.pkg(pkg.name()).is_ok();
-            let reason = if is_installed {
-                Some(reason_to_string(localdb.pkg(pkg.name()).unwrap().reason()).to_string())
-            } else {
-                None
-            };
+            let local_pkg = localdb.pkg(pkg.name()).ok();
+            let is_installed = local_pkg.is_some();
+            let reason = local_pkg.map(|lp| reason_to_string(lp.reason()).to_string());
             let repo = repo_map.get(pkg.name()).map(|s| s.to_string()).or_else(|| {
                 handle
                     .syncdbs()

@@ -379,7 +379,7 @@ pub fn save_mirrorlist(mirrors: &[MirrorEntry]) -> Result<()> {
             BACKUP_PREFIX,
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or(Duration::ZERO)
                 .as_secs()
         );
         fs::copy(path, &backup)?;
@@ -488,7 +488,7 @@ pub fn restore_mirror_backup(timestamp: i64) -> Result<()> {
     let pre_restore_backup = if mirrorlist.exists() {
         let ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or(Duration::ZERO)
             .as_secs();
         let path = format!("{}{}", BACKUP_PREFIX, ts);
         fs::copy(mirrorlist, &path)?;

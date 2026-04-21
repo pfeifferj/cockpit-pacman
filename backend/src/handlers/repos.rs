@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::models::{ListReposResponse, RepoDirectiveFull, RepoEntry, SaveReposResponse};
 use crate::util::emit_json;
@@ -73,7 +73,9 @@ pub fn parse_conf(input: &str) -> PacmanConf {
             continue;
         }
 
-        let repo = repos.last_mut().unwrap();
+        let Some(repo) = repos.last_mut() else {
+            continue;
+        };
 
         if trimmed.is_empty() {
             repo.trailing_blank_lines += 1;
@@ -267,7 +269,7 @@ pub fn save_repos(repos: &[RepoEntry]) -> Result<()> {
             BACKUP_PREFIX,
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or(Duration::ZERO)
                 .as_secs()
         );
         if let Err(e) = fs::copy(path, &backup) {

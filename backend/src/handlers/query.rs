@@ -76,7 +76,7 @@ pub fn list_installed(
                 alpm::PackageReason::Depend => total_dependency += 1,
             }
 
-            if filter_reason.is_none() || pkg.reason() == filter_reason.unwrap() {
+            if filter_reason.is_none_or(|r| pkg.reason() == r) {
                 filtered.push((pkg, repo));
             }
 
