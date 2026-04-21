@@ -452,6 +452,21 @@ fn test_validate_schedule_invalid_chars() {
     assert!(validate_schedule("weekly$(whoami)").is_err());
 }
 
+#[test]
+fn test_validate_schedule_bracket_range_accepted() {
+    assert!(validate_schedule("2026[1-3]-01 12:00:00").is_ok());
+}
+
+#[test]
+fn test_validate_schedule_newline_rejected() {
+    assert!(validate_schedule("x\n=y").is_err());
+}
+
+#[test]
+fn test_validate_schedule_equals_rejected() {
+    assert!(validate_schedule("key=val").is_err());
+}
+
 // --- validate_json_payload_size tests ---
 
 #[test]
@@ -930,6 +945,28 @@ fn test_strip_html_only_tags() {
     assert_eq!(strip_html_and_truncate("<br/><hr/>", 300), "");
 }
 
+// --- parse_rss_body tests ---
+
+#[test]
+fn test_parse_rss_body_strips_tags_and_decodes_entities() {
+    use crate::handlers::news::parse_rss_body;
+
+    let html = "<b>hello &amp; world</b>\n<p>foo&nbsp;bar</p>";
+    let result = parse_rss_body(html, 300);
+    assert!(result.contains("hello & world"), "ampersand decoded");
+    assert!(!result.contains("<b>"), "b tag stripped");
+    assert!(!result.contains("&nbsp;"), "nbsp decoded");
+    assert!(result.len() <= 300, "within max chars");
+}
+
+#[test]
+fn test_parse_rss_body_decodes_hex_entity_en_dash() {
+    use crate::handlers::news::parse_rss_body;
+
+    let result = parse_rss_body("foo &#x2013; bar", 300);
+    assert!(result.contains('\u{2013}'), "en-dash decoded from &#x2013;");
+}
+
 // --- Integration tests (require live pacman system) ---
 
 #[cfg(feature = "integration-tests")]
@@ -1212,4 +1249,61 @@ fn test_news_dismissal_atomicity() {
     assert_eq!(state.dismissed.len(), 20);
     let content = std::fs::read_to_string(&path).unwrap();
     assert!(serde_json::from_str::<serde_json::Value>(&content).is_ok());
+}
+
+// --- build_update_stats_map tests ---
+
+#[test]
+fn test_build_update_stats_map_counts_per_package() {
+    use crate::handlers::query::build_update_stats_map;
+    use crate::models::{LogEntry, UpdateStats};
+    use std::collections::HashMap;
+
+    let entries = vec![
+        LogEntry {
+            timestamp: "2024-01-01T00:00:00+0000".into(),
+            action: "installed".into(),
+            package: "linux".into(),
+            old_version: None,
+            new_version: Some("6.1.0".into()),
+        },
+        LogEntry {
+            timestamp: "2024-02-01T00:00:00+0000".into(),
+            action: "upgraded".into(),
+            package: "linux".into(),
+            old_version: Some("6.1.0".into()),
+            new_version: Some("6.2.0".into()),
+        },
+        LogEntry {
+            timestamp: "2024-03-01T00:00:00+0000".into(),
+            action: "upgraded".into(),
+            package: "linux".into(),
+            old_version: Some("6.2.0".into()),
+            new_version: Some("6.3.0".into()),
+        },
+        LogEntry {
+            timestamp: "2024-01-15T00:00:00+0000".into(),
+            action: "installed".into(),
+            package: "git".into(),
+            old_version: None,
+            new_version: Some("2.43.0".into()),
+        },
+        LogEntry {
+            timestamp: "2024-02-15T00:00:00+0000".into(),
+            action: "upgraded".into(),
+            package: "git".into(),
+            old_version: Some("2.43.0".into()),
+            new_version: Some("2.44.0".into()),
+        },
+    ];
+
+    let stats: HashMap<String, UpdateStats> = build_update_stats_map(entries);
+
+    let linux = stats.get("linux").expect("linux stats missing");
+    assert_eq!(linux.update_count, 2);
+    assert!(linux.first_installed.is_some());
+
+    let git = stats.get("git").expect("git stats missing");
+    assert_eq!(git.update_count, 1);
+    assert!(git.first_installed.is_some());
 }
