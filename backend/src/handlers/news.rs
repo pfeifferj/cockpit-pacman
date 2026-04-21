@@ -19,6 +19,11 @@ pub struct NewsReadState {
     pub dismissed: Vec<String>,
 }
 
+#[derive(Serialize, Deserialize, Default)]
+pub struct ServicesDismissal {
+    pub signature: Option<String>,
+}
+
 pub fn fetch_news(days: u32) -> Result<()> {
     let days = days.min(365);
     let items = fetch_news_items(days)?;
@@ -156,6 +161,11 @@ fn news_state_path() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".config/cockpit-pacman/news-read.json"))
 }
 
+fn services_dismissal_path() -> Result<PathBuf> {
+    let home = std::env::var("HOME").context("HOME environment variable is not set")?;
+    Ok(PathBuf::from(home).join(".config/cockpit-pacman/services-dismissed.json"))
+}
+
 pub fn read_news_state() -> Result<()> {
     let path = news_state_path()?;
     let state = read_news_state_from(&path)?;
@@ -166,6 +176,102 @@ pub fn mark_news_read(link: &str) -> Result<()> {
     crate::validation::validate_mirror_url(link)?;
     let path = news_state_path()?;
     let state = mark_news_read_to(&path, link)?;
+    emit_json(&state)
+}
+
+pub fn read_services_dismissal_from(path: &Path) -> Result<ServicesDismissal> {
+    match std::fs::read_to_string(path) {
+        Ok(content) => {
+            if content.trim().is_empty() {
+                return Ok(ServicesDismissal::default());
+            }
+            let state: ServicesDismissal = serde_json::from_str(&content)
+                .with_context(|| format!("Failed to parse services dismissal from {:?}", path))?;
+            Ok(state)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(ServicesDismissal::default()),
+        Err(e) => {
+            Err(e).with_context(|| format!("Failed to read services dismissal from {:?}", path))
+        }
+    }
+}
+
+pub fn write_services_dismissal_to(path: &Path, signature: &str) -> Result<ServicesDismissal> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory {:?}", parent))?;
+    }
+
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("Invalid dismissal path: {:?}", path))?;
+
+    let mut lock_name = file_name.to_os_string();
+    lock_name.push(".lock");
+    let lock_path = path.with_file_name(lock_name);
+
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .with_context(|| format!("Failed to open lock file {:?}", lock_path))?;
+    lock_file
+        .lock_exclusive()
+        .with_context(|| format!("Failed to acquire lock on {:?}", lock_path))?;
+
+    let state = ServicesDismissal {
+        signature: Some(signature.to_string()),
+    };
+    let content =
+        serde_json::to_string_pretty(&state).context("Failed to serialize services dismissal")?;
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_nanos();
+    let tid: String = format!("{:?}", std::thread::current().id())
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    let base = file_name.to_string_lossy();
+    let tmp_path = path.with_file_name(format!("{base}.{nanos}.{tid}.tmp"));
+
+    {
+        let mut tmp = File::create(&tmp_path)
+            .with_context(|| format!("Failed to create temp file {:?}", tmp_path))?;
+        tmp.write_all(content.as_bytes())
+            .with_context(|| format!("Failed to write temp file {:?}", tmp_path))?;
+        let _ = tmp.sync_all();
+    }
+
+    std::fs::rename(&tmp_path, path)
+        .with_context(|| format!("Failed to rename {:?} to {:?}", tmp_path, path))?;
+
+    Ok(state)
+}
+
+pub fn read_services_dismissal() -> Result<()> {
+    let path = services_dismissal_path()?;
+    let state = read_services_dismissal_from(&path)?;
+    emit_json(&state)
+}
+
+pub fn mark_services_dismissed(signature: &str) -> Result<()> {
+    if signature.is_empty() {
+        anyhow::bail!("Signature must not be empty");
+    }
+    if signature.len() > 4096 {
+        anyhow::bail!("Signature length {} exceeds 4096", signature.len());
+    }
+    if signature.chars().any(|c| c.is_control()) {
+        anyhow::bail!("Signature contains control characters");
+    }
+    let path = services_dismissal_path()?;
+    let state = write_services_dismissal_to(&path, signature)?;
     emit_json(&state)
 }
 

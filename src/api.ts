@@ -1200,6 +1200,18 @@ export async function markNewsRead(link: string): Promise<void> {
   await runBackend<NewsReadState>("news-mark-read", [link], { superuser: "none" });
 }
 
+export interface ServicesDismissal {
+  signature: string | null;
+}
+
+export async function getServicesDismissal(): Promise<ServicesDismissal> {
+  return runBackend<ServicesDismissal>("services-dismissal-state", [], { superuser: "none" });
+}
+
+export async function markServicesDismissed(signature: string): Promise<void> {
+  await runBackend<ServicesDismissal>("services-mark-dismissed", [signature], { superuser: "none" });
+}
+
 export type DependencyDirection = "forward" | "reverse" | "both";
 
 export interface DependencyTreeParams {

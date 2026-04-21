@@ -89,6 +89,8 @@ import {
   fetchNews,
   getNewsReadState,
   markNewsRead,
+  getServicesDismissal,
+  markServicesDismissed,
   addIgnoredPackage,
   getSignoffList,
   checkLock,
@@ -338,6 +340,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [rebootOnComplete, setRebootOnComplete] = useState(false);
   const [servicesStatus, setServicesStatus] = useState<ServicesStatus | null>(null);
   const [restartServicesOnComplete, setRestartServicesOnComplete] = useState(false);
+  const [dismissedServicesSignature, setDismissedServicesSignature] = useState<string | null | undefined>(undefined);
   const [orphanCount, setOrphanCount] = useState<number | null>(null);
   const [cacheSize, setCacheSize] = useState<number | null>(null);
   const [keyringStatus, setKeyringStatus] = useState<KeyringStatusResponse | null>(null);
@@ -570,6 +573,12 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       setServicesStatus(null);
       return null;
     }
+  }, []);
+
+  useEffect(() => {
+    getServicesDismissal()
+      .then((d) => setDismissedServicesSignature(d.signature))
+      .catch(() => setDismissedServicesSignature(null));
   }, []);
 
   useEffect(() => {
@@ -902,11 +911,28 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     () => servicesStatus?.services.filter((s) => effectiveBlock(s)) ?? [],
     [servicesStatus, effectiveBlock],
   );
-  const servicesAlert = servicesStatus?.restart_required ? (
+  const servicesSignature = useMemo(
+    () => (servicesStatus?.services ?? []).map((s) => s.name).sort().join(","),
+    [servicesStatus],
+  );
+  const servicesAlert = servicesStatus?.restart_required
+    && servicesSignature !== ""
+    && dismissedServicesSignature !== undefined
+    && dismissedServicesSignature !== servicesSignature ? (
     <Alert
       variant="warning"
       title="Running services need to be restarted"
       className="pf-v6-u-mb-md"
+      actionClose={
+        <AlertActionCloseButton
+          onClose={() => {
+            setDismissedServicesSignature(servicesSignature);
+            markServicesDismissed(servicesSignature).catch((err) => {
+              console.error("Failed to persist services dismissal:", err);
+            });
+          }}
+        />
+      }
       actionLinks={
         safeServices.length > 0 ? (
           <Button
