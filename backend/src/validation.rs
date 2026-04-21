@@ -70,12 +70,37 @@ pub fn validate_schedule(schedule: &str) -> Result<()> {
         anyhow::bail!("Schedule string too long (max 256)");
     }
     // Critical: prevent injection of systemd directives via newlines or other control chars
-    if schedule.chars().any(|c| c.is_control()) {
+    if schedule.chars().any(|c| c.is_ascii_control() && c != '\t') {
         anyhow::bail!("Schedule contains invalid control characters");
     }
     // Reject characters that could be used for injection
-    if schedule.contains('[') || schedule.contains(']') || schedule.contains('=') {
+    if schedule.contains('=') {
         anyhow::bail!("Schedule contains invalid characters");
+    }
+    // Brackets are permitted only as balanced digit-range groups (e.g. `[1-3]`).
+    let mut inside = false;
+    for c in schedule.chars() {
+        match c {
+            '[' => {
+                if inside {
+                    anyhow::bail!("Schedule has nested brackets");
+                }
+                inside = true;
+            }
+            ']' => {
+                if !inside {
+                    anyhow::bail!("Schedule has unmatched ]");
+                }
+                inside = false;
+            }
+            _ if inside && !c.is_ascii_digit() && c != '-' && c != ',' => {
+                anyhow::bail!("Schedule has invalid bracket content");
+            }
+            _ => {}
+        }
+    }
+    if inside {
+        anyhow::bail!("Schedule has unmatched [");
     }
     // Only allow known safe presets or valid OnCalendar-like patterns
     let safe_presets = [
@@ -101,6 +126,8 @@ pub fn validate_schedule(schedule: &str) -> Result<()> {
             || c == '/'
             || c == '.'
             || c == '~'
+            || c == '['
+            || c == ']'
     };
     if !schedule.chars().all(valid_chars) {
         anyhow::bail!("Schedule contains invalid characters for OnCalendar format");
