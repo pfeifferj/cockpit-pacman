@@ -317,7 +317,7 @@ checksum = "8628d1f5b9a7b1196ce1aa660e3ba7e2559d350649cbe94993519c127df667f2"
 
 [[package]]
 name = "cockpit-pacman-backend"
-version = "0.2.0"
+version = "0.3.5"
 dependencies = [
  "alpm",
  "alpm-utils",

@@ -1,4 +1,4 @@
-VERSION = 0.1.0
+VERSION := $(shell sed -n 's/^## \[\([0-9.]*\)\].*/\1/p;T;q' CHANGELOG.md)
 PREFIX = /usr
 DESTDIR =
 TARFILE = cockpit-pacman-$(VERSION).tar.xz
