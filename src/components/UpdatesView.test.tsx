@@ -34,6 +34,8 @@ vi.mock("../api", async () => {
     fetchNews: vi.fn(),
     getNewsReadState: vi.fn(),
     markNewsRead: vi.fn(),
+    getServicesDismissal: vi.fn(),
+    markServicesDismissed: vi.fn(),
     checkLock: vi.fn(),
     removeStaleLock: vi.fn(),
     addIgnoredPackage: vi.fn(),
@@ -58,6 +60,8 @@ const mockRemoveStaleLock = vi.mocked(api.removeStaleLock);
 const mockAddIgnoredPackage = vi.mocked(api.addIgnoredPackage);
 const mockGetNewsReadState = vi.mocked(api.getNewsReadState);
 const mockMarkNewsRead = vi.mocked(api.markNewsRead);
+const mockGetServicesDismissal = vi.mocked(api.getServicesDismissal);
+const mockMarkServicesDismissed = vi.mocked(api.markServicesDismissed);
 
 describe("UpdatesView", () => {
   beforeEach(() => {
@@ -96,6 +100,8 @@ describe("UpdatesView", () => {
     mockAddIgnoredPackage.mockResolvedValue({ success: true, package: "linux", message: "Package ignored" });
     mockGetNewsReadState.mockResolvedValue({ dismissed: [] });
     mockMarkNewsRead.mockResolvedValue(undefined);
+    mockGetServicesDismissal.mockResolvedValue({ signature: null });
+    mockMarkServicesDismissed.mockResolvedValue(undefined);
     mockRunUpgrade.mockReturnValue({ cancel: vi.fn() });
     mockSyncDatabase.mockImplementation((callbacks) => {
       setTimeout(() => callbacks.onComplete(), 0);
@@ -1358,6 +1364,53 @@ describe("UpdatesView", () => {
       render(<UpdatesView />);
       await waitFor(() => {
         expect(mockCheckUpdates).toHaveBeenCalled();
+      });
+      expect(
+        screen.queryByText("Running services need to be restarted"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("hides the alert on mount when the stored signature matches the current services", async () => {
+      mockGetServicesStatus.mockResolvedValue(mockServicesStatusMixed);
+      mockGetServicesDismissal.mockResolvedValue({
+        signature: "gdm.service,nginx.service,polkit.service,wpa_supplicant.service",
+      });
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(mockGetServicesDismissal).toHaveBeenCalled();
+      });
+      await waitFor(() => {
+        expect(mockGetServicesStatus).toHaveBeenCalled();
+      });
+      expect(
+        screen.queryByText("Running services need to be restarted"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows the alert when the stored signature differs from the current services", async () => {
+      mockGetServicesStatus.mockResolvedValue(mockServicesStatusMixed);
+      mockGetServicesDismissal.mockResolvedValue({ signature: "old.service" });
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("Running services need to be restarted")).toBeInTheDocument();
+      });
+    });
+
+    it("close button calls markServicesDismissed with the sorted service signature", async () => {
+      mockGetServicesStatus.mockResolvedValue(mockServicesStatusMixed);
+      render(<UpdatesView />);
+      await screen.findByText("Running services need to be restarted");
+      const closeButtons = screen.getAllByRole("button").filter(
+        (btn) => btn.getAttribute("aria-label")?.includes("Running services"),
+      );
+      expect(closeButtons.length).toBeGreaterThan(0);
+      await act(async () => {
+        fireEvent.click(closeButtons[0]);
+      });
+      await waitFor(() => {
+        expect(mockMarkServicesDismissed).toHaveBeenCalledWith(
+          "gdm.service,nginx.service,polkit.service,wpa_supplicant.service",
+        );
       });
       expect(
         screen.queryByText("Running services need to be restarted"),

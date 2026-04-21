@@ -1250,6 +1250,118 @@ fn test_news_dismissal_atomicity() {
 }
 
 #[test]
+fn test_services_dismissal_roundtrip() {
+    use crate::handlers::news::{read_services_dismissal_from, write_services_dismissal_to};
+    let dir = std::env::temp_dir().join("cockpit-pacman-test-services-roundtrip");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("services-dismissed.json");
+    let _ = std::fs::remove_file(&path);
+    write_services_dismissal_to(&path, "foo,bar,baz").unwrap();
+    let state = read_services_dismissal_from(&path).unwrap();
+    assert_eq!(state.signature.as_deref(), Some("foo,bar,baz"));
+}
+
+#[test]
+fn test_services_dismissal_overwrites_previous_signature() {
+    use crate::handlers::news::{read_services_dismissal_from, write_services_dismissal_to};
+    let dir = std::env::temp_dir().join("cockpit-pacman-test-services-overwrite");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("services-dismissed.json");
+    let _ = std::fs::remove_file(&path);
+    write_services_dismissal_to(&path, "first").unwrap();
+    write_services_dismissal_to(&path, "second").unwrap();
+    let state = read_services_dismissal_from(&path).unwrap();
+    assert_eq!(state.signature.as_deref(), Some("second"));
+}
+
+#[test]
+fn test_services_dismissal_missing_file_returns_default() {
+    use crate::handlers::news::read_services_dismissal_from;
+    let dir = std::env::temp_dir().join("cockpit-pacman-test-services-missing");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("does-not-exist.json");
+    let _ = std::fs::remove_file(&path);
+    let state = read_services_dismissal_from(&path).unwrap();
+    assert!(state.signature.is_none());
+}
+
+#[test]
+fn test_services_dismissal_atomicity_under_concurrent_writes() {
+    use crate::handlers::news::{read_services_dismissal_from, write_services_dismissal_to};
+    let dir = std::env::temp_dir().join("cockpit-pacman-test-services-atomicity");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("services-dismissed.json");
+    let _ = std::fs::remove_file(&path);
+    let handles: Vec<_> = (0..20)
+        .map(|i| {
+            let p = path.clone();
+            std::thread::spawn(move || {
+                let sig = format!("sig-{i}");
+                write_services_dismissal_to(&p, &sig).unwrap();
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+    let content = std::fs::read_to_string(&path).unwrap();
+    assert!(serde_json::from_str::<serde_json::Value>(&content).is_ok());
+    let state = read_services_dismissal_from(&path).unwrap();
+    assert!(
+        state
+            .signature
+            .as_deref()
+            .map(|s| s.starts_with("sig-"))
+            .unwrap_or(false)
+    );
+}
+
+#[test]
+fn test_mark_services_dismissed_rejects_empty() {
+    use crate::handlers::news::mark_services_dismissed;
+    let home_backup = std::env::var_os("HOME");
+    let tmp = std::env::temp_dir().join("cockpit-pacman-test-mark-empty");
+    std::fs::create_dir_all(&tmp).unwrap();
+    unsafe { std::env::set_var("HOME", &tmp) };
+    let result = mark_services_dismissed("");
+    if let Some(h) = home_backup {
+        unsafe { std::env::set_var("HOME", h) };
+    }
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("empty"));
+}
+
+#[test]
+fn test_mark_services_dismissed_rejects_oversized() {
+    use crate::handlers::news::mark_services_dismissed;
+    let home_backup = std::env::var_os("HOME");
+    let tmp = std::env::temp_dir().join("cockpit-pacman-test-mark-oversize");
+    std::fs::create_dir_all(&tmp).unwrap();
+    unsafe { std::env::set_var("HOME", &tmp) };
+    let result = mark_services_dismissed(&"a".repeat(4097));
+    if let Some(h) = home_backup {
+        unsafe { std::env::set_var("HOME", h) };
+    }
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("4096"));
+}
+
+#[test]
+fn test_mark_services_dismissed_rejects_control_chars() {
+    use crate::handlers::news::mark_services_dismissed;
+    let home_backup = std::env::var_os("HOME");
+    let tmp = std::env::temp_dir().join("cockpit-pacman-test-mark-control");
+    std::fs::create_dir_all(&tmp).unwrap();
+    unsafe { std::env::set_var("HOME", &tmp) };
+    let result = mark_services_dismissed("foo\nbar");
+    if let Some(h) = home_backup {
+        unsafe { std::env::set_var("HOME", h) };
+    }
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("control"));
+}
+
+#[test]
 fn test_build_update_stats_map_counts_per_package() {
     use crate::handlers::query::build_update_stats_map;
     use crate::models::{LogEntry, UpdateStats};
