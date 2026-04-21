@@ -20,6 +20,11 @@ import {
   FormSelectOption,
   Label,
   TextInput,
+  Modal,
+  ModalVariant,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
 } from "@patternfly/react-core";
 import {
   GlobeIcon,
@@ -68,6 +73,7 @@ export const RepositoriesView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
   const [searchFilter, setSearchFilter] = useState("");
+  const [pendingSearchFilter, setPendingSearchFilter] = useState<string | null>(null);
   const [expandedRepos, setExpandedRepos] = useState<Set<string>>(new Set());
   const [newDirectiveTypes, setNewDirectiveTypes] = useState<
     Record<string, "Server" | "Include">
@@ -330,6 +336,7 @@ export const RepositoriesView: React.FC = () => {
   }
 
   return (
+    <>
     <Card>
       <CardBody>
         <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
@@ -355,10 +362,20 @@ export const RepositoriesView: React.FC = () => {
               <SearchInput
                 placeholder="Search repositories..."
                 value={searchFilter}
-                onChange={(_event: React.SyntheticEvent, value: string) =>
-                  setSearchFilter(value)
-                }
-                onClear={() => setSearchFilter("")}
+                onChange={(_event: React.SyntheticEvent, value: string) => {
+                  if (hasChanges) {
+                    setPendingSearchFilter(value);
+                  } else {
+                    setSearchFilter(value);
+                  }
+                }}
+                onClear={() => {
+                  if (hasChanges) {
+                    setPendingSearchFilter("");
+                  } else {
+                    setSearchFilter("");
+                  }
+                }}
                 aria-label="Search repositories"
               />
             </ToolbarItem>
@@ -579,5 +596,33 @@ export const RepositoriesView: React.FC = () => {
 
       </CardBody>
     </Card>
+    <Modal
+      variant={ModalVariant.small}
+      isOpen={pendingSearchFilter !== null}
+      onClose={() => setPendingSearchFilter(null)}
+      aria-labelledby="repo-filter-guard-title"
+    >
+      <ModalHeader title="Unsaved changes" labelId="repo-filter-guard-title" />
+      <ModalBody>
+        Repository configuration has unsaved changes. Switching the filter will discard them.
+      </ModalBody>
+      <ModalFooter>
+        <Button
+          variant="danger"
+          onClick={async () => {
+            const target = pendingSearchFilter ?? "";
+            setPendingSearchFilter(null);
+            await loadRepos();
+            setSearchFilter(target);
+          }}
+        >
+          Discard and switch filter
+        </Button>
+        <Button variant="link" onClick={() => setPendingSearchFilter(null)}>
+          Cancel
+        </Button>
+      </ModalFooter>
+    </Modal>
+    </>
   );
 };
