@@ -8,6 +8,63 @@ use std::time::Duration;
 
 use fs2::FileExt;
 
+fn atomic_write_json_locked<T: Serialize>(path: &Path, state: &T) -> Result<()> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory {:?}", parent))?;
+    }
+
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("Invalid state path: {:?}", path))?;
+
+    let mut lock_name = file_name.to_os_string();
+    lock_name.push(".lock");
+    let lock_path = path.with_file_name(lock_name);
+
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .with_context(|| format!("Failed to open lock file {:?}", lock_path))?;
+    lock_file
+        .lock_exclusive()
+        .with_context(|| format!("Failed to acquire lock on {:?}", lock_path))?;
+
+    let content = serde_json::to_string_pretty(state).context("Failed to serialize state")?;
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_nanos();
+    let tid: String = format!("{:?}", std::thread::current().id())
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    let base = file_name.to_string_lossy();
+    let tmp_path = path.with_file_name(format!("{base}.{nanos}.{tid}.tmp"));
+
+    let write_result = (|| -> Result<()> {
+        let mut tmp = File::create(&tmp_path)
+            .with_context(|| format!("Failed to create temp file {:?}", tmp_path))?;
+        tmp.write_all(content.as_bytes())
+            .with_context(|| format!("Failed to write temp file {:?}", tmp_path))?;
+        let _ = tmp.sync_all();
+        std::fs::rename(&tmp_path, path)
+            .with_context(|| format!("Failed to rename {:?} to {:?}", tmp_path, path))?;
+        Ok(())
+    })();
+
+    if write_result.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+    write_result
+}
+
 use crate::models::{NewsItem, NewsResponse};
 use crate::util::emit_json;
 
@@ -99,60 +156,11 @@ pub fn read_news_state_from(path: &Path) -> Result<NewsReadState> {
 }
 
 pub fn mark_news_read_to(path: &Path, link: &str) -> Result<NewsReadState> {
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory {:?}", parent))?;
-    }
-
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| anyhow::anyhow!("Invalid news state path: {:?}", path))?;
-
-    let mut lock_name = file_name.to_os_string();
-    lock_name.push(".lock");
-    let lock_path = path.with_file_name(lock_name);
-
-    let lock_file = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .with_context(|| format!("Failed to open lock file {:?}", lock_path))?;
-    lock_file
-        .lock_exclusive()
-        .with_context(|| format!("Failed to acquire lock on {:?}", lock_path))?;
-
     let mut state = read_news_state_from(path)?;
     if !state.dismissed.iter().any(|u| u == link) {
         state.dismissed.push(link.to_string());
     }
-    let content = serde_json::to_string_pretty(&state).context("Failed to serialize news state")?;
-
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO)
-        .as_nanos();
-    let tid: String = format!("{:?}", std::thread::current().id())
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .collect();
-    let base = file_name.to_string_lossy();
-    let tmp_path = path.with_file_name(format!("{base}.{nanos}.{tid}.tmp"));
-
-    {
-        let mut tmp = File::create(&tmp_path)
-            .with_context(|| format!("Failed to create temp file {:?}", tmp_path))?;
-        tmp.write_all(content.as_bytes())
-            .with_context(|| format!("Failed to write temp file {:?}", tmp_path))?;
-        let _ = tmp.sync_all();
-    }
-
-    std::fs::rename(&tmp_path, path)
-        .with_context(|| format!("Failed to rename {:?} to {:?}", tmp_path, path))?;
-
+    atomic_write_json_locked(path, &state)?;
     Ok(state)
 }
 
@@ -197,60 +205,10 @@ pub fn read_services_dismissal_from(path: &Path) -> Result<ServicesDismissal> {
 }
 
 pub fn write_services_dismissal_to(path: &Path, signature: &str) -> Result<ServicesDismissal> {
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory {:?}", parent))?;
-    }
-
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| anyhow::anyhow!("Invalid dismissal path: {:?}", path))?;
-
-    let mut lock_name = file_name.to_os_string();
-    lock_name.push(".lock");
-    let lock_path = path.with_file_name(lock_name);
-
-    let lock_file = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .with_context(|| format!("Failed to open lock file {:?}", lock_path))?;
-    lock_file
-        .lock_exclusive()
-        .with_context(|| format!("Failed to acquire lock on {:?}", lock_path))?;
-
     let state = ServicesDismissal {
         signature: Some(signature.to_string()),
     };
-    let content =
-        serde_json::to_string_pretty(&state).context("Failed to serialize services dismissal")?;
-
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO)
-        .as_nanos();
-    let tid: String = format!("{:?}", std::thread::current().id())
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .collect();
-    let base = file_name.to_string_lossy();
-    let tmp_path = path.with_file_name(format!("{base}.{nanos}.{tid}.tmp"));
-
-    {
-        let mut tmp = File::create(&tmp_path)
-            .with_context(|| format!("Failed to create temp file {:?}", tmp_path))?;
-        tmp.write_all(content.as_bytes())
-            .with_context(|| format!("Failed to write temp file {:?}", tmp_path))?;
-        let _ = tmp.sync_all();
-    }
-
-    std::fs::rename(&tmp_path, path)
-        .with_context(|| format!("Failed to rename {:?} to {:?}", tmp_path, path))?;
-
+    atomic_write_json_locked(path, &state)?;
     Ok(state)
 }
 
