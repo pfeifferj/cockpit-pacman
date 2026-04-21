@@ -29,6 +29,8 @@ pub fn get_repo_map(handle: &Alpm) -> Arc<RepoMap> {
     map
 }
 
+// Called by handlers/mutation.rs::sync_database after a syncdb update;
+// OnceLock has no re-init path, so the Mutex stays.
 pub fn invalidate_repo_map_cache() {
     let mut cache = REPO_MAP_CACHE
         .lock()
