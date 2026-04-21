@@ -20,7 +20,7 @@ import {
 	EmptyStateBody,
 } from '@patternfly/react-core';
 import { OutlinedQuestionCircleIcon, ArrowDownIcon, ExclamationCircleIcon, TopologyIcon, TrashIcon, PlusCircleIcon, HistoryIcon, BanIcon } from "@patternfly/react-icons";
-import { PackageDetails, SyncPackageDetails, formatSize, addIgnoredPackage } from "../api";
+import { PackageDetails, SyncPackageDetails, formatSize, addIgnoredPackage, removeIgnoredPackage } from "../api";
 import { TimeAgo } from "./TimeAgo";
 import { sanitizeUrl, sanitizeErrorMessage } from "../utils";
 import { DowngradeModal } from "./DowngradeModal";
@@ -519,23 +519,25 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
               View History
             </Button>
           )}
-          {!isIgnored && (
-            <Button
-              variant="secondary"
-              icon={<BanIcon />}
-              onClick={async () => {
-                try {
+          <Button
+            variant="secondary"
+            icon={<BanIcon />}
+            onClick={async () => {
+              try {
+                if (isIgnored) {
+                  await removeIgnoredPackage(packageDetails.name);
+                } else {
                   await addIgnoredPackage(packageDetails.name);
-                  onIgnored?.();
-                  onClose();
-                } catch (err) {
-                  console.error("Failed to ignore package:", err);
                 }
-              }}
-            >
-              Ignore
-            </Button>
-          )}
+                onIgnored?.();
+                onClose();
+              } catch (err) {
+                console.error("Failed to toggle ignore:", err);
+              }
+            }}
+          >
+            {isIgnored ? "Unignore" : "Ignore"}
+          </Button>
           {isInstalled ? (
             <>
               <Button
