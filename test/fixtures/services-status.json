@@ -1,0 +1,23 @@
+{
+  "empty": {
+    "restart_required": false,
+    "services": []
+  },
+  "two-services": {
+    "restart_required": true,
+    "services": [
+      {
+        "name": "nginx.service",
+        "pid": 1234,
+        "affected_packages": ["openssl", "pcre2"],
+        "reason": "deleted_mappings"
+      },
+      {
+        "name": "sshd.service",
+        "pid": 5678,
+        "affected_packages": [],
+        "reason": "deleted_mappings"
+      }
+    ]
+  }
+}

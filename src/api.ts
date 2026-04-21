@@ -918,12 +918,57 @@ export async function getRebootStatus(): Promise<RebootStatus> {
 
 export function rebootSystem(): Promise<void> {
   const client = cockpit.dbus("org.freedesktop.login1", { bus: "system", superuser: "try" });
-  return client.call(
-    "/org/freedesktop/login1",
-    "org.freedesktop.login1.Manager",
-    "Reboot",
-    [false],
-  ).then(() => client.close()) as Promise<void>;
+  return client
+    .call(
+      "/org/freedesktop/login1",
+      "org.freedesktop.login1.Manager",
+      "Reboot",
+      [false],
+    )
+    .finally(() => client.close())
+    .then(() => undefined);
+}
+
+export type RestartBlocked = "session_critical" | "cockpit_session" | "cockpit_transport";
+
+export interface ServiceRestart {
+  name: string;
+  pid: number;
+  affected_packages: string[];
+  reason: string;
+  restart_blocked?: RestartBlocked;
+}
+
+export interface ServicesStatus {
+  restart_required: boolean;
+  services: ServiceRestart[];
+}
+
+export async function getServicesStatus(): Promise<ServicesStatus> {
+  return runBackend<ServicesStatus>("services-status");
+}
+
+const UNIT_NAME_RE = /^[A-Za-z0-9@:._-]+\.(service|socket|target|path|timer|mount)$/;
+
+export function restartServices(units: string[]): Promise<void> {
+  for (const unit of units) {
+    if (!UNIT_NAME_RE.test(unit)) {
+      return Promise.reject(new Error(`refusing to restart unsafe unit name: ${unit}`));
+    }
+  }
+  const client = cockpit.dbus("org.freedesktop.systemd1", { bus: "system", superuser: "try" });
+  return Promise.all(
+    units.map((u) =>
+      client.call(
+        "/org/freedesktop/systemd1",
+        "org.freedesktop.systemd1.Manager",
+        "RestartUnit",
+        [u, "replace"],
+      ),
+    ),
+  )
+    .finally(() => client.close())
+    .then(() => undefined);
 }
 
 export interface MirrorEntry {

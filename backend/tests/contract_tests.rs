@@ -13,11 +13,11 @@ use cockpit_pacman_backend::models::{
     MirrorEntry, MirrorListResponse, MirrorStatus, MirrorStatusResponse, MirrorTestResult,
     NewsItem, NewsResponse, OrphanPackage, OrphanResponse, Package, PackageDetails,
     PackageListResponse, PackageSecurityAdvisory, PreflightResponse, PreflightWarning,
-    ProviderChoice, RebootStatus, RefreshMirrorsResponse, ReplacementInfo,
+    ProviderChoice, RebootStatus, RefreshMirrorsResponse, ReplacementInfo, RestartBlocked,
     RestoreMirrorBackupResponse, SaveMirrorlistResponse, ScheduledRunEntry, ScheduledRunsResponse,
     SearchResponse, SearchResult, SecurityInfoAdvisory, SecurityInfoGroup, SecurityInfoIssue,
-    SecurityInfoResponse, SecurityResponse, StreamEvent, SyncPackageDetails, UpdateInfo,
-    UpdateStats, UpdatesResponse, VersionMatch, WarningSeverity,
+    SecurityInfoResponse, SecurityResponse, ServiceRestart, ServicesStatus, StreamEvent,
+    SyncPackageDetails, UpdateInfo, UpdateStats, UpdatesResponse, VersionMatch, WarningSeverity,
 };
 use serde_json::Value;
 
@@ -1830,4 +1830,95 @@ fn sync_package_detail_fixture_round_trip() {
         "../../test/fixtures/sync-package-detail.json"
     ))
     .unwrap();
+}
+
+#[test]
+fn services_status_shape() {
+    let status = ServicesStatus {
+        restart_required: true,
+        services: vec![ServiceRestart {
+            name: "nginx.service".into(),
+            pid: 1234,
+            affected_packages: vec!["openssl".into(), "pcre2".into()],
+            reason: "deleted_mappings".into(),
+            restart_blocked: None,
+        }],
+    };
+    let v = to_json(&status);
+
+    assert_bool(&v, "restart_required");
+    assert_array(&v, "services");
+    assert_eq!(v["restart_required"], true);
+
+    let svc = &v["services"][0];
+    assert_string(svc, "name");
+    assert_number(svc, "pid");
+    assert_array(svc, "affected_packages");
+    assert_string(svc, "reason");
+
+    assert_eq!(svc["name"], "nginx.service");
+    assert_eq!(svc["pid"], 1234);
+    assert_eq!(svc["reason"], "deleted_mappings");
+    assert!(
+        svc.get("restart_blocked").is_none_or(|v| v.is_null()),
+        "restart_blocked should be omitted when None"
+    );
+}
+
+#[test]
+fn service_restart_blocked_field_serializes_each_variant() {
+    for (variant, expected) in [
+        (RestartBlocked::SessionCritical, "session_critical"),
+        (RestartBlocked::CockpitSession, "cockpit_session"),
+        (RestartBlocked::CockpitTransport, "cockpit_transport"),
+    ] {
+        let svc = ServiceRestart {
+            name: "x.service".into(),
+            pid: 42,
+            affected_packages: vec![],
+            reason: "deleted_mappings".into(),
+            restart_blocked: Some(variant),
+        };
+        assert_eq!(to_json(&svc)["restart_blocked"], expected);
+    }
+}
+
+#[test]
+fn services_status_fixture_matches_struct_shape() {
+    let fixture = parse_fixture(include_str!("../../test/fixtures/services-status.json"));
+
+    let empty = &fixture["empty"];
+    assert_bool(empty, "restart_required");
+    assert_array(empty, "services");
+    assert_eq!(empty["restart_required"], false);
+    assert_eq!(empty["services"].as_array().unwrap().len(), 0);
+
+    let two = &fixture["two-services"];
+    assert_bool(two, "restart_required");
+    assert_array(two, "services");
+    assert_eq!(two["restart_required"], true);
+
+    let svc = &two["services"][0];
+    assert_string(svc, "name");
+    assert_number(svc, "pid");
+    assert_array(svc, "affected_packages");
+    assert_string(svc, "reason");
+
+    // Service with no affected packages (unowned deleted mappings) is still included.
+    let no_pkgs = &two["services"][1];
+    assert_eq!(no_pkgs["affected_packages"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn services_status_empty_fixture_round_trip() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../../test/fixtures/services-status.json")).unwrap();
+    serde_json::from_value::<ServicesStatus>(fixture["empty"].clone()).unwrap();
+}
+
+#[test]
+fn services_status_two_services_fixture_round_trip() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../../test/fixtures/services-status.json")).unwrap();
+    serde_json::from_value::<ServicesStatus>(fixture["two-services"].clone()).unwrap();
 }

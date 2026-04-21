@@ -1,5 +1,6 @@
 import type {
   PackageListResponse,
+  ServicesStatus,
   UpdatesResponse,
   PackageDetails,
   SearchResult,
@@ -401,4 +402,60 @@ export const mockDependencyTreeResponse: DependencyTreeResponse = {
   root: "linux",
   max_depth_reached: false,
   warnings: [],
+};
+
+export const mockServicesStatus: ServicesStatus = {
+  restart_required: false,
+  services: [],
+};
+
+export const mockServicesStatusWithServices: ServicesStatus = {
+  restart_required: true,
+  services: [
+    {
+      name: "nginx.service",
+      pid: 1234,
+      affected_packages: ["openssl", "pcre2"],
+      reason: "deleted_mappings",
+    },
+    {
+      name: "sshd.service",
+      pid: 5678,
+      affected_packages: [],
+      reason: "deleted_mappings",
+    },
+  ],
+};
+
+export const mockServicesStatusMixed: ServicesStatus = {
+  restart_required: true,
+  services: [
+    {
+      name: "nginx.service",
+      pid: 1234,
+      affected_packages: ["openssl"],
+      reason: "deleted_mappings",
+    },
+    {
+      name: "polkit.service",
+      pid: 2222,
+      affected_packages: ["pcre2"],
+      reason: "deleted_mappings",
+      restart_blocked: "cockpit_session",
+    },
+    {
+      name: "wpa_supplicant.service",
+      pid: 3333,
+      affected_packages: ["openssl"],
+      reason: "deleted_mappings",
+      restart_blocked: "cockpit_transport",
+    },
+    {
+      name: "gdm.service",
+      pid: 4444,
+      affected_packages: ["openssl"],
+      reason: "deleted_mappings",
+      restart_blocked: "session_critical",
+    },
+  ],
 };
