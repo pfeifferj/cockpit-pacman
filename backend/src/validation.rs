@@ -69,8 +69,7 @@ pub fn validate_schedule(schedule: &str) -> Result<()> {
     if schedule.len() > 256 {
         anyhow::bail!("Schedule string too long (max 256)");
     }
-    // Critical: prevent injection of systemd directives via newlines or other control chars
-    if schedule.chars().any(|c| c.is_ascii_control() && c != '\t') {
+    if schedule.chars().any(|c| c.is_ascii_control()) {
         anyhow::bail!("Schedule contains invalid control characters");
     }
     // Reject characters that could be used for injection

@@ -647,8 +647,6 @@ mod tests {
 
     #[test]
     fn commented_server_line_returns_value_after_equals() {
-        // splitn(2, '=') has no '#' filter; the '#' ends up in the key half,
-        // so the value after '=' is returned as-is.
         assert_eq!(
             parse_server_line("#Server = https://mirror.example/"),
             Some("https://mirror.example/".to_string())

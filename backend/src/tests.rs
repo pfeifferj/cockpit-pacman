@@ -945,8 +945,6 @@ fn test_strip_html_only_tags() {
     assert_eq!(strip_html_and_truncate("<br/><hr/>", 300), "");
 }
 
-// --- parse_rss_body tests ---
-
 #[test]
 fn test_parse_rss_body_strips_tags_and_decodes_entities() {
     use crate::handlers::news::parse_rss_body;
@@ -1250,8 +1248,6 @@ fn test_news_dismissal_atomicity() {
     let content = std::fs::read_to_string(&path).unwrap();
     assert!(serde_json::from_str::<serde_json::Value>(&content).is_ok());
 }
-
-// --- build_update_stats_map tests ---
 
 #[test]
 fn test_build_update_stats_map_counts_per_package() {

@@ -93,7 +93,7 @@ pub fn read_news_state_from(path: &Path) -> Result<NewsReadState> {
     }
 }
 
-pub fn mark_news_read_to(path: &Path, link: &str) -> Result<()> {
+pub fn mark_news_read_to(path: &Path, link: &str) -> Result<NewsReadState> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -148,7 +148,7 @@ pub fn mark_news_read_to(path: &Path, link: &str) -> Result<()> {
     std::fs::rename(&tmp_path, path)
         .with_context(|| format!("Failed to rename {:?} to {:?}", tmp_path, path))?;
 
-    Ok(())
+    Ok(state)
 }
 
 fn news_state_path() -> Result<PathBuf> {
@@ -165,20 +165,29 @@ pub fn read_news_state() -> Result<()> {
 pub fn mark_news_read(link: &str) -> Result<()> {
     crate::validation::validate_mirror_url(link)?;
     let path = news_state_path()?;
-    mark_news_read_to(&path, link)?;
-    let state = read_news_state_from(&path)?;
+    let state = mark_news_read_to(&path, link)?;
     emit_json(&state)
 }
 
 pub(crate) fn parse_rss_body(html: &str, max: usize) -> String {
     let text = html2text::from_read(html.as_bytes(), usize::MAX);
-    let trimmed = text.trim_end().to_string();
-    if trimmed.len() <= max {
-        return trimmed;
+    let trimmed = text.trim_end();
+    if trimmed.chars().count() <= max {
+        return trimmed.to_string();
     }
-    let truncated = &trimmed[..max];
+    let mut end = 0usize;
+    for (i, (idx, _)) in trimmed.char_indices().enumerate() {
+        if i == max {
+            end = idx;
+            break;
+        }
+    }
+    if end == 0 {
+        return trimmed.to_string();
+    }
+    let truncated = &trimmed[..end];
     match truncated.rfind(' ') {
-        Some(pos) if pos > max / 2 => format!("{}...", &truncated[..pos]),
+        Some(pos) if pos > end / 2 => format!("{}...", &truncated[..pos]),
         _ => format!("{}...", truncated),
     }
 }

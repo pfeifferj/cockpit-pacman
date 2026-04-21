@@ -128,20 +128,11 @@ fn siglevel_two_word_value_roundtrips() {
     );
 }
 
-// parse_conf does not record whether SigLevel was commented; serialize_conf
-// emits it uncommented when the section is enabled. Known limitation: comment
-// state on SigLevel is not preserved.
 #[test]
-fn commented_siglevel_roundtrips() {
+fn commented_siglevel_is_not_preserved_on_roundtrip() {
     let fragment = "[myrepo]\n#SigLevel = Optional TrustAll\n";
     let parsed: PacmanConf = parse_conf(fragment);
     let output = serialize_conf(&parsed);
-    assert!(
-        output.contains("SigLevel = Optional TrustAll"),
-        "SigLevel value must appear in output"
-    );
-    assert!(
-        !output.contains("#SigLevel"),
-        "commented SigLevel is not preserved; comment state is dropped on roundtrip"
-    );
+    assert!(output.contains("SigLevel = Optional TrustAll"));
+    assert!(!output.contains("#SigLevel"));
 }

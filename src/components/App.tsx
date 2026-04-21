@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import {
   Page,
   PageSection,
@@ -68,14 +68,17 @@ export const App: React.FC = () => {
     setActiveTab(3);
   };
 
-  const navHandlers = {
-    onViewDependencies: handleViewDependencies,
-    onViewHistory: handleViewHistory,
-    onViewOrphans: handleViewOrphans,
-    onViewCache: handleViewCache,
-    onViewKeyring: handleViewKeyring,
-    onViewSignoffs: signoffAvailable ? handleViewSignoffs : undefined,
-  };
+  const navHandlers = useMemo(
+    () => ({
+      onViewDependencies: handleViewDependencies,
+      onViewHistory: handleViewHistory,
+      onViewOrphans: handleViewOrphans,
+      onViewCache: handleViewCache,
+      onViewKeyring: handleViewKeyring,
+      onViewSignoffs: signoffAvailable ? handleViewSignoffs : undefined,
+    }),
+    [signoffAvailable],
+  );
 
   return (
     <NavigationProvider value={navHandlers}>

@@ -498,6 +498,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     () => updates.filter((u) => u.ignored).length,
     [updates]
   );
+  const ignoredNameSet = useMemo(
+    () => new Set(updates.filter((u) => u.ignored).map((u) => u.name)),
+    [updates]
+  );
 
   const loadSecurityData = useCallback(async () => {
     setSecurityLoading(true);
@@ -1538,7 +1542,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
                             onClick={async () => {
                               try {
                                 await addIgnoredPackage(update.name);
-                                loadUpdates();
+                                await loadUpdates();
                               } catch (err) {
                                 console.error("Failed to ignore package:", err);
                               }
@@ -1566,7 +1570,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         onViewDependencies={onViewDependencies}
         onViewHistory={onViewHistory}
         onPackageRemoved={loadUpdates}
-        isIgnored={selectedPackage ? updates.find((u) => u.name === selectedPackage.name)?.ignored ?? false : false}
+        isIgnored={selectedPackage ? ignoredNameSet.has(selectedPackage.name) : false}
         onIgnored={loadUpdates}
       />
 
