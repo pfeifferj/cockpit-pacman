@@ -49,6 +49,7 @@ export interface UpdateInfo {
   current_size: number;
   new_size: number;
   repository: string;
+  ignored?: boolean;
 }
 
 export interface PackageDetails {

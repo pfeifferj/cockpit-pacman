@@ -260,7 +260,7 @@ pub fn scheduled_run() -> Result<()> {
         anyhow::bail!("Operation cancelled or timed out");
     }
 
-    let updates = find_available_updates(&handle);
+    let updates = find_available_updates(&handle, &ignored_packages);
     let packages_checked = updates.len();
 
     if updates.is_empty() {

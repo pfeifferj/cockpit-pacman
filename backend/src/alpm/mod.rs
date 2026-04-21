@@ -54,7 +54,7 @@ pub fn lookup_file_owner<'a>(index: &'a FileOwnerIndex, path: &str) -> Option<&'
 }
 
 /// Find all packages with available updates by comparing local versions to sync databases.
-pub fn find_available_updates(handle: &Alpm) -> Vec<UpdateInfo> {
+pub fn find_available_updates(handle: &Alpm, extra_ignored: &[String]) -> Vec<UpdateInfo> {
     let localdb = handle.localdb();
     let mut updates = Vec::new();
 
@@ -62,6 +62,17 @@ pub fn find_available_updates(handle: &Alpm) -> Vec<UpdateInfo> {
         for syncdb in handle.syncdbs() {
             if let Ok(syncpkg) = syncdb.pkg(pkg.name()) {
                 if syncpkg.version() > pkg.version() {
+                    let ignored = handle.ignorepkgs().iter().any(|n| n == pkg.name())
+                        || handle.ignoregroups().iter().any(|g| {
+                            handle.syncdbs().iter().any(|db| {
+                                db.group(g)
+                                    .map(|grp| {
+                                        grp.packages().iter().any(|p| p.name() == pkg.name())
+                                    })
+                                    .unwrap_or(false)
+                            })
+                        })
+                        || extra_ignored.iter().any(|n| n == pkg.name());
                     updates.push(UpdateInfo {
                         name: pkg.name().to_string(),
                         current_version: pkg.version().to_string(),
@@ -70,6 +81,7 @@ pub fn find_available_updates(handle: &Alpm) -> Vec<UpdateInfo> {
                         current_size: pkg.isize(),
                         new_size: syncpkg.isize(),
                         repository: syncdb.name().to_string(),
+                        ignored,
                     });
                 }
                 break;

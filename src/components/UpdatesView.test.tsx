@@ -1202,6 +1202,7 @@ describe("UpdatesView", () => {
             current_size: 142000000,
             new_size: 145000000,
             repository: "core",
+            ignored: true,
           },
           {
             name: "firefox",
@@ -1211,6 +1212,7 @@ describe("UpdatesView", () => {
             current_size: 200000000,
             new_size: 201000000,
             repository: "extra",
+            ignored: false,
           },
         ],
         warnings: [],

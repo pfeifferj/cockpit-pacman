@@ -50,6 +50,8 @@ pub struct UpdateInfo {
     pub current_size: i64,
     pub new_size: i64,
     pub repository: String,
+    #[serde(default)]
+    pub ignored: bool,
 }
 
 #[derive(Serialize, Deserialize)]

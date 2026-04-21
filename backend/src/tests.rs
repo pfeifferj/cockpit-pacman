@@ -58,6 +58,7 @@ fn test_updates_response_serialization() {
             current_size: 140_000_000,
             new_size: 145_000_000,
             repository: "core".to_string(),
+            ignored: false,
         }],
         warnings: vec![],
     };

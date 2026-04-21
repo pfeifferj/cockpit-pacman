@@ -196,6 +196,7 @@ fn update_info_all_fields_present_and_typed() {
         current_size: 142_000_000,
         new_size: 145_000_000,
         repository: "core".into(),
+        ignored: false,
     };
     let v = to_json(&info);
 

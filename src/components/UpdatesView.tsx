@@ -75,7 +75,6 @@ import {
   preflightUpgrade,
   formatSize,
   formatNumber,
-  listIgnoredPackages,
   getRebootStatus,
   rebootSystem,
   getServicesStatus,
@@ -326,7 +325,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   useBackdropClose(cancelModalOpen, () => setCancelModalOpen(false));
   const [isCancelling, setIsCancelling] = useState(false);
-  const [configIgnored, setConfigIgnored] = useState<Set<string>>(new Set());
   const [ignoredModalOpen, setIgnoredModalOpen] = useState(false);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [acknowledgedRemovals, setAcknowledgedRemovals] = useState(false);
@@ -478,7 +476,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
     setSelectedPackages(
       new Set(
         updates
-          .filter((u) => !configIgnored.has(u.name))
+          .filter((u) => !u.ignored)
           .map((u) => u.name)
       )
     );
@@ -490,6 +488,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
 
   const areAllSelected = selectedPackages.size === updates.length && updates.length > 0;
   const areSomeSelected = selectedPackages.size > 0 && selectedPackages.size < updates.length;
+  const ignoredCount = useMemo(
+    () => updates.filter((u) => u.ignored).length,
+    [updates]
+  );
 
   const loadSecurityData = useCallback(async () => {
     setSecurityLoading(true);
@@ -539,19 +541,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
     });
     return () => cancel();
   }, [loadUpdates]);
-
-  const loadConfigIgnored = useCallback(async () => {
-    try {
-      const response = await listIgnoredPackages();
-      setConfigIgnored(new Set(response.packages));
-    } catch (err) {
-      console.error("Failed to load ignored packages:", err);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadConfigIgnored();
-  }, [loadConfigIgnored]);
 
   const loadRebootStatus = useCallback(async () => {
     try {
@@ -630,10 +619,12 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
 
     if (hasInitializedSelection.current) {
       setSelectedPackages((prev) => {
-        const existingNames = new Set(updates.map((u) => u.name));
+        const nonIgnoredNames = new Set(
+          updates.filter((u) => !u.ignored).map((u) => u.name)
+        );
         const next = new Set<string>();
         for (const pkg of prev) {
-          if (existingNames.has(pkg) && !configIgnored.has(pkg)) {
+          if (nonIgnoredNames.has(pkg)) {
             next.add(pkg);
           }
         }
@@ -643,11 +634,11 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
     }
 
     const nonIgnored = updates
-      .filter((u) => !configIgnored.has(u.name))
+      .filter((u) => !u.ignored)
       .map((u) => u.name);
     setSelectedPackages(new Set(nonIgnored));
     hasInitializedSelection.current = true;
-  }, [updates, configIgnored]);
+  }, [updates]);
 
   useEffect(() => {
     return () => {
@@ -1212,7 +1203,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
                     variant="secondary"
                     onClick={() => setIgnoredModalOpen(true)}
                   >
-                    Manage Ignored{configIgnored.size > 0 ? ` (${configIgnored.size})` : ""}
+                    Manage Ignored{ignoredCount > 0 ? ` (${ignoredCount})` : ""}
                   </Button>
                 </ToolbarItem>
                 <ToolbarItem>
@@ -1242,7 +1233,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
         <IgnoredPackagesModal
           isOpen={ignoredModalOpen}
           onClose={() => setIgnoredModalOpen(false)}
-          onIgnoredChange={() => loadConfigIgnored()}
+          onIgnoredChange={() => loadUpdates()}
         />
         <ScheduleModal
           isOpen={scheduleModalOpen}
@@ -1378,7 +1369,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
                   variant="secondary"
                   onClick={() => setIgnoredModalOpen(true)}
                 >
-                  Manage Ignored{configIgnored.size > 0 ? ` (${configIgnored.size})` : ""}
+                  Manage Ignored{ignoredCount > 0 ? ` (${ignoredCount})` : ""}
                 </Button>
               </ToolbarItem>
               <ToolbarItem>
@@ -1426,7 +1417,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
             {sortedUpdates.map((update) => {
               const netSize = update.new_size - update.current_size;
               const isSelected = selectedPackages.has(update.name);
-              const isConfigIgnored = configIgnored.has(update.name);
+              const isIgnored = update.ignored;
               const advisories = securityMap.get(update.name);
               const hasAdvisories = advisories && advisories.length > 0;
               const highest = hasAdvisories
@@ -1450,7 +1441,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
                       rowIndex: 0,
                       onSelect: (_event, _isSelected) => togglePackageSelection(update.name),
                       isSelected,
-                      isDisabled: isConfigIgnored,
+                      isDisabled: isIgnored,
                     }}
                     onClick={(e) => e.stopPropagation()}
                   />
@@ -1458,7 +1449,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
                     <Button variant="link" isInline className="pf-v6-u-p-0">
                       {update.name}
                     </Button>
-                    {isConfigIgnored && (
+                    {isIgnored && (
                       <Label
                         color="orange"
                         className="pf-v6-u-ml-sm"
@@ -1709,7 +1700,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ onViewDependencies, on
       <IgnoredPackagesModal
         isOpen={ignoredModalOpen}
         onClose={() => setIgnoredModalOpen(false)}
-        onIgnoredChange={() => loadConfigIgnored()}
+        onIgnoredChange={() => loadUpdates()}
       />
 
       <ScheduleModal
