@@ -290,12 +290,10 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
   const hasFilters = filters.size > 0 || !!search || repoFilter !== "all";
 
   return (
-    <Card>
-      <CardBody>
+    <>
       {error && (
         <Alert
           variant="danger"
-          isInline
           title="Error"
           actionClose={<Button variant="plain" onClick={() => setError(null)}>Dismiss</Button>}
           className="pf-v6-u-mb-md"
@@ -303,7 +301,8 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
           {error}
         </Alert>
       )}
-
+      <Card>
+      <CardBody>
       <Toolbar>
         <ToolbarContent>
           <ToolbarItem>
@@ -533,5 +532,6 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
       />
       </CardBody>
     </Card>
+    </>
   );
 };

@@ -288,7 +288,30 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ initialPackage }
   };
 
   return (
-    <Card>
+    <>
+      {error && (
+        <Alert
+          variant="danger"
+          title="Failed to load dependencies"
+          className="pf-v6-u-mb-md"
+        >
+          {error}
+        </Alert>
+      )}
+      {warnings.length > 0 && (
+        <Alert
+          variant="warning"
+          title="Warnings"
+          className="pf-v6-u-mb-md"
+        >
+          <ul style={{ margin: 0, paddingLeft: "1.5em" }}>
+            {warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </Alert>
+      )}
+      <Card>
       <CardBody>
         <Toolbar>
           <ToolbarContent>
@@ -418,32 +441,6 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ initialPackage }
           </ToolbarContent>
         </Toolbar>
 
-        {error && (
-          <Alert
-            variant="danger"
-            title="Failed to load dependencies"
-            isInline
-            className="pf-v6-u-mb-md"
-          >
-            {error}
-          </Alert>
-        )}
-
-        {warnings.length > 0 && (
-          <Alert
-            variant="warning"
-            title="Warnings"
-            isInline
-            className="pf-v6-u-mb-md"
-          >
-            <ul style={{ margin: 0, paddingLeft: "1.5em" }}>
-              {warnings.map((w, i) => (
-                <li key={i}>{w}</li>
-              ))}
-            </ul>
-          </Alert>
-        )}
-
         {loading ? (
           <div className="pf-v6-u-p-xl pf-v6-u-text-align-center">
             <Spinner /> Loading dependency tree...
@@ -523,5 +520,6 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ initialPackage }
         />
       </CardBody>
     </Card>
+    </>
   );
 };

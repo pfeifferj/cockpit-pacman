@@ -290,8 +290,25 @@ export const SearchView: React.FC = () => {
     fetchDetails(pkgName, installed ? { strategy: "local" } : { strategy: "sync", repo });
   };
 
+  const errorAlert = error ? (() => {
+    const isLockError = error.toLowerCase().includes("unable to lock database");
+    return (
+      <Alert
+        variant={isLockError ? "warning" : "danger"}
+        title={isLockError ? "Database is locked" : "Search failed"}
+        className="pf-v6-u-mb-md"
+      >
+        {isLockError
+          ? "Another package manager operation is in progress. Please wait for it to complete before searching."
+          : error}
+      </Alert>
+    );
+  })() : null;
+
   return (
-    <Card>
+    <>
+      {errorAlert}
+      <Card>
       <CardBody>
         <Toolbar>
           <ToolbarContent>
@@ -360,22 +377,6 @@ export const SearchView: React.FC = () => {
             )}
           </ToolbarContent>
         </Toolbar>
-
-        {error && (() => {
-          const isLockError = error.toLowerCase().includes("unable to lock database");
-          return (
-            <Alert
-              variant={isLockError ? "warning" : "danger"}
-              title={isLockError ? "Database is locked" : "Search failed"}
-              isInline
-              className="pf-v6-u-mb-md"
-            >
-              {isLockError
-                ? "Another package manager operation is in progress. Please wait for it to complete before searching."
-                : error}
-            </Alert>
-          );
-        })()}
 
         {!hasSearched ? (
           <EmptyState headingLevel="h3" titleText="Search for packages" icon={SearchIcon}>
@@ -498,5 +499,6 @@ export const SearchView: React.FC = () => {
         />
       </CardBody>
     </Card>
+    </>
   );
 };

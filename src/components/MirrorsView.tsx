@@ -6,7 +6,6 @@ import {
   CardTitle,
   Button,
   Alert,
-  AlertActionCloseButton,
   EmptyState,
   EmptyStateBody,
   EmptyStateActions,
@@ -201,7 +200,6 @@ export const MirrorsView: React.FC = () => {
   const [isFetchingStatus, setIsFetchingStatus] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testProgress, setTestProgress] = useState<{ current: number; total: number } | null>(null);
-  const [testResultDismissed, setTestResultDismissed] = useState(false);
   const cancelRef = useRef<(() => void) | null>(null);
   const initialAutoRunRef = useRef(false);
 
@@ -351,7 +349,6 @@ export const MirrorsView: React.FC = () => {
 
     setIsTesting(true);
     setTestProgress(null);
-    setTestResultDismissed(false);
 
     const { cancel } = testMirrors(
       {
@@ -384,20 +381,6 @@ export const MirrorsView: React.FC = () => {
       setIsTesting(false);
       setTestProgress(null);
     }
-  };
-
-  const handleSortByLatency = () => {
-    setMirrors(prev => {
-      const sorted = [...prev].sort((a, b) => {
-        if (!a.testResult?.success && !b.testResult?.success) return 0;
-        if (!a.testResult?.success) return 1;
-        if (!b.testResult?.success) return -1;
-        return (a.testResult.latency_ms ?? Infinity) - (b.testResult.latency_ms ?? Infinity);
-      });
-      return sorted;
-    });
-    setHasChanges(true);
-    setTestProgress(null);
   };
 
   const handleSave = () => {
@@ -678,14 +661,33 @@ export const MirrorsView: React.FC = () => {
   }
 
   return (
-    <Card>
+    <>
+      {error && (
+        <Alert variant="warning" title="Error" className="pf-v6-u-mb-md">
+          {sanitizeErrorMessage(error)}
+        </Alert>
+      )}
+      {(isFetchingStatus || isTesting) && (
+        <Alert
+          variant="info"
+          className="pf-v6-u-mb-md"
+          customIcon={<Spinner size="sm" />}
+          title={
+            isFetchingStatus
+              ? "Fetching mirror status..."
+              : testProgress
+                ? `Testing mirrors (${testProgress.current}/${testProgress.total})...`
+                : "Starting mirror tests..."
+          }
+          actionLinks={
+            isTesting
+              ? <Button variant="link" isInline onClick={handleCancel}>Cancel</Button>
+              : undefined
+          }
+        />
+      )}
+      <Card>
       <CardBody>
-        {error && (
-          <Alert variant="warning" title="Error" isInline className="pf-v6-u-mb-md">
-            {sanitizeErrorMessage(error)}
-          </Alert>
-        )}
-
         <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
           <FlexItem>
             <CardTitle className="pf-v6-u-m-0">Pacman Mirrors</CardTitle>
@@ -769,42 +771,6 @@ export const MirrorsView: React.FC = () => {
             </ToolbarItem>
           </ToolbarContent>
         </Toolbar>
-
-        {(isFetchingStatus || isTesting) && (
-          <Alert
-            variant="info"
-            isInline
-            className="pf-v6-u-mb-sm"
-            customIcon={<Spinner size="sm" />}
-            title={
-              isFetchingStatus
-                ? "Fetching mirror status..."
-                : testProgress
-                  ? `Testing mirrors (${testProgress.current}/${testProgress.total})...`
-                  : "Starting mirror tests..."
-            }
-            actionLinks={
-              isTesting
-                ? <Button variant="link" isInline onClick={handleCancel}>Cancel</Button>
-                : undefined
-            }
-          />
-        )}
-
-        {!isTesting && testProgress && !testResultDismissed && (
-          <Alert
-            variant="info"
-            title={`Tested ${testProgress.total} mirror${testProgress.total !== 1 ? "s" : ""}`}
-            isInline
-            className="pf-v6-u-mb-sm"
-            actionClose={<AlertActionCloseButton onClose={() => setTestResultDismissed(true)} />}
-            actionLinks={
-              <Button variant="link" isInline onClick={handleSortByLatency}>
-                Sort by latency
-              </Button>
-            }
-          />
-        )}
 
         <Table aria-label="Mirror list" variant="compact">
           <Thead>
@@ -1231,5 +1197,6 @@ export const MirrorsView: React.FC = () => {
         </ModalFooter>
       </Modal>
     </Card>
+    </>
   );
 };

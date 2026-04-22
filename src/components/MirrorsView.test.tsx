@@ -405,7 +405,7 @@ describe("MirrorsView", () => {
   });
 
 
-  it("auto-runs mirror test on mount and shows sort suggestion", async () => {
+  it("auto-runs mirror test on mount and renders latency after completion", async () => {
     let capturedCallbacks: Parameters<typeof api.testMirrors>[0] | null = null;
     mockTestMirrors.mockImplementation((callbacks) => {
       capturedCallbacks = callbacks;
@@ -437,41 +437,9 @@ describe("MirrorsView", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText(/Tested 1 mirror\b/)).toBeInTheDocument();
-      expect(screen.getByText("Sort by latency")).toBeInTheDocument();
+      expect(screen.queryByText(/Starting mirror tests/)).not.toBeInTheDocument();
     });
-  });
-
-  it("dismisses test result banner when close button is clicked", async () => {
-    let capturedCallbacks: Parameters<typeof api.testMirrors>[0] | null = null;
-    mockTestMirrors.mockImplementation((callbacks) => {
-      capturedCallbacks = callbacks;
-      return { cancel: vi.fn() };
-    });
-
-    render(<MirrorsView />);
-    await waitFor(() => {
-      expect(mockTestMirrors).toHaveBeenCalled();
-    });
-
-    await act(async () => {
-      capturedCallbacks!.onTestResult!(
-        { url: "https://mirror1.example.com/$repo/os/$arch", success: true, latency_ms: 10, speed_bps: null, error: null },
-        1, 1
-      );
-    });
-    await act(async () => {
-      capturedCallbacks!.onComplete!();
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText(/Tested 1 mirror\b/)).toBeInTheDocument();
-    });
-
-    const closeButton = screen.getByLabelText("Close Info alert: alert: Tested 1 mirror");
-    fireEvent.click(closeButton);
-
-    expect(screen.queryByText(/Tested 1 mirror\b/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sort by latency/)).not.toBeInTheDocument();
   });
 
   it("re-runs auto-test after retry from error state", async () => {

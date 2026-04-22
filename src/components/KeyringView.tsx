@@ -305,27 +305,29 @@ export const KeyringView: React.FC = () => {
 
   if (!keyringData?.master_key_initialized) {
     return (
-      <Card>
-        <CardBody>
-          {keyringData?.warnings.map((warning, i) => (
-            <Alert key={`${warning}-${i}`} variant="warning" title="Keyring Warning" className="pf-v6-u-mb-md">
-              {warning}
-            </Alert>
-          ))}
-          <EmptyState headingLevel="h2" icon={KeyIcon} titleText="Keyring not initialized">
-            <EmptyStateBody>
-              The pacman keyring has not been initialized. Initialize it to verify package signatures.
-            </EmptyStateBody>
-            <EmptyStateFooter>
-              <EmptyStateActions>
-                <Button variant="primary" onClick={handleInitKeyring}>
-                  Initialize Keyring
-                </Button>
-              </EmptyStateActions>
-            </EmptyStateFooter>
-          </EmptyState>
-        </CardBody>
-      </Card>
+      <>
+        {keyringData?.warnings.map((warning, i) => (
+          <Alert key={`${warning}-${i}`} variant="warning" title="Keyring Warning" className="pf-v6-u-mb-md">
+            {warning}
+          </Alert>
+        ))}
+        <Card>
+          <CardBody>
+            <EmptyState headingLevel="h2" icon={KeyIcon} titleText="Keyring not initialized">
+              <EmptyStateBody>
+                The pacman keyring has not been initialized. Initialize it to verify package signatures.
+              </EmptyStateBody>
+              <EmptyStateFooter>
+                <EmptyStateActions>
+                  <Button variant="primary" onClick={handleInitKeyring}>
+                    Initialize Keyring
+                  </Button>
+                </EmptyStateActions>
+              </EmptyStateFooter>
+            </EmptyState>
+          </CardBody>
+        </Card>
+      </>
     );
   }
 
