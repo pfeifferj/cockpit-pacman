@@ -117,7 +117,7 @@ describe("UpdatesView", () => {
     it("shows loading spinner while checking for updates", async () => {
       mockCheckUpdates.mockImplementation(() => new Promise(() => {}));
       render(<UpdatesView />);
-      expect(screen.getByText("Querying package databases...")).toBeInTheDocument();
+      expect(await screen.findByText("Querying package databases...")).toBeInTheDocument();
     });
 
     it("calls checkUpdates on initial load", async () => {
