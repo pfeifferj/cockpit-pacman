@@ -117,7 +117,7 @@ describe("UpdatesView", () => {
     it("shows loading spinner while checking for updates", async () => {
       mockCheckUpdates.mockImplementation(() => new Promise(() => {}));
       render(<UpdatesView />);
-      expect(screen.getByText("Querying package databases...")).toBeInTheDocument();
+      expect(await screen.findByText("Querying package databases...")).toBeInTheDocument();
     });
 
     it("calls checkUpdates on initial load", async () => {
@@ -1517,11 +1517,7 @@ describe("UpdatesView", () => {
       });
 
       render(<UpdatesView />);
-      await waitFor(() => {
-        expect(screen.getByText("openresty")).toBeInTheDocument();
-      });
-
-      const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
+      const applyButton = await screen.findByRole("button", { name: /Apply 1 Update/i });
       await act(async () => {
         fireEvent.click(applyButton);
       });
@@ -1529,11 +1525,7 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(screen.getByText("System Updated")).toBeInTheDocument();
       });
-      await waitFor(() => {
-        expect(screen.getByRole("button", { name: /Restart safe \(2\)/ })).toBeInTheDocument();
-      });
-
-      const restartBtn = screen.getByRole("button", { name: /Restart safe \(2\)/ });
+      const restartBtn = await screen.findByRole("button", { name: /Restart safe \(2\)/ });
       await act(async () => {
         fireEvent.click(restartBtn);
       });
@@ -1555,11 +1547,7 @@ describe("UpdatesView", () => {
       });
 
       render(<UpdatesView />);
-      await waitFor(() => {
-        expect(screen.getByText("openresty")).toBeInTheDocument();
-      });
-
-      const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
+      const applyButton = await screen.findByRole("button", { name: /Apply 1 Update/i });
       await act(async () => {
         fireEvent.click(applyButton);
       });
@@ -1584,11 +1572,7 @@ describe("UpdatesView", () => {
       });
 
       render(<UpdatesView />);
-      await waitFor(() => {
-        expect(screen.getByText("openresty")).toBeInTheDocument();
-      });
-
-      const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
+      const applyButton = await screen.findByRole("button", { name: /Apply 1 Update/i });
       await act(async () => {
         fireEvent.click(applyButton);
       });
@@ -1596,11 +1580,7 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(screen.getByText("System Updated")).toBeInTheDocument();
       });
-      await waitFor(() => {
-        expect(screen.getByRole("button", { name: /Restart safe \(2\)/ })).toBeInTheDocument();
-      });
-
-      const restartBtn = screen.getByRole("button", { name: /Restart safe \(2\)/ });
+      const restartBtn = await screen.findByRole("button", { name: /Restart safe \(2\)/ });
       await act(async () => {
         fireEvent.click(restartBtn);
       });

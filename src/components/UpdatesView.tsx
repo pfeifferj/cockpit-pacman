@@ -497,6 +497,11 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
   const areAllSelected = selectedPackages.size === updates.length && updates.length > 0;
   const areSomeSelected = selectedPackages.size > 0 && selectedPackages.size < updates.length;
+
+  useEffect(() => {
+    const el = document.getElementById("select-all-updates") as HTMLInputElement | null;
+    if (el) el.indeterminate = areSomeSelected;
+  }, [areSomeSelected, areAllSelected]);
   const ignoredCount = useMemo(
     () => updates.filter((u) => u.ignored).length,
     [updates]
@@ -846,11 +851,11 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       className="pf-v6-u-mb-md"
     >
       <Content component={ContentVariants.p}>{item.summary}</Content>
-      <Content component={ContentVariants.p}>
+      <div className="pf-v6-u-font-size-sm pf-v6-u-color-200 pf-v6-u-mt-sm">
         <small><TimeAgo timestamp={item.published} dateOnly /></small>
         {" -- "}
         <a href={sanitizeUrl(item.link) ?? "#"} target="_blank" rel="noopener noreferrer">Read more on archlinux.org</a>
-      </Content>
+      </div>
     </Alert>
   ));
 
@@ -1428,7 +1433,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
               <Th screenReaderText="Select">
                 <Checkbox
                   id="select-all-updates"
-                  isChecked={areAllSelected ? true : areSomeSelected ? null : false}
+                  isChecked={areAllSelected}
                   onChange={(_event, checked) => checked ? selectAllPackages() : deselectAllPackages()}
                   aria-label="Select all updates"
                 />

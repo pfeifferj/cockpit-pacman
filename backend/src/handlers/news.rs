@@ -8,7 +8,10 @@ use std::time::Duration;
 
 use fs2::FileExt;
 
-fn atomic_write_json_locked<T: Serialize>(path: &Path, state: &T) -> Result<()> {
+fn with_state_lock<R, F>(path: &Path, f: F) -> Result<R>
+where
+    F: FnOnce() -> Result<R>,
+{
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -34,6 +37,14 @@ fn atomic_write_json_locked<T: Serialize>(path: &Path, state: &T) -> Result<()> 
     lock_file
         .lock_exclusive()
         .with_context(|| format!("Failed to acquire lock on {:?}", lock_path))?;
+
+    f()
+}
+
+fn write_json_atomic<T: Serialize>(path: &Path, state: &T) -> Result<()> {
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("Invalid state path: {:?}", path))?;
 
     let content = serde_json::to_string_pretty(state).context("Failed to serialize state")?;
 
@@ -156,12 +167,14 @@ pub fn read_news_state_from(path: &Path) -> Result<NewsReadState> {
 }
 
 pub fn mark_news_read_to(path: &Path, link: &str) -> Result<NewsReadState> {
-    let mut state = read_news_state_from(path)?;
-    if !state.dismissed.iter().any(|u| u == link) {
-        state.dismissed.push(link.to_string());
-    }
-    atomic_write_json_locked(path, &state)?;
-    Ok(state)
+    with_state_lock(path, || {
+        let mut state = read_news_state_from(path)?;
+        if !state.dismissed.iter().any(|u| u == link) {
+            state.dismissed.push(link.to_string());
+        }
+        write_json_atomic(path, &state)?;
+        Ok(state)
+    })
 }
 
 fn news_state_path() -> Result<PathBuf> {
@@ -205,11 +218,13 @@ pub fn read_services_dismissal_from(path: &Path) -> Result<ServicesDismissal> {
 }
 
 pub fn write_services_dismissal_to(path: &Path, signature: &str) -> Result<ServicesDismissal> {
-    let state = ServicesDismissal {
-        signature: Some(signature.to_string()),
-    };
-    atomic_write_json_locked(path, &state)?;
-    Ok(state)
+    with_state_lock(path, || {
+        let state = ServicesDismissal {
+            signature: Some(signature.to_string()),
+        };
+        write_json_atomic(path, &state)?;
+        Ok(state)
+    })
 }
 
 pub fn read_services_dismissal() -> Result<()> {

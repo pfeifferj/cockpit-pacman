@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.3.6] - Unreleased
+
+### Added
+- Repositories tab for managing `pacman.conf` repositories (db8fdc6, 1972c3d)
+- Services-restart alert in Updates view for stale systemd services after an upgrade (0237f04, 49e0c2c)
+- Dismissable services-restart alert (47a5262)
+- Ignore and unignore actions in the package details modal and row kebab (f0053fe, 8a8869e)
+
+### Changed
+- Banners render above the card on every tab (8cdf0e4)
+- Ignored packages can no longer be selected in the updates list (5f583f2)
+- Mirrors view no longer renders repo-specific overrides (now managed in Repositories) (5d90c0c)
+
+### Fixed
+- Repositories filter change silently dropping unsaved edits (0c75779)
+- Modals closing on any click outside the dialog instead of only backdrop clicks (dfdaa63)
+- Kernel preflight missing non-stock kernels that did not match by provides (cf90afa)
+- News dismissals not persisting across reloads (f1ce9b0)
+- Save Changes button misaligned with the Mirrors toolbar (bb1e53b)
+
 ## [0.3.5] - 2026-04-12
 
 ### Added
