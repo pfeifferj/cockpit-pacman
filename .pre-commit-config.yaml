@@ -36,11 +36,3 @@ repos:
         language: system
         stages: [pre-push]
         pass_filenames: false
-
-      - id: npm-ci-dryrun
-        name: npm ci dry-run
-        entry: npm ci --dry-run --no-audit --no-fund
-        language: system
-        files: ^(package\.json|package-lock\.json)$
-        stages: [pre-push]
-        pass_filenames: false

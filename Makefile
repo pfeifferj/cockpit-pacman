@@ -60,6 +60,7 @@ lint-backend:
 test: test-frontend test-backend
 
 test-frontend:
+	npm ci --dry-run --no-audit --no-fund
 	npm test
 
 test-backend:
