@@ -56,9 +56,8 @@ export const UninstallModal: React.FC<UninstallModalProps> = ({
   }, []);
 
   useEffect(() => {
-    if (isOpen) {
-      resetState();
-    }
+    if (!isOpen) return;
+    Promise.resolve().then(resetState);
   }, [isOpen, resetState]);
 
   useEffect(() => {

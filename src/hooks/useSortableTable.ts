@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { ThProps } from "@patternfly/react-table";
 
 export type SortDirection = "asc" | "desc";
@@ -89,7 +89,9 @@ export function useSortableTable<K extends string = string>(
   }, [columns]);
 
   const onSortRef = useRef(options.onSort);
-  onSortRef.current = options.onSort;
+  useEffect(() => {
+    onSortRef.current = options.onSort;
+  });
 
   const getSortParams = useCallback((columnKeyOrIndex: K | number): ThProps["sort"] | undefined => {
     const columnIndex = typeof columnKeyOrIndex === "number"

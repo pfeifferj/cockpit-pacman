@@ -78,8 +78,20 @@ export const KeyringView: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    loadKeyringStatus();
-  }, [loadKeyringStatus]);
+    let cancelled = false;
+    getKeyringStatus()
+      .then((response) => {
+        if (cancelled) return;
+        setKeyringData(response);
+        setState("ready");
+      })
+      .catch((ex) => {
+        if (cancelled) return;
+        setState("error");
+        setError(ex instanceof Error ? ex.message : String(ex));
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     return () => {

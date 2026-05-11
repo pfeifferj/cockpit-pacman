@@ -52,7 +52,6 @@ export const SearchView: React.FC = () => {
   const [totalNotInstalled, setTotalNotInstalled] = useState(0);
   const [repositories, setRepositories] = useState<string[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isMountedRef = useRef(true);
   const currentQueryRef = useRef(currentQuery);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -62,21 +61,28 @@ export const SearchView: React.FC = () => {
   });
 
   useEffect(() => {
-    isMountedRef.current = true;
     return () => {
-      isMountedRef.current = false;
       abortControllerRef.current?.abort();
     };
   }, []);
 
-  // Refs to avoid stale closures in debounced callback and sort handler
   const perPageRef = useRef(perPage);
   const installedFilterRef = useRef(installedFilter);
-  currentQueryRef.current = currentQuery;
-  perPageRef.current = perPage;
-  installedFilterRef.current = installedFilter;
+  useEffect(() => {
+    currentQueryRef.current = currentQuery;
+    perPageRef.current = perPage;
+    installedFilterRef.current = installedFilter;
+  });
 
-  // Custom getSortParams with component-specific onSort behavior for server-side sorting
+  const onSortHandler = (_event: React.MouseEvent, index: number, direction: "asc" | "desc") => {
+    setActiveSortIndex(index);
+    setActiveSortDirection(direction);
+    setPage(1);
+    if (currentQuery) {
+      fetchResults(currentQuery, 1, perPage, installedFilter, false, index, direction);
+    }
+  };
+
   const getSortParams = (columnIndex: number) => {
     if (![0, 3, 4].includes(columnIndex)) return undefined;
     return {
@@ -85,14 +91,7 @@ export const SearchView: React.FC = () => {
         direction: activeSortDirection,
         defaultDirection: "asc" as const,
       },
-      onSort: (_event: React.MouseEvent, index: number, direction: "asc" | "desc") => {
-        setActiveSortIndex(index);
-        setActiveSortDirection(direction);
-        setPage(1);
-        if (currentQueryRef.current) {
-          fetchResults(currentQueryRef.current, 1, perPageRef.current, installedFilterRef.current, false, index, direction);
-        }
-      },
+      onSort: onSortHandler,
       columnIndex,
     };
   };
@@ -116,9 +115,7 @@ export const SearchView: React.FC = () => {
       abortControllerRef.current = new AbortController();
       const currentController = abortControllerRef.current;
 
-      // Use refs to get current values, avoiding stale closure
       if (query !== currentQueryRef.current) {
-        if (!isMountedRef.current) return;
         setCurrentQuery(query);
         setHasSearched(true);
         setRepoFilter("all");
@@ -134,18 +131,14 @@ export const SearchView: React.FC = () => {
             limit: perPageRef.current,
             installed: "all",
           });
-          // Check if this request was aborted
           if (currentController.signal.aborted) return;
-          if (!isMountedRef.current) return;
           setResults(response.results);
           setTotal(response.total);
           setTotalInstalled(response.total_installed);
           setTotalNotInstalled(response.total_not_installed);
           setRepositories(response.repositories);
         } catch (ex) {
-          // Ignore errors from aborted requests
           if (currentController.signal.aborted) return;
-          if (!isMountedRef.current) return;
           setError(ex instanceof Error ? ex.message : String(ex));
           setResults([]);
           setTotal(0);
@@ -153,8 +146,7 @@ export const SearchView: React.FC = () => {
           setTotalNotInstalled(0);
           setRepositories([]);
         } finally {
-          // Only update loading state if not aborted
-          if (!currentController.signal.aborted && isMountedRef.current) {
+          if (!currentController.signal.aborted) {
             setLoading(false);
           }
         }
@@ -198,7 +190,6 @@ export const SearchView: React.FC = () => {
         sortBy: getSortField(sortIdx),
         sortDir: sortDirection,
       });
-      if (!isMountedRef.current) return;
       setResults(response.results);
       setTotal(response.total);
       setTotalInstalled(response.total_installed);
@@ -207,7 +198,6 @@ export const SearchView: React.FC = () => {
         setRepositories(response.repositories);
       }
     } catch (ex) {
-      if (!isMountedRef.current) return;
       setError(ex instanceof Error ? ex.message : String(ex));
       setResults([]);
       setTotal(0);
@@ -217,9 +207,7 @@ export const SearchView: React.FC = () => {
         setRepositories([]);
       }
     } finally {
-      if (isMountedRef.current) {
-        setLoading(false);
-      }
+      setLoading(false);
     }
   };
 

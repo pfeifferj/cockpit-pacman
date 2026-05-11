@@ -123,11 +123,12 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   }, []);
 
   useEffect(() => {
-    if (isOpen) {
-      loadConfig();
-      loadRuns();
+    if (!isOpen) return;
+    Promise.resolve().then(() => {
       setSaveMessage(null);
-    }
+      void loadConfig();
+      void loadRuns();
+    });
   }, [isOpen, loadConfig, loadRuns]);
 
   const handleSave = async () => {

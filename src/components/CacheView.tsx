@@ -99,8 +99,20 @@ export const CacheView: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    loadCacheInfo();
-  }, [loadCacheInfo]);
+    let cancelled = false;
+    getCacheInfo()
+      .then((response) => {
+        if (cancelled) return;
+        setCacheData(response);
+        setState("ready");
+      })
+      .catch((ex) => {
+        if (cancelled) return;
+        setState("error");
+        setError(ex instanceof Error ? ex.message : String(ex));
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     return () => {

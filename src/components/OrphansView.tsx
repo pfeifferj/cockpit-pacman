@@ -96,8 +96,21 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
   }, [onOrphansLoaded]);
 
   useEffect(() => {
-    loadOrphans();
-  }, [loadOrphans, refreshTrigger]);
+    let cancelled = false;
+    listOrphans()
+      .then((response) => {
+        if (cancelled || !isMountedRef.current) return;
+        setOrphanData(response);
+        onOrphansLoaded?.(response.orphans.length);
+        setViewState("ready");
+      })
+      .catch((ex) => {
+        if (cancelled || !isMountedRef.current) return;
+        setError(ex instanceof Error ? ex.message : String(ex));
+        setViewState("ready");
+      });
+    return () => { cancelled = true; };
+  }, [onOrphansLoaded, refreshTrigger]);
 
   const startRemoval = () => {
     setConfirmModalOpen(false);

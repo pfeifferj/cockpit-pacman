@@ -97,8 +97,21 @@ export const RepositoriesView: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    loadRepos();
-  }, [loadRepos]);
+    let cancelled = false;
+    listRepos()
+      .then((response: ListReposResponse) => {
+        if (cancelled) return;
+        setRepos(response.repos);
+        setHasChanges(false);
+        setState("ready");
+      })
+      .catch((ex) => {
+        if (cancelled) return;
+        setState("error");
+        setError(ex instanceof Error ? ex.message : String(ex));
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const handleSave = async () => {
     setState("saving");

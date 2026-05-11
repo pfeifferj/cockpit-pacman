@@ -236,7 +236,7 @@ export const MirrorsView: React.FC = () => {
   }, [applyStatusToMirrors]);
 
   useEffect(() => {
-    loadMirrors();
+    Promise.resolve().then(loadMirrors);
   }, [loadMirrors]);
 
   useEffect(() => {
@@ -247,17 +247,7 @@ export const MirrorsView: React.FC = () => {
     };
   }, []);
 
-  useEffect(() => {
-    if (state === "ready" && !initialAutoRunRef.current) {
-      initialAutoRunRef.current = true;
-      handleFetchStatus(false).then(() => {
-        handleTestMirrors();
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state]);
-
-  const handleFetchStatus = async (forceRefresh = false) => {
+  const handleFetchStatus = useCallback(async (forceRefresh = false) => {
     if (!forceRefresh) {
       const cached = getCachedStatus();
       if (cached) {
@@ -278,7 +268,7 @@ export const MirrorsView: React.FC = () => {
     } finally {
       setIsFetchingStatus(false);
     }
-  };
+  }, [applyStatusToMirrors]);
 
   const loadBackups = useCallback(async () => {
     setBackupsLoading(true);
@@ -343,7 +333,7 @@ export const MirrorsView: React.FC = () => {
     setDeletingBackups(false);
   };
 
-  const handleTestMirrors = () => {
+  const handleTestMirrors = useCallback(() => {
     const enabledMirrors = mirrors.filter(m => m.enabled).map(m => m.url);
     if (enabledMirrors.length === 0) return;
 
@@ -372,7 +362,15 @@ export const MirrorsView: React.FC = () => {
       enabledMirrors
     );
     cancelRef.current = cancel;
-  };
+  }, [mirrors]);
+
+  useEffect(() => {
+    if (state !== "ready" || initialAutoRunRef.current) return;
+    initialAutoRunRef.current = true;
+    handleFetchStatus(false).then(() => {
+      handleTestMirrors();
+    });
+  }, [state, handleFetchStatus, handleTestMirrors]);
 
   const handleCancel = () => {
     if (cancelRef.current) {

@@ -2,7 +2,9 @@ import { useEffect, useRef } from "react";
 
 export function useBackdropClose(isOpen: boolean, onClose?: () => void) {
   const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     if (!isOpen || !onCloseRef.current) return;

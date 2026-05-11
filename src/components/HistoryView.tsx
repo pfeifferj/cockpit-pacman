@@ -85,12 +85,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
   const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
 
   useEffect(() => {
-    if (initialSearch) {
+    if (!initialSearch) return;
+    Promise.resolve().then(() => {
       setSearchInput(initialSearch.query);
       setSearchQuery(initialSearch.query);
       setPage(1);
       expandAllRef.current = true;
-    }
+    });
   }, [initialSearch, setPage]);
 
   const loadHistory = useCallback(async () => {
@@ -117,8 +118,23 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
   }, [offset, perPage, filter, searchQuery]);
 
   useEffect(() => {
-    loadHistory();
-  }, [loadHistory]);
+    let cancelled = false;
+    getGroupedHistory({ offset, limit: perPage, filter, search: searchQuery })
+      .then((response) => {
+        if (cancelled) return;
+        setGroupedData(response);
+        const shouldExpandAll = expandAllRef.current;
+        expandAllRef.current = false;
+        setExpandedGroups(shouldExpandAll ? new Set(response.groups.map((g) => g.id)) : new Set());
+        setState("ready");
+      })
+      .catch((ex) => {
+        if (cancelled) return;
+        setState("error");
+        setError(ex instanceof Error ? ex.message : String(ex));
+      });
+    return () => { cancelled = true; };
+  }, [offset, perPage, filter, searchQuery]);
 
   useEffect(() => {
     const sanitized = sanitizeSearchInput(searchInput);

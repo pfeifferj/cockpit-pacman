@@ -93,85 +93,93 @@ export const IgnoredPackagesModal: React.FC<IgnoredPackagesModalProps> = ({
   }, []);
 
   useEffect(() => {
-    if (isOpen) {
-      loadIgnoredPackages();
+    if (!isOpen) return;
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
       setTypeaheadValue("");
       setSelectedPackage(null);
       setPreviewPackage(null);
       setSuggestions([]);
-    }
-  }, [isOpen, loadIgnoredPackages]);
+    });
+    listIgnoredPackages()
+      .then((response) => {
+        if (cancelled) return;
+        setIgnoredPackages(response.packages);
+        setLoading(false);
+      })
+      .catch((ex) => {
+        if (cancelled) return;
+        setError(ex instanceof Error ? ex.message : String(ex));
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [isOpen]);
 
   useEffect(() => {
     if (ignoredPackages.length === 0) {
-      setPackageVersions({});
+      Promise.resolve().then(() => setPackageVersions({}));
       return;
     }
-
-    const fetchVersions = async () => {
-      const versions: Record<string, string> = {};
-      await Promise.all(
-        ignoredPackages.map(async (pkg) => {
-          try {
-            const info = await getPackageInfo(pkg);
-            versions[pkg] = info.version;
-          } catch {
-            versions[pkg] = "not installed";
-          }
-        })
-      );
-      setPackageVersions(versions);
-    };
-
-    fetchVersions();
+    let cancelled = false;
+    Promise.all(
+      ignoredPackages.map(async (pkg) => {
+        try {
+          const info = await getPackageInfo(pkg);
+          return [pkg, info.version] as const;
+        } catch {
+          return [pkg, "not installed"] as const;
+        }
+      })
+    ).then((entries) => {
+      if (cancelled) return;
+      setPackageVersions(Object.fromEntries(entries));
+    });
+    return () => { cancelled = true; };
   }, [ignoredPackages]);
 
-  // Fetch suggestions when typeahead value changes
   useEffect(() => {
     if (!debouncedTypeahead || debouncedTypeahead.length < 2) {
-      setSuggestions([]);
+      Promise.resolve().then(() => setSuggestions([]));
       return;
     }
-
-    const fetchSuggestions = async () => {
-      setLoadingSuggestions(true);
-      try {
-        const response = await searchPackages({
-          query: debouncedTypeahead,
-          limit: 20,
-          installed: "all",
-        });
+    let cancelled = false;
+    searchPackages({
+      query: debouncedTypeahead,
+      limit: 20,
+      installed: "all",
+    })
+      .then((response) => {
+        if (cancelled) return;
         setSuggestions(response.results);
-      } catch {
-        setSuggestions([]);
-      } finally {
         setLoadingSuggestions(false);
-      }
-    };
-
-    fetchSuggestions();
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSuggestions([]);
+        setLoadingSuggestions(false);
+      });
+    return () => { cancelled = true; };
   }, [debouncedTypeahead]);
 
-  // Load preview when a package is selected
   useEffect(() => {
     if (!selectedPackage) {
-      setPreviewPackage(null);
+      Promise.resolve().then(() => setPreviewPackage(null));
       return;
     }
-
-    const fetchPreview = async () => {
-      setLoadingPreview(true);
-      try {
-        const details = await getSyncPackageInfo(selectedPackage.name, selectedPackage.repository);
+    let cancelled = false;
+    getSyncPackageInfo(selectedPackage.name, selectedPackage.repository)
+      .then((details) => {
+        if (cancelled) return;
         setPreviewPackage(details);
-      } catch {
-        setPreviewPackage(null);
-      } finally {
         setLoadingPreview(false);
-      }
-    };
-
-    fetchPreview();
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPreviewPackage(null);
+        setLoadingPreview(false);
+      });
+    return () => { cancelled = true; };
   }, [selectedPackage]);
 
   const handleAddPackage = async () => {

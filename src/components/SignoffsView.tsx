@@ -109,8 +109,20 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
   }, [credentials]);
 
   useEffect(() => {
-    fetchSignoffs();
-  }, [fetchSignoffs]);
+    let cancelled = false;
+    getSignoffList(credentials)
+      .then((result) => {
+        if (cancelled) return;
+        setData(result);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(sanitizeErrorMessage(err instanceof Error ? err.message : null));
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [credentials]);
 
   const handleSignoff = async (group: SignoffGroupWithLocal) => {
     setActionInProgress(signoffKey(group));

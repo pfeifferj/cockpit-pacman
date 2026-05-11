@@ -85,15 +85,13 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, initialF
   }, []);
 
   useEffect(() => {
-    if (graphPackage) {
-      setFilter("graph");
-    }
+    if (!graphPackage) return;
+    Promise.resolve().then(() => setFilter("graph"));
   }, [graphPackage]);
 
   useEffect(() => {
-    if (initialFilter) {
-      setFilter(initialFilter.filter);
-    }
+    if (!initialFilter) return;
+    Promise.resolve().then(() => setFilter(initialFilter.filter));
   }, [initialFilter]);
 
   const debouncedSearchInput = useDebouncedValue(
@@ -106,10 +104,11 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, initialF
       manualSearchRef.current = false;
       return;
     }
-    if (debouncedSearchInput !== searchValue) {
+    if (debouncedSearchInput === searchValue) return;
+    Promise.resolve().then(() => {
       setSearchValue(debouncedSearchInput);
       setPage(1);
-    }
+    });
   }, [debouncedSearchInput, searchValue, setPage]);
 
   const getSortField = (index: number | null): string => {
@@ -157,8 +156,34 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, initialF
   }, [page, perPage, searchValue, filter, repoFilter, activeSortIndex, activeSortDirection, setTotal]);
 
   useEffect(() => {
-    loadPackages();
-  }, [loadPackages]);
+    if (filter === "graph" || filter === "orphan") return;
+    let cancelled = false;
+    const offset = (page - 1) * perPage;
+    listInstalled({
+      offset,
+      limit: perPage,
+      search: searchValue,
+      filter,
+      repo: repoFilter,
+      sortBy: getSortField(activeSortIndex),
+      sortDir: activeSortDirection,
+    })
+      .then((response: PackageListResponse) => {
+        if (cancelled || !isMountedRef.current) return;
+        setPackages(response.packages);
+        setTotal(response.total);
+        setTotalExplicit(response.total_explicit);
+        setTotalDependency(response.total_dependency);
+        setRepositories(response.repositories || []);
+        setLoading(false);
+      })
+      .catch((ex) => {
+        if (cancelled || !isMountedRef.current) return;
+        setError(ex instanceof Error ? ex.message : String(ex));
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [page, perPage, searchValue, filter, repoFilter, activeSortIndex, activeSortDirection, setTotal]);
 
   const handleSearch = () => {
     manualSearchRef.current = true;

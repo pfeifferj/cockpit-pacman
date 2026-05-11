@@ -117,101 +117,7 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ initialPackage }
   const textInputRef = useRef<HTMLInputElement | null>(null);
   const debouncedSearch = useDebouncedValue(searchInput, SEARCH_DEBOUNCE_MS);
 
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
-
-  // Auto-load initial package when it changes
-  useEffect(() => {
-    if (initialPackage && initialPackage !== initialLoadRef.current) {
-      initialLoadRef.current = initialPackage;
-      setSearchInput(initialPackage);
-      fetchDependencyTree(initialPackage, depth, direction);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialPackage]);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const updateWidth = () => {
-      if (containerRef.current) {
-        setGraphWidth(containerRef.current.offsetWidth);
-      }
-    };
-
-    const resizeObserver = new ResizeObserver(updateWidth);
-    resizeObserver.observe(container);
-
-    return () => resizeObserver.disconnect();
-  }, [nodes.length]);
-
-  // Fetch suggestions when search input changes
-  useEffect(() => {
-    if (!debouncedSearch || debouncedSearch.length < 2) {
-      setSuggestions([]);
-      return;
-    }
-
-    const fetchSuggestions = async () => {
-      setLoadingSuggestions(true);
-      try {
-        const response = await searchPackages({
-          query: debouncedSearch,
-          limit: 15,
-          installed: "all",
-        });
-        if (isMountedRef.current) {
-          setSuggestions(response.results);
-        }
-      } catch {
-        if (isMountedRef.current) {
-          setSuggestions([]);
-        }
-      } finally {
-        if (isMountedRef.current) {
-          setLoadingSuggestions(false);
-        }
-      }
-    };
-
-    fetchSuggestions();
-  }, [debouncedSearch]);
-
-  const handleNodeClick = useCallback(async (node: ForceGraphNode) => {
-    if (!node.installed) return;
-    setDetailsLoading(true);
-    try {
-      const details = await getPackageInfo(node.name);
-      if (!isMountedRef.current) return;
-      setSelectedPackage(details);
-    } catch (ex) {
-      if (!isMountedRef.current) return;
-      setError(ex instanceof Error ? ex.message : String(ex));
-    } finally {
-      if (isMountedRef.current) {
-        setDetailsLoading(false);
-      }
-    }
-  }, []);
-
-  const handleNodeDoubleClick = useCallback((node: ForceGraphNode) => {
-    setSearchInput(node.name);
-    fetchDependencyTree(node.name, depth, direction);
-  }, [depth, direction]);
-
-  const { svgRef, resetView } = useForceGraph(nodes, edges, rootId, {
-    width: graphWidth,
-    height: GRAPH_HEIGHT,
-    onNodeClick: handleNodeClick,
-    onNodeDoubleClick: handleNodeDoubleClick,
-  });
-
-  const fetchDependencyTree = async (name: string, depthVal: number, dir: DependencyDirection) => {
+  const fetchDependencyTree = useCallback(async (name: string, depthVal: number, dir: DependencyDirection) => {
     setLoading(true);
     setError(null);
     setWarnings([]);
@@ -237,7 +143,92 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ initialPackage }
         setLoading(false);
       }
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!initialPackage || initialPackage === initialLoadRef.current) return;
+    initialLoadRef.current = initialPackage;
+    Promise.resolve().then(() => {
+      setSearchInput(initialPackage);
+      void fetchDependencyTree(initialPackage, depth, direction);
+    });
+  }, [initialPackage, depth, direction, fetchDependencyTree]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const updateWidth = () => {
+      if (containerRef.current) {
+        setGraphWidth(containerRef.current.offsetWidth);
+      }
+    };
+
+    const resizeObserver = new ResizeObserver(updateWidth);
+    resizeObserver.observe(container);
+
+    return () => resizeObserver.disconnect();
+  }, [nodes.length]);
+
+  useEffect(() => {
+    if (!debouncedSearch || debouncedSearch.length < 2) {
+      Promise.resolve().then(() => setSuggestions([]));
+      return;
+    }
+    let cancelled = false;
+    searchPackages({
+      query: debouncedSearch,
+      limit: 15,
+      installed: "all",
+    })
+      .then((response) => {
+        if (cancelled || !isMountedRef.current) return;
+        setSuggestions(response.results);
+        setLoadingSuggestions(false);
+      })
+      .catch(() => {
+        if (cancelled || !isMountedRef.current) return;
+        setSuggestions([]);
+        setLoadingSuggestions(false);
+      });
+    return () => { cancelled = true; };
+  }, [debouncedSearch]);
+
+  const handleNodeClick = useCallback(async (node: ForceGraphNode) => {
+    if (!node.installed) return;
+    setDetailsLoading(true);
+    try {
+      const details = await getPackageInfo(node.name);
+      if (!isMountedRef.current) return;
+      setSelectedPackage(details);
+    } catch (ex) {
+      if (!isMountedRef.current) return;
+      setError(ex instanceof Error ? ex.message : String(ex));
+    } finally {
+      if (isMountedRef.current) {
+        setDetailsLoading(false);
+      }
+    }
+  }, []);
+
+  const handleNodeDoubleClick = useCallback((node: ForceGraphNode) => {
+    setSearchInput(node.name);
+    void fetchDependencyTree(node.name, depth, direction);
+  }, [depth, direction, fetchDependencyTree]);
+
+  const { svgRef, resetView } = useForceGraph(nodes, edges, rootId, {
+    width: graphWidth,
+    height: GRAPH_HEIGHT,
+    onNodeClick: handleNodeClick,
+    onNodeDoubleClick: handleNodeDoubleClick,
+  });
 
   const handleSearch = () => {
     const query = sanitizeSearchInput(searchInput);

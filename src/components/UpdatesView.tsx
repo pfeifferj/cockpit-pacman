@@ -245,23 +245,31 @@ interface UpdatesViewProps {
 }
 
 const LockErrorBody: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
-  const [checking, setChecking] = useState(false);
+  const [checking, setChecking] = useState(true);
   const [removing, setRemoving] = useState(false);
   const [lockInfo, setLockInfo] = useState<{ stale: boolean; process?: string } | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
 
   useEffect(() => {
-    setChecking(true);
+    let cancelled = false;
     checkLock()
       .then((status) => {
+        if (cancelled) return;
         if (!status.locked) {
           onRetry();
           return;
         }
         setLockInfo({ stale: status.stale, process: status.blocking_process });
       })
-      .catch(() => setLockInfo(null))
-      .finally(() => setChecking(false));
+      .catch(() => {
+        if (cancelled) return;
+        setLockInfo(null);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setChecking(false);
+      });
+    return () => { cancelled = true; };
   }, [onRetry]);
 
   const handleRemoveLock = async () => {
@@ -629,37 +637,42 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   }, []);
 
   useEffect(() => {
-    loadRebootStatus();
-    loadServicesStatus();
-  }, [loadRebootStatus, loadServicesStatus]);
+    let cancelled = false;
+    getRebootStatus()
+      .then((status) => { if (!cancelled) setRebootStatus(status); })
+      .catch(() => { if (!cancelled) setRebootStatus(null); });
+    getServicesStatus()
+      .then((status) => { if (!cancelled) setServicesStatus(status); })
+      .catch(() => { if (!cancelled) setServicesStatus(null); });
+    return () => { cancelled = true; };
+  }, []);
 
-  const loadSummary = useCallback(async () => {
-    setSummaryLoading(true);
+  useEffect(() => {
+    let cancelled = false;
     type NewsResult = { ok: true; items: NewsItem[] } | { ok: false };
-    const [orphans, cache, keyring, newsResult] = await Promise.all([
+    Promise.all([
       listOrphans().catch(() => null),
       getCacheInfo().catch(() => null),
       getKeyringStatus().catch(() => null),
       fetchNews(NEWS_LOOKBACK_DAYS)
         .then((r): NewsResult => ({ ok: true, items: r.items }))
         .catch((): NewsResult => ({ ok: false })),
-    ]);
-    setOrphanCount(orphans?.orphans.length ?? null);
-    setCacheSize(cache?.total_size ?? null);
-    setKeyringStatus(keyring);
-    if (newsResult.ok) {
-      setNewsError(false);
-      setNewsItems(newsResult.items);
-    } else {
-      setNewsError(true);
-      setNewsItems([]);
-    }
-    setSummaryLoading(false);
+    ]).then(([orphans, cache, keyring, newsResult]) => {
+      if (cancelled) return;
+      setOrphanCount(orphans?.orphans.length ?? null);
+      setCacheSize(cache?.total_size ?? null);
+      setKeyringStatus(keyring);
+      if (newsResult.ok) {
+        setNewsError(false);
+        setNewsItems(newsResult.items);
+      } else {
+        setNewsError(true);
+        setNewsItems([]);
+      }
+      setSummaryLoading(false);
+    });
+    return () => { cancelled = true; };
   }, []);
-
-  useEffect(() => {
-    loadSummary();
-  }, [loadSummary]);
 
   useEffect(() => {
     if (!signoffCredentials) return;
@@ -967,20 +980,21 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     () => ["localhost", "127.0.0.1", "::1", ""].includes(window.location.hostname),
     [],
   );
-  const effectiveBlock = useCallback(
-    (svc: ServiceRestart) =>
-      svc.restart_blocked === "cockpit_transport" && isLocalCockpit
-        ? undefined
-        : svc.restart_blocked,
-    [isLocalCockpit],
-  );
+  const effectiveBlock = (svc: ServiceRestart) =>
+    svc.restart_blocked === "cockpit_transport" && isLocalCockpit
+      ? undefined
+      : svc.restart_blocked;
   const safeServices = useMemo(
-    () => servicesStatus?.services.filter((s) => !effectiveBlock(s)) ?? [],
-    [servicesStatus, effectiveBlock],
+    () => servicesStatus?.services.filter(
+      (s) => !(s.restart_blocked === "cockpit_transport" && isLocalCockpit ? undefined : s.restart_blocked),
+    ) ?? [],
+    [servicesStatus, isLocalCockpit],
   );
   const blockedServices = useMemo(
-    () => servicesStatus?.services.filter((s) => effectiveBlock(s)) ?? [],
-    [servicesStatus, effectiveBlock],
+    () => servicesStatus?.services.filter(
+      (s) => s.restart_blocked === "cockpit_transport" && isLocalCockpit ? undefined : s.restart_blocked,
+    ) ?? [],
+    [servicesStatus, isLocalCockpit],
   );
   const servicesSignature = useMemo(
     () => (servicesStatus?.services ?? []).map((s) => s.name).sort().join(","),

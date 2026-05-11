@@ -71,11 +71,12 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
   }, [packageName]);
 
   useEffect(() => {
-    if (isOpen) {
-      loadVersions();
+    if (!isOpen) return;
+    Promise.resolve().then(() => {
       setSelectedVersion(null);
       setLog("");
-    }
+      void loadVersions();
+    });
   }, [isOpen, loadVersions]);
 
   useEffect(() => {
