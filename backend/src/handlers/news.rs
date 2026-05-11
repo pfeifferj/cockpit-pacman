@@ -92,6 +92,11 @@ pub struct ServicesDismissal {
     pub signature: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Default)]
+pub struct RebootDismissal {
+    pub signature: Option<String>,
+}
+
 pub fn fetch_news(days: u32) -> Result<()> {
     let days = days.min(365);
     let items = fetch_news_items(days)?;
@@ -187,6 +192,11 @@ fn services_dismissal_path() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".config/cockpit-pacman/services-dismissed.json"))
 }
 
+fn reboot_dismissal_path() -> Result<PathBuf> {
+    let home = std::env::var("HOME").context("HOME environment variable is not set")?;
+    Ok(PathBuf::from(home).join(".config/cockpit-pacman/reboot-dismissed.json"))
+}
+
 pub fn read_news_state() -> Result<()> {
     let path = news_state_path()?;
     let state = read_news_state_from(&path)?;
@@ -245,6 +255,54 @@ pub fn mark_services_dismissed(signature: &str) -> Result<()> {
     }
     let path = services_dismissal_path()?;
     let state = write_services_dismissal_to(&path, signature)?;
+    emit_json(&state)
+}
+
+pub fn read_reboot_dismissal_from(path: &Path) -> Result<RebootDismissal> {
+    match std::fs::read_to_string(path) {
+        Ok(content) => {
+            if content.trim().is_empty() {
+                return Ok(RebootDismissal::default());
+            }
+            let state: RebootDismissal = serde_json::from_str(&content)
+                .with_context(|| format!("Failed to parse reboot dismissal from {:?}", path))?;
+            Ok(state)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(RebootDismissal::default()),
+        Err(e) => {
+            Err(e).with_context(|| format!("Failed to read reboot dismissal from {:?}", path))
+        }
+    }
+}
+
+pub fn write_reboot_dismissal_to(path: &Path, signature: &str) -> Result<RebootDismissal> {
+    with_state_lock(path, || {
+        let state = RebootDismissal {
+            signature: Some(signature.to_string()),
+        };
+        write_json_atomic(path, &state)?;
+        Ok(state)
+    })
+}
+
+pub fn read_reboot_dismissal() -> Result<()> {
+    let path = reboot_dismissal_path()?;
+    let state = read_reboot_dismissal_from(&path)?;
+    emit_json(&state)
+}
+
+pub fn mark_reboot_dismissed(signature: &str) -> Result<()> {
+    if signature.is_empty() {
+        anyhow::bail!("Signature must not be empty");
+    }
+    if signature.len() > 4096 {
+        anyhow::bail!("Signature length {} exceeds 4096", signature.len());
+    }
+    if signature.chars().any(|c| c.is_control()) {
+        anyhow::bail!("Signature contains control characters");
+    }
+    let path = reboot_dismissal_path()?;
+    let state = write_reboot_dismissal_to(&path, signature)?;
     emit_json(&state)
 }
 

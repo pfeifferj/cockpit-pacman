@@ -1212,6 +1212,18 @@ export async function markServicesDismissed(signature: string): Promise<void> {
   await runBackend<ServicesDismissal>("services-mark-dismissed", [signature], { superuser: "none" });
 }
 
+export interface RebootDismissal {
+  signature: string | null;
+}
+
+export async function getRebootDismissal(): Promise<RebootDismissal> {
+  return runBackend<RebootDismissal>("reboot-dismissal-state", [], { superuser: "none" });
+}
+
+export async function markRebootDismissed(signature: string): Promise<void> {
+  await runBackend<RebootDismissal>("reboot-mark-dismissed", [signature], { superuser: "none" });
+}
+
 export type DependencyDirection = "forward" | "reverse" | "both";
 
 export interface DependencyTreeParams {

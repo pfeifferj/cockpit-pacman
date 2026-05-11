@@ -6,12 +6,12 @@ use cockpit_pacman_backend::handlers::{
     get_grouped_history, get_history, get_reboot_status, get_schedule_config, get_scheduled_runs,
     get_services_status, init_keyring, install_package, keyring_status, list_downgrades,
     list_ignored, list_installed, list_mirror_backups, list_mirrors, list_orphans,
-    list_repo_mirrors, list_repos, local_package_info, mark_news_read, mark_services_dismissed,
-    preflight_upgrade, read_news_state, read_services_dismissal, refresh_keyring, refresh_mirrors,
-    remove_ignored, remove_orphans, remove_package, remove_stale_lock, restore_mirror_backup,
-    run_upgrade, save_mirrorlist, save_repos, scheduled_run, search, security_info,
-    set_schedule_config, signoff_list, signoff_revoke, signoff_sign, sync_database,
-    sync_package_info, test_mirrors,
+    list_repo_mirrors, list_repos, local_package_info, mark_news_read, mark_reboot_dismissed,
+    mark_services_dismissed, preflight_upgrade, read_news_state, read_reboot_dismissal,
+    read_services_dismissal, refresh_keyring, refresh_mirrors, remove_ignored, remove_orphans,
+    remove_package, remove_stale_lock, restore_mirror_backup, run_upgrade, save_mirrorlist,
+    save_repos, scheduled_run, search, security_info, set_schedule_config, signoff_list,
+    signoff_revoke, signoff_sign, sync_database, sync_package_info, test_mirrors,
 };
 use cockpit_pacman_backend::models::{MirrorEntry, RepoEntry};
 use cockpit_pacman_backend::validation::{
@@ -474,6 +474,14 @@ fn main() {
                 std::process::exit(1);
             }
             mark_services_dismissed(&args[2])
+        }
+        "reboot-dismissal-state" => read_reboot_dismissal(),
+        "reboot-mark-dismissed" => {
+            if args.len() < 3 {
+                eprintln!("Error: reboot-mark-dismissed requires a SIGNATURE");
+                std::process::exit(1);
+            }
+            mark_reboot_dismissed(&args[2])
         }
         "signoff-list" => {
             if args.len() < 3 {

@@ -1362,6 +1362,87 @@ fn test_mark_services_dismissed_rejects_control_chars() {
 }
 
 #[test]
+fn test_reboot_dismissal_roundtrip() {
+    use crate::handlers::news::{read_reboot_dismissal_from, write_reboot_dismissal_to};
+    let dir = std::env::temp_dir().join("cockpit-pacman-test-reboot-roundtrip");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("reboot-dismissed.json");
+    let _ = std::fs::remove_file(&path);
+    write_reboot_dismissal_to(&path, "kernel:6.18.5.arch1-1").unwrap();
+    let state = read_reboot_dismissal_from(&path).unwrap();
+    assert_eq!(state.signature.as_deref(), Some("kernel:6.18.5.arch1-1"));
+}
+
+#[test]
+fn test_reboot_dismissal_overwrites_previous_signature() {
+    use crate::handlers::news::{read_reboot_dismissal_from, write_reboot_dismissal_to};
+    let dir = std::env::temp_dir().join("cockpit-pacman-test-reboot-overwrite");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("reboot-dismissed.json");
+    let _ = std::fs::remove_file(&path);
+    write_reboot_dismissal_to(&path, "kernel:6.18.4.arch1-1").unwrap();
+    write_reboot_dismissal_to(&path, "kernel:6.18.5.arch1-1").unwrap();
+    let state = read_reboot_dismissal_from(&path).unwrap();
+    assert_eq!(state.signature.as_deref(), Some("kernel:6.18.5.arch1-1"));
+}
+
+#[test]
+fn test_reboot_dismissal_missing_file_returns_default() {
+    use crate::handlers::news::read_reboot_dismissal_from;
+    let dir = std::env::temp_dir().join("cockpit-pacman-test-reboot-missing");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("does-not-exist.json");
+    let _ = std::fs::remove_file(&path);
+    let state = read_reboot_dismissal_from(&path).unwrap();
+    assert!(state.signature.is_none());
+}
+
+#[test]
+fn test_mark_reboot_dismissed_rejects_empty() {
+    use crate::handlers::news::mark_reboot_dismissed;
+    let home_backup = std::env::var_os("HOME");
+    let tmp = std::env::temp_dir().join("cockpit-pacman-test-reboot-mark-empty");
+    std::fs::create_dir_all(&tmp).unwrap();
+    unsafe { std::env::set_var("HOME", &tmp) };
+    let result = mark_reboot_dismissed("");
+    if let Some(h) = home_backup {
+        unsafe { std::env::set_var("HOME", h) };
+    }
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("empty"));
+}
+
+#[test]
+fn test_mark_reboot_dismissed_rejects_oversized() {
+    use crate::handlers::news::mark_reboot_dismissed;
+    let home_backup = std::env::var_os("HOME");
+    let tmp = std::env::temp_dir().join("cockpit-pacman-test-reboot-mark-oversize");
+    std::fs::create_dir_all(&tmp).unwrap();
+    unsafe { std::env::set_var("HOME", &tmp) };
+    let result = mark_reboot_dismissed(&"a".repeat(4097));
+    if let Some(h) = home_backup {
+        unsafe { std::env::set_var("HOME", h) };
+    }
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("4096"));
+}
+
+#[test]
+fn test_mark_reboot_dismissed_rejects_control_chars() {
+    use crate::handlers::news::mark_reboot_dismissed;
+    let home_backup = std::env::var_os("HOME");
+    let tmp = std::env::temp_dir().join("cockpit-pacman-test-reboot-mark-control");
+    std::fs::create_dir_all(&tmp).unwrap();
+    unsafe { std::env::set_var("HOME", &tmp) };
+    let result = mark_reboot_dismissed("foo\nbar");
+    if let Some(h) = home_backup {
+        unsafe { std::env::set_var("HOME", h) };
+    }
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("control"));
+}
+
+#[test]
 fn test_build_update_stats_map_counts_per_package() {
     use crate::handlers::query::build_update_stats_map;
     use crate::models::{LogEntry, UpdateStats};

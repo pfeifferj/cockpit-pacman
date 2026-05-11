@@ -91,6 +91,8 @@ import {
   markNewsRead,
   getServicesDismissal,
   markServicesDismissed,
+  getRebootDismissal,
+  markRebootDismissed,
   addIgnoredPackage,
   getSignoffList,
   checkLock,
@@ -351,6 +353,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [servicesStatus, setServicesStatus] = useState<ServicesStatus | null>(null);
   const [restartServicesOnComplete, setRestartServicesOnComplete] = useState(false);
   const [dismissedServicesSignature, setDismissedServicesSignature] = useState<string | null | undefined>(undefined);
+  const [dismissedRebootSignature, setDismissedRebootSignature] = useState<string | null | undefined>(undefined);
   const [orphanCount, setOrphanCount] = useState<number | null>(null);
   const [cacheSize, setCacheSize] = useState<number | null>(null);
   const [keyringStatus, setKeyringStatus] = useState<KeyringStatusResponse | null>(null);
@@ -617,6 +620,12 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     getServicesDismissal()
       .then((d) => setDismissedServicesSignature(d.signature))
       .catch(() => setDismissedServicesSignature(null));
+  }, []);
+
+  useEffect(() => {
+    getRebootDismissal()
+      .then((d) => setDismissedRebootSignature(d.signature))
+      .catch(() => setDismissedRebootSignature(null));
   }, []);
 
   useEffect(() => {
@@ -905,11 +914,35 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     </Alert>
   ) : null;
 
-  const rebootAlert = rebootStatus?.requires_reboot ? (
+  const rebootSignature = useMemo(() => {
+    if (!rebootStatus?.requires_reboot) return "";
+    if (rebootStatus.reason === "kernel_update" && rebootStatus.installed_kernel) {
+      return `kernel:${rebootStatus.installed_kernel}`;
+    }
+    if (rebootStatus.reason === "critical_packages" && rebootStatus.updated_packages.length > 0) {
+      return `critical:${[...rebootStatus.updated_packages].sort().join(",")}`;
+    }
+    return "";
+  }, [rebootStatus]);
+
+  const rebootAlert = rebootStatus?.requires_reboot
+    && rebootSignature !== ""
+    && dismissedRebootSignature !== undefined
+    && dismissedRebootSignature !== rebootSignature ? (
     <Alert
       variant="warning"
       title="System reboot recommended"
       className="pf-v6-u-mb-md"
+      actionClose={
+        <AlertActionCloseButton
+          onClose={() => {
+            setDismissedRebootSignature(rebootSignature);
+            markRebootDismissed(rebootSignature).catch((err) => {
+              console.error("Failed to persist reboot dismissal:", err);
+            });
+          }}
+        />
+      }
       actionLinks={
         <Button variant="warning" icon={<PowerOffIcon />} onClick={() => rebootSystem()}>
           Reboot Now

@@ -37,6 +37,8 @@ vi.mock("../api", async () => {
     markNewsRead: vi.fn(),
     getServicesDismissal: vi.fn(),
     markServicesDismissed: vi.fn(),
+    getRebootDismissal: vi.fn(),
+    markRebootDismissed: vi.fn(),
     checkLock: vi.fn(),
     removeStaleLock: vi.fn(),
     addIgnoredPackage: vi.fn(),
@@ -63,6 +65,8 @@ const mockGetNewsReadState = vi.mocked(api.getNewsReadState);
 const mockMarkNewsRead = vi.mocked(api.markNewsRead);
 const mockGetServicesDismissal = vi.mocked(api.getServicesDismissal);
 const mockMarkServicesDismissed = vi.mocked(api.markServicesDismissed);
+const mockGetRebootDismissal = vi.mocked(api.getRebootDismissal);
+const mockMarkRebootDismissed = vi.mocked(api.markRebootDismissed);
 
 describe("UpdatesView", () => {
   beforeEach(() => {
@@ -103,6 +107,8 @@ describe("UpdatesView", () => {
     mockMarkNewsRead.mockResolvedValue(undefined);
     mockGetServicesDismissal.mockResolvedValue({ signature: null });
     mockMarkServicesDismissed.mockResolvedValue(undefined);
+    mockGetRebootDismissal.mockResolvedValue({ signature: null });
+    mockMarkRebootDismissed.mockResolvedValue(undefined);
     mockRunUpgrade.mockReturnValue({ cancel: vi.fn() });
     mockSyncDatabase.mockImplementation((callbacks) => {
       setTimeout(() => callbacks.onComplete(), 0);
@@ -1272,6 +1278,97 @@ describe("UpdatesView", () => {
         expect(screen.getByText("System is up to date")).toBeInTheDocument();
       });
       expect(screen.queryByText(/System reboot recommended/)).not.toBeInTheDocument();
+    });
+
+    it("close button calls markRebootDismissed with kernel signature for kernel_update", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
+      mockGetRebootStatus.mockResolvedValue({
+        requires_reboot: true,
+        reason: "kernel_update",
+        running_kernel: "6.18.4-arch1-1",
+        installed_kernel: "6.18.5.arch1-1",
+        kernel_package: "linux",
+        updated_packages: [],
+      });
+
+      render(<UpdatesView />);
+      await screen.findByText(/System reboot recommended/);
+      const closeButtons = screen.getAllByRole("button").filter(
+        (btn) => btn.getAttribute("aria-label")?.includes("System reboot"),
+      );
+      expect(closeButtons.length).toBeGreaterThan(0);
+      await act(async () => {
+        fireEvent.click(closeButtons[0]);
+      });
+      await waitFor(() => {
+        expect(mockMarkRebootDismissed).toHaveBeenCalledWith("kernel:6.18.5.arch1-1");
+      });
+      expect(screen.queryByText(/System reboot recommended/)).not.toBeInTheDocument();
+    });
+
+    it("close button calls markRebootDismissed with sorted critical signature", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
+      mockGetRebootStatus.mockResolvedValue({
+        requires_reboot: true,
+        reason: "critical_packages",
+        running_kernel: "6.18.5-arch1-1",
+        installed_kernel: "6.18.5.arch1-1",
+        kernel_package: "linux",
+        updated_packages: ["systemd", "linux-firmware"],
+      });
+
+      render(<UpdatesView />);
+      await screen.findByText(/System reboot recommended/);
+      const closeButtons = screen.getAllByRole("button").filter(
+        (btn) => btn.getAttribute("aria-label")?.includes("System reboot"),
+      );
+      expect(closeButtons.length).toBeGreaterThan(0);
+      await act(async () => {
+        fireEvent.click(closeButtons[0]);
+      });
+      await waitFor(() => {
+        expect(mockMarkRebootDismissed).toHaveBeenCalledWith("critical:linux-firmware,systemd");
+      });
+    });
+
+    it("hides reboot alert on mount when stored signature matches", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
+      mockGetRebootStatus.mockResolvedValue({
+        requires_reboot: true,
+        reason: "kernel_update",
+        running_kernel: "6.18.4-arch1-1",
+        installed_kernel: "6.18.5.arch1-1",
+        kernel_package: "linux",
+        updated_packages: [],
+      });
+      mockGetRebootDismissal.mockResolvedValue({ signature: "kernel:6.18.5.arch1-1" });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(mockGetRebootDismissal).toHaveBeenCalled();
+      });
+      await waitFor(() => {
+        expect(mockGetRebootStatus).toHaveBeenCalled();
+      });
+      expect(screen.queryByText(/System reboot recommended/)).not.toBeInTheDocument();
+    });
+
+    it("shows reboot alert when stored signature is for an older kernel", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
+      mockGetRebootStatus.mockResolvedValue({
+        requires_reboot: true,
+        reason: "kernel_update",
+        running_kernel: "6.18.4-arch1-1",
+        installed_kernel: "6.18.5.arch1-1",
+        kernel_package: "linux",
+        updated_packages: [],
+      });
+      mockGetRebootDismissal.mockResolvedValue({ signature: "kernel:6.18.4.arch1-1" });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText(/System reboot recommended/)).toBeInTheDocument();
+      });
     });
   });
 
