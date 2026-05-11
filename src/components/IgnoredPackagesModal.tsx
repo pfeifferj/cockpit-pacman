@@ -94,27 +94,14 @@ export const IgnoredPackagesModal: React.FC<IgnoredPackagesModalProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
-    let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
       setTypeaheadValue("");
       setSelectedPackage(null);
       setPreviewPackage(null);
       setSuggestions([]);
+      void loadIgnoredPackages();
     });
-    listIgnoredPackages()
-      .then((response) => {
-        if (cancelled) return;
-        setIgnoredPackages(response.packages);
-        setLoading(false);
-      })
-      .catch((ex) => {
-        if (cancelled) return;
-        setError(ex instanceof Error ? ex.message : String(ex));
-        setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [isOpen]);
+  }, [isOpen, loadIgnoredPackages]);
 
   useEffect(() => {
     if (ignoredPackages.length === 0) {

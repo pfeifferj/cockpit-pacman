@@ -56,20 +56,12 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
   const [log, setLog] = useState("");
   const [logExpanded, setLogExpanded] = useState(false);
   const cancelRef = useRef<(() => void) | null>(null);
-  const isMountedRef = useRef(true);
   const logContainerRef = useAutoScrollLog(log);
 
   const { activeSortIndex, activeSortDirection, getSortParams } = useSortableTable({
     sortableColumns: [0, 2, 3],
     defaultDirection: "asc",
   });
-
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
 
   useEffect(() => {
     return () => {
@@ -84,33 +76,18 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
     setError(null);
     try {
       const response = await listOrphans();
-      if (!isMountedRef.current) return;
       setOrphanData(response);
       onOrphansLoaded?.(response.orphans.length);
       setViewState("ready");
     } catch (ex) {
-      if (!isMountedRef.current) return;
       setError(ex instanceof Error ? ex.message : String(ex));
       setViewState("ready");
     }
   }, [onOrphansLoaded]);
 
   useEffect(() => {
-    let cancelled = false;
-    listOrphans()
-      .then((response) => {
-        if (cancelled || !isMountedRef.current) return;
-        setOrphanData(response);
-        onOrphansLoaded?.(response.orphans.length);
-        setViewState("ready");
-      })
-      .catch((ex) => {
-        if (cancelled || !isMountedRef.current) return;
-        setError(ex instanceof Error ? ex.message : String(ex));
-        setViewState("ready");
-      });
-    return () => { cancelled = true; };
-  }, [onOrphansLoaded, refreshTrigger]);
+    Promise.resolve().then(() => loadOrphans());
+  }, [loadOrphans, refreshTrigger]);
 
   const startRemoval = () => {
     setConfirmModalOpen(false);

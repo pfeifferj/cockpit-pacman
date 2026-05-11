@@ -236,7 +236,7 @@ export const MirrorsView: React.FC = () => {
   }, [applyStatusToMirrors]);
 
   useEffect(() => {
-    Promise.resolve().then(loadMirrors);
+    Promise.resolve().then(() => loadMirrors());
   }, [loadMirrors]);
 
   useEffect(() => {

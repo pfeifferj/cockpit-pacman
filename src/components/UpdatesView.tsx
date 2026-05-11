@@ -138,6 +138,12 @@ function publishPageStatus(status: PageStatus | null): void {
   cockpit.transport.control("notify", { page_status: status });
 }
 
+function effectiveBlock(svc: ServiceRestart, isLocal: boolean): ServiceRestart["restart_blocked"] {
+  return svc.restart_blocked === "cockpit_transport" && isLocal
+    ? undefined
+    : svc.restart_blocked;
+}
+
 interface UpgradeProgress {
   phase: "preparing" | "downloading" | "installing" | "hooks";
   current: number;
@@ -637,15 +643,9 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    getRebootStatus()
-      .then((status) => { if (!cancelled) setRebootStatus(status); })
-      .catch(() => { if (!cancelled) setRebootStatus(null); });
-    getServicesStatus()
-      .then((status) => { if (!cancelled) setServicesStatus(status); })
-      .catch(() => { if (!cancelled) setServicesStatus(null); });
-    return () => { cancelled = true; };
-  }, []);
+    Promise.resolve().then(() => loadRebootStatus());
+    Promise.resolve().then(() => loadServicesStatus());
+  }, [loadRebootStatus, loadServicesStatus]);
 
   useEffect(() => {
     let cancelled = false;
@@ -853,7 +853,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         loadServicesStatus().then((status) => {
           if (restartServicesOnComplete && status?.restart_required) {
             const units = status.services
-              .filter((s) => !effectiveBlock(s))
+              .filter((s) => !effectiveBlock(s, isLocalCockpit))
               .map((s) => s.name);
             if (units.length > 0) {
               restartServices(units).catch(() => loadServicesStatus());
@@ -976,26 +976,11 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     </Alert>
   ) : null;
 
-  const isLocalCockpit = useMemo(
-    () => ["localhost", "127.0.0.1", "::1", ""].includes(window.location.hostname),
-    [],
+  const [isLocalCockpit] = useState(() =>
+    ["localhost", "127.0.0.1", "::1", ""].includes(window.location.hostname),
   );
-  const effectiveBlock = (svc: ServiceRestart) =>
-    svc.restart_blocked === "cockpit_transport" && isLocalCockpit
-      ? undefined
-      : svc.restart_blocked;
-  const safeServices = useMemo(
-    () => servicesStatus?.services.filter(
-      (s) => !(s.restart_blocked === "cockpit_transport" && isLocalCockpit ? undefined : s.restart_blocked),
-    ) ?? [],
-    [servicesStatus, isLocalCockpit],
-  );
-  const blockedServices = useMemo(
-    () => servicesStatus?.services.filter(
-      (s) => s.restart_blocked === "cockpit_transport" && isLocalCockpit ? undefined : s.restart_blocked,
-    ) ?? [],
-    [servicesStatus, isLocalCockpit],
-  );
+  const safeServices = servicesStatus?.services.filter((s) => !effectiveBlock(s, isLocalCockpit)) ?? [];
+  const blockedServices = servicesStatus?.services.filter((s) => effectiveBlock(s, isLocalCockpit)) ?? [];
   const servicesSignature = useMemo(
     () => (servicesStatus?.services ?? []).map((s) => s.name).sort().join(","),
     [servicesStatus],
@@ -1051,7 +1036,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
           <div className="pf-v6-u-mt-md">Cockpit can&apos;t restart these safely:</div>
           <List>
             {blockedServices.map((svc) => {
-              const blk = effectiveBlock(svc);
+              const blk = effectiveBlock(svc, isLocalCockpit);
               const note =
                 blk === "session_critical"
                   ? "Restarting this would log out the desktop session."

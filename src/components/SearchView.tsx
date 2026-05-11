@@ -68,6 +68,8 @@ export const SearchView: React.FC = () => {
 
   const perPageRef = useRef(perPage);
   const installedFilterRef = useRef(installedFilter);
+  // The debounced setTimeout below reads these after the effect has captured stale state;
+  // sync the refs after every commit so it sees the latest values.
   useEffect(() => {
     currentQueryRef.current = currentQuery;
     perPageRef.current = perPage;

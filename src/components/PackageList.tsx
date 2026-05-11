@@ -156,34 +156,8 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, initialF
   }, [page, perPage, searchValue, filter, repoFilter, activeSortIndex, activeSortDirection, setTotal]);
 
   useEffect(() => {
-    if (filter === "graph" || filter === "orphan") return;
-    let cancelled = false;
-    const offset = (page - 1) * perPage;
-    listInstalled({
-      offset,
-      limit: perPage,
-      search: searchValue,
-      filter,
-      repo: repoFilter,
-      sortBy: getSortField(activeSortIndex),
-      sortDir: activeSortDirection,
-    })
-      .then((response: PackageListResponse) => {
-        if (cancelled || !isMountedRef.current) return;
-        setPackages(response.packages);
-        setTotal(response.total);
-        setTotalExplicit(response.total_explicit);
-        setTotalDependency(response.total_dependency);
-        setRepositories(response.repositories || []);
-        setLoading(false);
-      })
-      .catch((ex) => {
-        if (cancelled || !isMountedRef.current) return;
-        setError(ex instanceof Error ? ex.message : String(ex));
-        setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [page, perPage, searchValue, filter, repoFilter, activeSortIndex, activeSortDirection, setTotal]);
+    Promise.resolve().then(() => loadPackages());
+  }, [loadPackages]);
 
   const handleSearch = () => {
     manualSearchRef.current = true;
