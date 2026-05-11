@@ -1,17 +1,20 @@
 # Changelog
 
-## [0.3.6] - Unreleased
+## [0.3.6] - 2026-05-11
 
 ### Added
 - Repositories tab for managing `pacman.conf` repositories (db8fdc6, 1972c3d)
 - Services-restart alert in Updates view for stale systemd services after an upgrade (0237f04, 49e0c2c)
 - Dismissable services-restart alert (47a5262)
+- Dismissable system reboot alert (7286d2d)
 - Ignore and unignore actions in the package details modal and row kebab (f0053fe, 8a8869e)
+- Update status published to the Cockpit overview page health card (33e55fb)
 
 ### Changed
 - Banners render above the card on every tab (8cdf0e4)
 - Ignored packages can no longer be selected in the updates list (5f583f2)
 - Mirrors view no longer renders repo-specific overrides (now managed in Repositories) (5d90c0c)
+- Update-stats per package cached against pacman.log mtime to avoid rewalking the log on every package details open (65ffa9e)
 
 ### Fixed
 - Repositories filter change silently dropping unsaved edits (0c75779)
@@ -19,6 +22,9 @@
 - Kernel preflight missing non-stock kernels that did not match by provides (cf90afa)
 - News dismissals not persisting across reloads (f1ce9b0)
 - Save Changes button misaligned with the Mirrors toolbar (bb1e53b)
+- Ignored update rows briefly misrendering while ignore state loaded after the update list (f3a85c7)
+- News summaries with multi-byte characters truncating mid-codepoint (23ed2e7)
+- Backend panics on NTP backward time steps and mutex poisoning in the repo cache (4a4c0e9)
 
 ## [0.3.5] - 2026-04-12
 
