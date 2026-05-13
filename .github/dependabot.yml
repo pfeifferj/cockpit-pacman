@@ -5,6 +5,8 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    cooldown:
+      default-days: 7
     groups:
       patternfly:
         patterns:
@@ -31,9 +33,13 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "cargo"
     directory: "/backend"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
