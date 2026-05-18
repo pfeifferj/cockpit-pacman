@@ -383,7 +383,7 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
           </ToolbarItem>
           <ToolbarItem>
             <Button
-              variant="plain"
+              variant="secondary"
               onClick={fetchSignoffs}
               isDisabled={loading || bulkInProgress}
               icon={<SyncAltIcon />}

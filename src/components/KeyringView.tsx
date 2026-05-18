@@ -353,19 +353,10 @@ export const KeyringView: React.FC = () => {
 
       <Card>
         <CardBody>
-          <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsCenter" }}>
-          <FlexItem>
-            <CardTitle className="pf-v6-u-m-0">
-              {keyringData?.total ?? 0} key{(keyringData?.total ?? 0) !== 1 ? "s" : ""} in keyring
-              {filteredKeys.length !== (keyringData?.total ?? 0) && ` (${filteredKeys.length} shown)`}
-            </CardTitle>
-          </FlexItem>
-          <FlexItem>
-            <Button variant="secondary" icon={<SyncAltIcon />} onClick={handleRefreshKeys}>
-              Refresh Keys
-            </Button>
-          </FlexItem>
-        </Flex>
+          <CardTitle className="pf-v6-u-m-0">
+            {keyringData?.total ?? 0} key{(keyringData?.total ?? 0) !== 1 ? "s" : ""} in keyring
+            {filteredKeys.length !== (keyringData?.total ?? 0) && ` (${filteredKeys.length} shown)`}
+          </CardTitle>
 
         <Toolbar className="pf-v6-u-px-0 pf-v6-u-mt-md">
           <ToolbarContent>
@@ -409,6 +400,11 @@ export const KeyringView: React.FC = () => {
                 </Select>
               </ToolbarItem>
             )}
+            <ToolbarItem>
+              <Button variant="secondary" icon={<SyncAltIcon />} onClick={handleRefreshKeys}>
+                Refresh
+              </Button>
+            </ToolbarItem>
           </ToolbarContent>
         </Toolbar>
 

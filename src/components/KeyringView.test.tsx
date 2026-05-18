@@ -193,11 +193,11 @@ describe("KeyringView", () => {
     render(<KeyringView />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Refresh Keys/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^Refresh$/i })).toBeInTheDocument();
     });
   });
 
-  it("starts refresh when clicking Refresh Keys", async () => {
+  it("starts refresh when clicking Refresh", async () => {
     let capturedCallbacks: api.UpgradeCallbacks | null = null;
     mockRefreshKeyring.mockImplementation((callbacks) => {
       capturedCallbacks = callbacks;
@@ -207,10 +207,10 @@ describe("KeyringView", () => {
     render(<KeyringView />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Refresh Keys/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^Refresh$/i })).toBeInTheDocument();
     });
 
-    const refreshButton = screen.getByRole("button", { name: /Refresh Keys/i });
+    const refreshButton = screen.getByRole("button", { name: /^Refresh$/i });
     await act(async () => {
       fireEvent.click(refreshButton);
     });
@@ -238,10 +238,10 @@ describe("KeyringView", () => {
     render(<KeyringView />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Refresh Keys/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^Refresh$/i })).toBeInTheDocument();
     });
 
-    const refreshButton = screen.getByRole("button", { name: /Refresh Keys/i });
+    const refreshButton = screen.getByRole("button", { name: /^Refresh$/i });
     await act(async () => {
       fireEvent.click(refreshButton);
     });
@@ -264,10 +264,10 @@ describe("KeyringView", () => {
     render(<KeyringView />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Refresh Keys/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^Refresh$/i })).toBeInTheDocument();
     });
 
-    const refreshButton = screen.getByRole("button", { name: /Refresh Keys/i });
+    const refreshButton = screen.getByRole("button", { name: /^Refresh$/i });
     await act(async () => {
       fireEvent.click(refreshButton);
     });
@@ -430,10 +430,10 @@ describe("KeyringView", () => {
     render(<KeyringView />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Refresh Keys/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^Refresh$/i })).toBeInTheDocument();
     });
 
-    const refreshButton = screen.getByRole("button", { name: /Refresh Keys/i });
+    const refreshButton = screen.getByRole("button", { name: /^Refresh$/i });
     await act(async () => {
       fireEvent.click(refreshButton);
     });
