@@ -307,7 +307,7 @@ pub fn mark_reboot_dismissed(signature: &str) -> Result<()> {
 }
 
 pub(crate) fn parse_rss_body(html: &str, max: usize) -> String {
-    let text = html2text::from_read(html.as_bytes(), usize::MAX);
+    let text = html2text::from_read(html.as_bytes(), usize::MAX).unwrap_or_default();
     let trimmed = text.trim_end();
     if trimmed.chars().count() <= max {
         return trimmed.to_string();
