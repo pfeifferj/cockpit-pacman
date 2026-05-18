@@ -25,6 +25,8 @@ import {
   ModalHeader,
   ModalBody,
   ModalFooter,
+  Popover,
+  Icon,
 } from "@patternfly/react-core";
 import {
   GlobeIcon,
@@ -35,6 +37,7 @@ import {
   TrashIcon,
   AngleRightIcon,
   AngleDownIcon,
+  OutlinedQuestionCircleIcon,
 } from "@patternfly/react-icons";
 import {
   Table,
@@ -402,7 +405,17 @@ export const RepositoriesView: React.FC = () => {
             <Tr>
               <Th width={10}>Enabled</Th>
               <Th>Repository</Th>
-              <Th width={25}>SigLevel</Th>
+              <Th width={25}>
+                SigLevel{" "}
+                <Popover
+                  headerContent="Signature level"
+                  bodyContent="Never: skip signature checks. Optional: verify if present. Required: must have a valid signature from any key. TrustedOnly: must be signed by a key in the local keyring."
+                >
+                  <Icon isInline style={{ cursor: "pointer" }} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                    <OutlinedQuestionCircleIcon />
+                  </Icon>
+                </Popover>
+              </Th>
               <Th width={10}>Servers</Th>
               <Th width={10}>Actions</Th>
             </Tr>

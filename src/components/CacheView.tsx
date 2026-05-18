@@ -542,7 +542,15 @@ export const CacheView: React.FC = () => {
                 : `This will clean ${selectedPackages.size} of ${groupedPackages.length} cached packages.`}
             </Content>
             <Content component={ContentVariants.p} className="pf-v6-u-mt-md pf-v6-u-mb-sm">
-              <strong>Versions to keep:</strong>
+              <strong>Versions to keep:</strong>{" "}
+              <Popover
+                headerContent="How many versions to keep"
+                bodyContent="0 deletes all cached packages, including the currently installed ones. 1 or more keeps the N most recent versions of each package, letting you downgrade later without re-downloading."
+              >
+                <Icon isInline style={{ cursor: "pointer" }}>
+                  <OutlinedQuestionCircleIcon />
+                </Icon>
+              </Popover>
             </Content>
             <Slider
               value={keepVersions}

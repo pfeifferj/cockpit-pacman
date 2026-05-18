@@ -284,12 +284,12 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, initialF
                   onChange={() => handleFilterChange("all")}
                 />
                 <ToggleGroupItem
-                  text={<>Explicit <Badge isRead>{formatNumber(totalExplicit)}</Badge></>}
+                  text={<>Explicit <Tooltip content="Packages whose install reason is explicit. Includes anything installed directly with `pacman -S`, `pacman -U` (local .pkg.tar.zst files from makepkg or AUR helpers), and packages later marked explicit via `pacman -D --asexplicit`."><OutlinedQuestionCircleIcon style={{ cursor: "pointer" }} /></Tooltip> <Badge isRead>{formatNumber(totalExplicit)}</Badge></>}
                   isSelected={filter === "explicit"}
                   onChange={() => handleFilterChange("explicit")}
                 />
                 <ToggleGroupItem
-                  text={<>Dependencies <Badge isRead>{formatNumber(totalDependency)}</Badge></>}
+                  text={<>Dependencies <Tooltip content="Packages installed automatically to satisfy another package's requirements."><OutlinedQuestionCircleIcon style={{ cursor: "pointer" }} /></Tooltip> <Badge isRead>{formatNumber(totalDependency)}</Badge></>}
                   isSelected={filter === "dependency"}
                   onChange={() => handleFilterChange("dependency")}
                 />

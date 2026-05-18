@@ -37,6 +37,9 @@ import {
   NumberInput,
   Checkbox,
   Label,
+  Tooltip,
+  Popover,
+  Icon,
 } from "@patternfly/react-core";
 import {
   GlobeIcon,
@@ -48,6 +51,7 @@ import {
   HistoryIcon,
   UndoIcon,
   TrashIcon,
+  OutlinedQuestionCircleIcon,
 } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
 import { StatBox } from "./StatBox";
@@ -749,14 +753,16 @@ export const MirrorsView: React.FC = () => {
               </ToolbarItem>
             )}
             <ToolbarItem>
-              <Button
-                variant="secondary"
-                icon={<GlobeIcon />}
-                onClick={handleOpenRefreshModal}
-                isDisabled={state !== "ready" || isTesting || isFetchingStatus}
-              >
-                Refresh Mirrorlist
-              </Button>
+              <Tooltip content="Generate a ranked mirrorlist from the Arch status API. You'll preview the result before it replaces /etc/pacman.d/mirrorlist.">
+                <Button
+                  variant="secondary"
+                  icon={<GlobeIcon />}
+                  onClick={handleOpenRefreshModal}
+                  isDisabled={state !== "ready" || isTesting || isFetchingStatus}
+                >
+                  Refresh Mirrorlist
+                </Button>
+              </Tooltip>
             </ToolbarItem>
             <ToolbarItem>
               <Button
@@ -776,8 +782,25 @@ export const MirrorsView: React.FC = () => {
               <Th sort={getSortParams(0)} width={10}>Enabled</Th>
               <Th sort={getSortParams(1)}>URL</Th>
               <Th sort={getSortParams(2)} width={15}>Country</Th>
-              <Th sort={getSortParams(3)} width={10}>Latency</Th>
-              <Th sort={getSortParams(4)} width={10}>Score</Th>
+              <Th sort={getSortParams(3)} width={10}>
+                Latency{" "}
+                <Tooltip content="Round-trip time from this machine to the mirror, in milliseconds. Affects download start time but not throughput.">
+                  <Icon isInline style={{ marginLeft: "0.25em", cursor: "pointer" }} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                    <OutlinedQuestionCircleIcon />
+                  </Icon>
+                </Tooltip>
+              </Th>
+              <Th sort={getSortParams(4)} width={10}>
+                Score{" "}
+                <Popover
+                  headerContent="Mirror score"
+                  bodyContent="Quality metric from the Arch mirror status API. Lower is better. Combines sync delay, completion ratio, and standard deviation of recent checks."
+                >
+                  <Icon isInline style={{ marginLeft: "0.25em", cursor: "pointer" }} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                    <OutlinedQuestionCircleIcon />
+                  </Icon>
+                </Popover>
+              </Th>
               <Th width={10}>Actions</Th>
             </Tr>
           </Thead>
@@ -1047,7 +1070,20 @@ export const MirrorsView: React.FC = () => {
                 <FormSelectOption value="all" label="All protocols" />
               </FormSelect>
             </FormGroup>
-            <FormGroup label="Sort by" fieldId="refresh-sort">
+            <FormGroup
+              label="Sort by"
+              fieldId="refresh-sort"
+              labelHelp={
+                <Popover
+                  headerContent="Sort criteria"
+                  bodyContent="Score: composite quality (lower is better). Delay: seconds behind the master mirror. Age: time since last successful sync (newest first)."
+                >
+                  <Icon isInline style={{ cursor: "pointer" }}>
+                    <OutlinedQuestionCircleIcon />
+                  </Icon>
+                </Popover>
+              }
+            >
               <FormSelect
                 id="refresh-sort"
                 value={refreshSortBy}

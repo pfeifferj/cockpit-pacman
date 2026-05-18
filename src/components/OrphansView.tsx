@@ -24,8 +24,10 @@ import {
   FlexItem,
   Label,
   SearchInput,
+  Popover,
+  Icon,
 } from "@patternfly/react-core";
-import { TrashIcon, CheckCircleIcon } from "@patternfly/react-icons";
+import { TrashIcon, CheckCircleIcon, OutlinedQuestionCircleIcon } from "@patternfly/react-icons";
 import { StatBox } from "./StatBox";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
@@ -262,11 +264,25 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
     <>
       <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsCenter" }} className="pf-v6-u-mb-md">
         <FlexItem>
-          <StatBox
-            label="Space to Free"
-            value={formatSize(orphanData.total_size)}
-            color="success"
-          />
+          <Flex spaceItems={{ default: "spaceItemsSm" }} alignItems={{ default: "alignItemsCenter" }}>
+            <FlexItem>
+              <StatBox
+                label="Space to Free"
+                value={formatSize(orphanData.total_size)}
+                color="success"
+              />
+            </FlexItem>
+            <FlexItem>
+              <Popover
+                headerContent="Orphan packages"
+                bodyContent="Packages installed automatically as dependencies but no longer required by anything else. Safe to remove, can be reinstalled from repos if needed."
+              >
+                <Icon isInline style={{ cursor: "pointer" }}>
+                  <OutlinedQuestionCircleIcon />
+                </Icon>
+              </Popover>
+            </FlexItem>
+          </Flex>
         </FlexItem>
         <Flex spaceItems={{ default: "spaceItemsMd" }} alignItems={{ default: "alignItemsCenter" }}>
           <FlexItem>

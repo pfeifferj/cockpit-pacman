@@ -401,9 +401,11 @@ export const KeyringView: React.FC = () => {
               </ToolbarItem>
             )}
             <ToolbarItem>
-              <Button variant="secondary" icon={<SyncAltIcon />} onClick={handleRefreshKeys}>
-                Refresh
-              </Button>
+              <Tooltip content="Fetches and updates keys from configured keyservers. This is a network operation and can take a minute.">
+                <Button variant="secondary" icon={<SyncAltIcon />} onClick={handleRefreshKeys}>
+                  Refresh
+                </Button>
+              </Tooltip>
             </ToolbarItem>
           </ToolbarContent>
         </Toolbar>
