@@ -52,6 +52,7 @@ import {
   UndoIcon,
   TrashIcon,
   OutlinedQuestionCircleIcon,
+  SyncAltIcon,
 } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
 import { StatBox } from "./StatBox";
@@ -756,11 +757,11 @@ export const MirrorsView: React.FC = () => {
               <Tooltip content="Generate a ranked mirrorlist from the Arch status API. You'll preview the result before it replaces /etc/pacman.d/mirrorlist.">
                 <Button
                   variant="secondary"
-                  icon={<GlobeIcon />}
+                  icon={<SyncAltIcon />}
                   onClick={handleOpenRefreshModal}
                   isDisabled={state !== "ready" || isTesting || isFetchingStatus}
                 >
-                  Refresh Mirrorlist
+                  Refresh
                 </Button>
               </Tooltip>
             </ToolbarItem>
