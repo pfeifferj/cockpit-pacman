@@ -374,6 +374,19 @@ pub struct RebootStatus {
     pub updated_packages: Vec<String>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct PacnewFile {
+    pub path: String,
+    pub package: String,
+    pub kind: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PacnewStatus {
+    pub has_pacnew: bool,
+    pub files: Vec<PacnewFile>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RestartBlocked {

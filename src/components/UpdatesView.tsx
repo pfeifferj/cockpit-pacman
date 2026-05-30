@@ -67,6 +67,7 @@ import {
   PreflightResponse,
   StreamEvent,
   RebootStatus,
+  PacnewStatus,
   ServiceRestart,
   ServicesStatus,
   KeyringStatusResponse,
@@ -93,6 +94,9 @@ import {
   markServicesDismissed,
   getRebootDismissal,
   markRebootDismissed,
+  getPacnewStatus,
+  getPacnewDismissal,
+  markPacnewDismissed,
   addIgnoredPackage,
   getSignoffList,
   checkLock,
@@ -368,6 +372,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [restartServicesOnComplete, setRestartServicesOnComplete] = useState(false);
   const [dismissedServicesSignature, setDismissedServicesSignature] = useState<string | null | undefined>(undefined);
   const [dismissedRebootSignature, setDismissedRebootSignature] = useState<string | null | undefined>(undefined);
+  const [pacnewStatus, setPacnewStatus] = useState<PacnewStatus | null>(null);
+  const [dismissedPacnewSignature, setDismissedPacnewSignature] = useState<string | null | undefined>(undefined);
   const [orphanCount, setOrphanCount] = useState<number | null>(null);
   const [cacheSize, setCacheSize] = useState<number | null>(null);
   const [keyringStatus, setKeyringStatus] = useState<KeyringStatusResponse | null>(null);
@@ -630,6 +636,14 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     }
   }, []);
 
+  const loadPacnewStatus = useCallback(async () => {
+    try {
+      setPacnewStatus(await getPacnewStatus());
+    } catch {
+      setPacnewStatus(null);
+    }
+  }, []);
+
   useEffect(() => {
     getServicesDismissal()
       .then((d) => setDismissedServicesSignature(d.signature))
@@ -643,9 +657,16 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   }, []);
 
   useEffect(() => {
+    getPacnewDismissal()
+      .then((d) => setDismissedPacnewSignature(d.signature))
+      .catch(() => setDismissedPacnewSignature(null));
+  }, []);
+
+  useEffect(() => {
     Promise.resolve().then(() => loadRebootStatus());
     Promise.resolve().then(() => loadServicesStatus());
-  }, [loadRebootStatus, loadServicesStatus]);
+    Promise.resolve().then(() => loadPacnewStatus());
+  }, [loadRebootStatus, loadServicesStatus, loadPacnewStatus]);
 
   useEffect(() => {
     let cancelled = false;
@@ -850,6 +871,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
           return;
         }
         loadRebootStatus();
+        loadPacnewStatus();
         loadServicesStatus().then((status) => {
           if (restartServicesOnComplete && status?.restart_required) {
             const units = status.services
@@ -973,6 +995,45 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
           A reboot is recommended to apply these changes.
         </>
       )}
+    </Alert>
+  ) : null;
+
+  const pacnewSignature = useMemo(
+    () => (pacnewStatus?.files ?? []).map((f) => f.path).sort().join(","),
+    [pacnewStatus],
+  );
+
+  const pacnewAlert = pacnewStatus?.has_pacnew
+    && pacnewSignature !== ""
+    && dismissedPacnewSignature !== undefined
+    && dismissedPacnewSignature !== pacnewSignature ? (
+    <Alert
+      variant="warning"
+      title="Configuration files need merging"
+      className="pf-v6-u-mb-md"
+      actionClose={
+        <AlertActionCloseButton
+          onClose={() => {
+            setDismissedPacnewSignature(pacnewSignature);
+            markPacnewDismissed(pacnewSignature).catch((err) => {
+              console.error("Failed to persist pacnew dismissal:", err);
+            });
+          }}
+        />
+      }
+    >
+      <Content component={ContentVariants.p}>
+        A package upgrade left {pacnewStatus.files.length} configuration{" "}
+        {pacnewStatus.files.length === 1 ? "file" : "files"} that differ from your local edits.
+        Review and merge them manually (e.g. with <code>pacdiff</code>).
+      </Content>
+      <List>
+        {pacnewStatus.files.map((f) => (
+          <ListItem key={f.path}>
+            <strong>{f.path}</strong> ({f.package})
+          </ListItem>
+        ))}
+      </List>
     </Alert>
   ) : null;
 
@@ -1230,6 +1291,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         <CardBody>
           {rebootAlert}
           {servicesAlert}
+          {pacnewAlert}
           <EmptyState  headingLevel="h2" icon={CheckCircleIcon}  titleText="System Updated">
             <EmptyStateBody>
               All packages have been updated successfully.
@@ -1259,6 +1321,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       <>
         {rebootAlert}
         {servicesAlert}
+        {pacnewAlert}
         {warnings.length > 0 && (
           <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
             <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">
@@ -1349,6 +1412,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     <>
       {rebootAlert}
       {servicesAlert}
+      {pacnewAlert}
       {warnings.length > 0 && (
         <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
           <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">

@@ -97,6 +97,11 @@ pub struct RebootDismissal {
     pub signature: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Default)]
+pub struct PacnewDismissal {
+    pub signature: Option<String>,
+}
+
 pub fn fetch_news(days: u32) -> Result<()> {
     let days = days.min(365);
     let items = fetch_news_items(days)?;
@@ -195,6 +200,11 @@ fn services_dismissal_path() -> Result<PathBuf> {
 fn reboot_dismissal_path() -> Result<PathBuf> {
     let home = std::env::var("HOME").context("HOME environment variable is not set")?;
     Ok(PathBuf::from(home).join(".config/cockpit-pacman/reboot-dismissed.json"))
+}
+
+fn pacnew_dismissal_path() -> Result<PathBuf> {
+    let home = std::env::var("HOME").context("HOME environment variable is not set")?;
+    Ok(PathBuf::from(home).join(".config/cockpit-pacman/pacnew-dismissed.json"))
 }
 
 pub fn read_news_state() -> Result<()> {
@@ -303,6 +313,54 @@ pub fn mark_reboot_dismissed(signature: &str) -> Result<()> {
     }
     let path = reboot_dismissal_path()?;
     let state = write_reboot_dismissal_to(&path, signature)?;
+    emit_json(&state)
+}
+
+pub fn read_pacnew_dismissal_from(path: &Path) -> Result<PacnewDismissal> {
+    match std::fs::read_to_string(path) {
+        Ok(content) => {
+            if content.trim().is_empty() {
+                return Ok(PacnewDismissal::default());
+            }
+            let state: PacnewDismissal = serde_json::from_str(&content)
+                .with_context(|| format!("Failed to parse pacnew dismissal from {:?}", path))?;
+            Ok(state)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(PacnewDismissal::default()),
+        Err(e) => {
+            Err(e).with_context(|| format!("Failed to read pacnew dismissal from {:?}", path))
+        }
+    }
+}
+
+pub fn write_pacnew_dismissal_to(path: &Path, signature: &str) -> Result<PacnewDismissal> {
+    with_state_lock(path, || {
+        let state = PacnewDismissal {
+            signature: Some(signature.to_string()),
+        };
+        write_json_atomic(path, &state)?;
+        Ok(state)
+    })
+}
+
+pub fn read_pacnew_dismissal() -> Result<()> {
+    let path = pacnew_dismissal_path()?;
+    let state = read_pacnew_dismissal_from(&path)?;
+    emit_json(&state)
+}
+
+pub fn mark_pacnew_dismissed(signature: &str) -> Result<()> {
+    if signature.is_empty() {
+        anyhow::bail!("Signature must not be empty");
+    }
+    if signature.len() > 4096 {
+        anyhow::bail!("Signature length {} exceeds 4096", signature.len());
+    }
+    if signature.chars().any(|c| c.is_control()) {
+        anyhow::bail!("Signature contains control characters");
+    }
+    let path = pacnew_dismissal_path()?;
+    let state = write_pacnew_dismissal_to(&path, signature)?;
     emit_json(&state)
 }
 
