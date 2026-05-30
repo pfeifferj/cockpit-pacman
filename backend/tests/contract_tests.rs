@@ -12,12 +12,13 @@ use cockpit_pacman_backend::models::{
     GroupedLogResponse, KeyInfo, KeyringKey, KeyringStatusResponse, LogEntry, LogGroup,
     MirrorEntry, MirrorListResponse, MirrorStatus, MirrorStatusResponse, MirrorTestResult,
     NewsItem, NewsResponse, OrphanPackage, OrphanResponse, Package, PackageDetails,
-    PackageListResponse, PackageSecurityAdvisory, PreflightResponse, PreflightWarning,
-    ProviderChoice, RebootStatus, RefreshMirrorsResponse, ReplacementInfo, RestartBlocked,
-    RestoreMirrorBackupResponse, SaveMirrorlistResponse, ScheduledRunEntry, ScheduledRunsResponse,
-    SearchResponse, SearchResult, SecurityInfoAdvisory, SecurityInfoGroup, SecurityInfoIssue,
-    SecurityInfoResponse, SecurityResponse, ServiceRestart, ServicesStatus, StreamEvent,
-    SyncPackageDetails, UpdateInfo, UpdateStats, UpdatesResponse, VersionMatch, WarningSeverity,
+    PackageListResponse, PackageSecurityAdvisory, PacnewFile, PacnewStatus, PreflightResponse,
+    PreflightWarning, ProviderChoice, RebootStatus, RefreshMirrorsResponse, ReplacementInfo,
+    RestartBlocked, RestoreMirrorBackupResponse, SaveMirrorlistResponse, ScheduledRunEntry,
+    ScheduledRunsResponse, SearchResponse, SearchResult, SecurityInfoAdvisory, SecurityInfoGroup,
+    SecurityInfoIssue, SecurityInfoResponse, SecurityResponse, ServiceRestart, ServicesStatus,
+    StreamEvent, SyncPackageDetails, UpdateInfo, UpdateStats, UpdatesResponse, VersionMatch,
+    WarningSeverity,
 };
 use serde_json::Value;
 
@@ -1173,6 +1174,58 @@ fn reboot_status_fixture_matches_struct_shape() {
     assert_array(&fixture, "updated_packages");
 }
 
+// PacnewStatus
+
+#[test]
+fn pacnew_status_shape() {
+    let status = PacnewStatus {
+        has_pacnew: true,
+        files: vec![PacnewFile {
+            path: "/etc/pacman.conf.pacnew".into(),
+            package: "pacman".into(),
+            kind: "pacnew".into(),
+        }],
+    };
+    let v = to_json(&status);
+
+    assert_bool(&v, "has_pacnew");
+    assert_array(&v, "files");
+
+    let file = &v["files"][0];
+    assert_string(file, "path");
+    assert_string(file, "package");
+    assert_string(file, "kind");
+
+    assert_eq!(v["has_pacnew"], true);
+    assert_eq!(file["kind"], "pacnew");
+}
+
+#[test]
+fn pacnew_status_empty_shape() {
+    let status = PacnewStatus {
+        has_pacnew: false,
+        files: vec![],
+    };
+    let v = to_json(&status);
+
+    assert_eq!(v["has_pacnew"], false);
+    assert_array(&v, "files");
+    assert_eq!(v["files"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn pacnew_status_fixture_matches_struct_shape() {
+    let fixture = parse_fixture(include_str!("../../test/fixtures/pacnew-status.json"));
+
+    assert_bool(&fixture, "has_pacnew");
+    assert_array(&fixture, "files");
+
+    let file = &fixture["files"][0];
+    assert_string(file, "path");
+    assert_string(file, "package");
+    assert_string(file, "kind");
+}
+
 // CacheInfo
 
 #[test]
@@ -1568,6 +1621,12 @@ fn log_history_fixture_round_trip() {
 #[test]
 fn reboot_status_fixture_round_trip() {
     serde_json::from_str::<RebootStatus>(include_str!("../../test/fixtures/reboot-status.json"))
+        .unwrap();
+}
+
+#[test]
+fn pacnew_status_fixture_round_trip() {
+    serde_json::from_str::<PacnewStatus>(include_str!("../../test/fixtures/pacnew-status.json"))
         .unwrap();
 }
 

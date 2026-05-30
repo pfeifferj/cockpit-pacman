@@ -34,6 +34,7 @@ import type {
   LogGroup,
   LogEntry,
   RebootStatus,
+  PacnewStatus,
   StreamEvent,
   StreamEventLog,
   StreamEventProgress,
@@ -61,6 +62,7 @@ import {
   checkSecurity,
   getGroupedHistory,
   getRebootStatus,
+  getPacnewStatus,
   getCacheInfo,
   getKeyringStatus,
   getDependencyTree,
@@ -88,6 +90,7 @@ import mirrorStatusFixture from "../../test/fixtures/mirror-status.json";
 import securityFixture from "../../test/fixtures/security-advisories.json";
 import logHistoryFixture from "../../test/fixtures/log-history.json";
 import rebootStatusFixture from "../../test/fixtures/reboot-status.json";
+import pacnewStatusFixture from "../../test/fixtures/pacnew-status.json";
 import cacheInfoFixture from "../../test/fixtures/cache-info.json";
 import keyringStatusFixture from "../../test/fixtures/keyring-status.json";
 import dependencyTreeFixture from "../../test/fixtures/dependency-tree.json";
@@ -633,6 +636,35 @@ describe("getRebootStatus contract", () => {
     expect(result.running_kernel).toBeNull();
     expect(result.installed_kernel).toBeNull();
     expect(result.kernel_package).toBeNull();
+  });
+});
+
+
+describe("getPacnewStatus contract", () => {
+  it("parses pacnew-status fixture into PacnewStatus shape", async () => {
+    spawnReturns(pacnewStatusFixture);
+    const result = await getPacnewStatus();
+
+    expect(typeof result.has_pacnew).toBe("boolean");
+    expect(Array.isArray(result.files)).toBe(true);
+  });
+
+  it("file entries have correct field types", async () => {
+    spawnReturns(pacnewStatusFixture);
+    const result = await getPacnewStatus();
+
+    expect(typeof result.files[0].path).toBe("string");
+    expect(typeof result.files[0].package).toBe("string");
+    expect(typeof result.files[0].kind).toBe("string");
+  });
+
+  it("empty status has no files", async () => {
+    const empty: PacnewStatus = { has_pacnew: false, files: [] };
+    spawnReturns(empty);
+    const result = await getPacnewStatus();
+
+    expect(result.has_pacnew).toBe(false);
+    expect(result.files).toHaveLength(0);
   });
 });
 

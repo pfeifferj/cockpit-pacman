@@ -1,0 +1,7 @@
+{
+  "has_pacnew": true,
+  "files": [
+    { "path": "/etc/pacman.conf.pacnew", "package": "pacman", "kind": "pacnew" },
+    { "path": "/etc/ssh/sshd_config.pacsave", "package": "openssh", "kind": "pacsave" }
+  ]
+}

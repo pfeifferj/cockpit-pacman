@@ -917,6 +917,23 @@ export async function getRebootStatus(): Promise<RebootStatus> {
   return runBackend<RebootStatus>("reboot-status");
 }
 
+export type PacnewKind = "pacnew" | "pacsave";
+
+export interface PacnewFile {
+  path: string;
+  package: string;
+  kind: PacnewKind;
+}
+
+export interface PacnewStatus {
+  has_pacnew: boolean;
+  files: PacnewFile[];
+}
+
+export async function getPacnewStatus(): Promise<PacnewStatus> {
+  return runBackend<PacnewStatus>("pacnew-status", [], { superuser: "none" });
+}
+
 export function rebootSystem(): Promise<void> {
   const client = cockpit.dbus("org.freedesktop.login1", { bus: "system", superuser: "try" });
   return client
@@ -1222,6 +1239,18 @@ export async function getRebootDismissal(): Promise<RebootDismissal> {
 
 export async function markRebootDismissed(signature: string): Promise<void> {
   await runBackend<RebootDismissal>("reboot-mark-dismissed", [signature], { superuser: "none" });
+}
+
+export interface PacnewDismissal {
+  signature: string | null;
+}
+
+export async function getPacnewDismissal(): Promise<PacnewDismissal> {
+  return runBackend<PacnewDismissal>("pacnew-dismissal-state", [], { superuser: "none" });
+}
+
+export async function markPacnewDismissed(signature: string): Promise<void> {
+  await runBackend<PacnewDismissal>("pacnew-mark-dismissed", [signature], { superuser: "none" });
 }
 
 export type DependencyDirection = "forward" | "reverse" | "both";
