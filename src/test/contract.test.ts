@@ -50,6 +50,8 @@ import type {
   NewsResponse,
   ScheduledRunEntry,
   ServicesStatus,
+  CachedVersion,
+  DowngradeResponse,
 } from "../api";
 import {
   listInstalled,
@@ -76,6 +78,7 @@ import {
   getSyncPackageInfo,
   listRepoMirrors,
   getServicesStatus,
+  listArchiveVersions,
 } from "../api";
 
 // JSON fixtures — vitest resolves these at build time via Vite's JSON import support
@@ -1194,5 +1197,46 @@ describe("getServicesStatus contract", () => {
     const noPackages = result.services.find((s) => s.affected_packages.length === 0);
     expect(noPackages).toBeDefined();
     expect(noPackages!.name).toBe("sshd.service");
+  });
+});
+
+
+describe("listArchiveVersions contract", () => {
+  const archiveResponse: DowngradeResponse = {
+    packages: [
+      {
+        name: "bash",
+        version: "5.1.016-1",
+        filename: "bash-5.1.016-1-x86_64.pkg.tar.zst",
+        size: 0,
+        installed_version: "5.2.015-1",
+        is_older: true,
+      },
+    ],
+    total: 1,
+  };
+
+  it("parses the archive listing into DowngradeResponse shape", async () => {
+    spawnReturns(archiveResponse);
+    const result = await listArchiveVersions("bash");
+
+    expect(Array.isArray(result.packages)).toBe(true);
+    expect(typeof result.total).toBe("number");
+
+    const entry: CachedVersion = result.packages[0];
+    expect(typeof entry.name).toBe("string");
+    expect(typeof entry.version).toBe("string");
+    expect(typeof entry.filename).toBe("string");
+    expect(typeof entry.size).toBe("number");
+    expect(typeof entry.is_older).toBe("boolean");
+  });
+
+  it("installed_version is null when the package is not installed", async () => {
+    spawnReturns({
+      packages: [{ ...archiveResponse.packages[0], installed_version: null }],
+      total: 1,
+    });
+    const result = await listArchiveVersions("bash");
+    expect(result.packages[0].installed_version).toBeNull();
   });
 });

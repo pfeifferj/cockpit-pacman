@@ -2,23 +2,25 @@ use std::env;
 
 use cockpit_pacman_backend::handlers::{
     add_ignored, check_lock, check_security, check_updates, clean_cache, delete_mirror_backup,
-    downgrade_package, fetch_mirror_status, fetch_news, get_cache_info, get_dependency_tree,
-    get_grouped_history, get_history, get_pacnew_status, get_reboot_status, get_schedule_config,
-    get_scheduled_runs, get_services_status, init_keyring, install_package, keyring_status,
-    list_downgrades, list_ignored, list_installed, list_mirror_backups, list_mirrors, list_orphans,
-    list_repo_mirrors, list_repos, local_package_info, mark_news_read, mark_pacnew_dismissed,
-    mark_reboot_dismissed, mark_services_dismissed, preflight_upgrade, read_news_state,
-    read_pacnew_dismissal, read_reboot_dismissal, read_services_dismissal, refresh_keyring,
-    refresh_mirrors, remove_ignored, remove_orphans, remove_package, remove_stale_lock,
-    restore_mirror_backup, run_upgrade, save_mirrorlist, save_repos, scheduled_run, search,
-    security_info, set_schedule_config, signoff_list, signoff_revoke, signoff_sign, sync_database,
+    downgrade_from_archive, downgrade_package, fetch_mirror_status, fetch_news, get_cache_info,
+    get_dependency_tree, get_grouped_history, get_history, get_pacnew_status, get_reboot_status,
+    get_schedule_config, get_scheduled_runs, get_services_status, init_keyring, install_package,
+    keyring_status, list_archive_versions, list_downgrades, list_ignored, list_installed,
+    list_mirror_backups, list_mirrors, list_orphans, list_repo_mirrors, list_repos,
+    local_package_info, mark_news_read, mark_pacnew_dismissed, mark_reboot_dismissed,
+    mark_services_dismissed, preflight_upgrade, read_news_state, read_pacnew_dismissal,
+    read_reboot_dismissal, read_services_dismissal, refresh_keyring, refresh_mirrors,
+    remove_ignored, remove_orphans, remove_package, remove_stale_lock, restore_mirror_backup,
+    run_upgrade, save_mirrorlist, save_repos, scheduled_run, search, security_info,
+    set_schedule_config, signoff_list, signoff_revoke, signoff_sign, sync_database,
     sync_package_info, test_mirrors,
 };
 use cockpit_pacman_backend::models::{MirrorEntry, RepoEntry};
 use cockpit_pacman_backend::validation::{
-    validate_depth, validate_direction, validate_json_payload_size, validate_keep_versions,
-    validate_mirror_timeout, validate_mirror_url, validate_package_name, validate_pagination,
-    validate_refresh_protocol, validate_refresh_sort, validate_search_query, validate_signoff_arg,
+    validate_archive_filename, validate_depth, validate_direction, validate_json_payload_size,
+    validate_keep_versions, validate_mirror_timeout, validate_mirror_url, validate_package_name,
+    validate_pagination, validate_refresh_protocol, validate_refresh_sort, validate_search_query,
+    validate_signoff_arg,
 };
 
 fn print_usage() {
@@ -86,6 +88,14 @@ fn print_usage() {
     eprintln!("                         NAME: optional package name to filter");
     eprintln!("  downgrade NAME VERSION [timeout]");
     eprintln!("                         Downgrade a package to a cached version (requires root)");
+    eprintln!("                         timeout: seconds (default: 300)");
+    eprintln!("  list-archive-versions NAME [QUERY]");
+    eprintln!("                         List versions available in the Arch Linux Archive");
+    eprintln!("                         filtered to the system architecture and 'any'");
+    eprintln!("                         QUERY: optional version substring, applied before the cap");
+    eprintln!("  downgrade-archive NAME FILENAME [timeout]");
+    eprintln!("                         Downgrade to an archive version via pacman -U URL");
+    eprintln!("                         (requires root; downloads and verifies the package)");
     eprintln!("                         timeout: seconds (default: 300)");
     eprintln!("  get-schedule           Get scheduled upgrade configuration");
     eprintln!("  set-schedule [enabled] [mode] [schedule] [max_packages]");
@@ -347,6 +357,31 @@ fn main() {
             let timeout = args.get(4).and_then(|s| s.parse().ok());
             validate_package_name(&args[2])
                 .and_then(|_| downgrade_package(&args[2], &args[3], timeout))
+        }
+        "list-archive-versions" => {
+            if args.len() < 3 {
+                eprintln!("Error: list-archive-versions requires a package name");
+                std::process::exit(1);
+            }
+            let query = args.get(3).map(|s| s.as_str()).filter(|s| !s.is_empty());
+            validate_package_name(&args[2])
+                .and_then(|_| {
+                    if let Some(q) = query {
+                        validate_search_query(q)?;
+                    }
+                    Ok(())
+                })
+                .and_then(|_| list_archive_versions(&args[2], query))
+        }
+        "downgrade-archive" => {
+            if args.len() < 4 {
+                eprintln!("Error: downgrade-archive requires NAME and FILENAME");
+                std::process::exit(1);
+            }
+            let timeout = args.get(4).and_then(|s| s.parse().ok());
+            validate_package_name(&args[2])
+                .and_then(|_| validate_archive_filename(&args[3], &args[2]))
+                .and_then(|_| downgrade_from_archive(&args[2], &args[3], timeout))
         }
         "get-schedule" => get_schedule_config(),
         "set-schedule" => {

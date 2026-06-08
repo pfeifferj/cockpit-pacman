@@ -840,6 +840,22 @@ export function downgradePackage(
   return runStreamingBackend("downgrade", [sanitizeSearchInput(name), sanitizeSearchInput(version)], callbacks);
 }
 
+export async function listArchiveVersions(packageName: string, query?: string): Promise<DowngradeResponse> {
+  const args = [sanitizeSearchInput(packageName)];
+  if (query && query.trim()) {
+    args.push(sanitizeSearchInput(query));
+  }
+  return runBackend<DowngradeResponse>("list-archive-versions", args);
+}
+
+export function downgradeFromArchive(
+  callbacks: UpgradeCallbacks,
+  name: string,
+  filename: string
+): { cancel: () => void } {
+  return runStreamingBackend("downgrade-archive", [sanitizeSearchInput(name), filename], callbacks);
+}
+
 export type ScheduleMode = "check" | "upgrade";
 
 export interface ScheduleConfig {

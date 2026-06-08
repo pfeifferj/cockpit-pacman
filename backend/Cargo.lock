@@ -331,6 +331,7 @@ dependencies = [
  "pacman-key",
  "pacman-log",
  "pacmanconf",
+ "percent-encoding",
  "rss",
  "serde",
  "serde_json",

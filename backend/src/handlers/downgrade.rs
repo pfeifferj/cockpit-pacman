@@ -75,13 +75,24 @@ pub fn downgrade_package(name: &str, version: &str, timeout: Option<u64>) -> Res
     let cache_dir = get_cache_dir();
     let cache_path = Path::new(&cache_dir);
     let target_filename = find_package_file(cache_path, name, version)?;
+    let pkg_path = cache_path.join(&target_filename);
 
+    run_pacman_upgrade(&pkg_path.to_string_lossy(), name, version, timeout)
+}
+
+/// Run `pacman -U` against a package target (a cache path or an archive URL),
+/// streaming its output as log events. Shared by cache and archive downgrades.
+pub(crate) fn run_pacman_upgrade(
+    target: &str,
+    name: &str,
+    version: &str,
+    timeout: Option<u64>,
+) -> Result<()> {
     emit_event(&StreamEvent::Event {
         event: format!("Downgrading {} to version {}", name, version),
         package: Some(name.to_string()),
     });
 
-    let pkg_path = cache_path.join(&target_filename);
     let timeout_secs = timeout.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS);
     let timeout_duration = std::time::Duration::from_secs(timeout_secs);
     let start_time = Instant::now();
@@ -90,14 +101,13 @@ pub fn downgrade_package(name: &str, version: &str, timeout: Option<u64>) -> Res
         level: "info".to_string(),
         message: format!(
             "Running: pacman -U --noconfirm {} (timeout: {}s)",
-            pkg_path.display(),
-            timeout_secs
+            target, timeout_secs
         ),
     });
 
     let mut child = Command::new("pacman")
         .args(["-U", "--noconfirm"])
-        .arg(&pkg_path)
+        .arg(target)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -224,7 +234,7 @@ fn find_package_file(cache_path: &Path, name: &str, version: &str) -> Result<Str
         };
         let path = entry.path();
         if let Some(filename) = path.file_name().map(|s| s.to_string_lossy().to_string())
-            && let Some((pkg_name, pkg_version)) = parse_package_filename(&filename)
+            && let Some((pkg_name, pkg_version, _)) = parse_package_filename(&filename)
             && pkg_name == name
             && pkg_version == version
         {
@@ -235,17 +245,17 @@ fn find_package_file(cache_path: &Path, name: &str, version: &str) -> Result<Str
     anyhow::bail!("Package file not found in cache: {}-{}", name, version)
 }
 
-fn get_installed_version(alpm: &Alpm, name: &str) -> Option<String> {
+pub(crate) fn get_installed_version(alpm: &Alpm, name: &str) -> Option<String> {
     alpm.localdb()
         .pkg(name)
         .ok()
         .map(|p| p.version().to_string())
 }
 
-fn is_version_older(cached: &str, installed: &str) -> bool {
+pub(crate) fn is_version_older(cached: &str, installed: &str) -> bool {
     matches!(compare_versions(cached, installed), Ordering::Less)
 }
 
-fn compare_versions(a: &str, b: &str) -> Ordering {
+pub(crate) fn compare_versions(a: &str, b: &str) -> Ordering {
     alpm::vercmp(a, b)
 }

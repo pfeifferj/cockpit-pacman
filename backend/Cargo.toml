@@ -22,6 +22,7 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 rss = "2"
 html2text = "0.17"
 ureq = "3"
+percent-encoding = "2"
 arch-security-client = { path = "crates/arch-security-client" }
 archweb-client = { path = "crates/archweb-client" }
 base64 = "0.22"
