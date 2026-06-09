@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
+use std::fs::OpenOptions;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -41,43 +41,8 @@ where
     f()
 }
 
-fn write_json_atomic<T: Serialize>(path: &Path, state: &T) -> Result<()> {
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| anyhow::anyhow!("Invalid state path: {:?}", path))?;
-
-    let content = serde_json::to_string_pretty(state).context("Failed to serialize state")?;
-
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO)
-        .as_nanos();
-    let tid: String = format!("{:?}", std::thread::current().id())
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .collect();
-    let base = file_name.to_string_lossy();
-    let tmp_path = path.with_file_name(format!("{base}.{nanos}.{tid}.tmp"));
-
-    let write_result = (|| -> Result<()> {
-        let mut tmp = File::create(&tmp_path)
-            .with_context(|| format!("Failed to create temp file {:?}", tmp_path))?;
-        tmp.write_all(content.as_bytes())
-            .with_context(|| format!("Failed to write temp file {:?}", tmp_path))?;
-        let _ = tmp.sync_all();
-        std::fs::rename(&tmp_path, path)
-            .with_context(|| format!("Failed to rename {:?} to {:?}", tmp_path, path))?;
-        Ok(())
-    })();
-
-    if write_result.is_err() {
-        let _ = std::fs::remove_file(&tmp_path);
-    }
-    write_result
-}
-
 use crate::models::{NewsItem, NewsResponse};
-use crate::util::emit_json;
+use crate::util::{emit_json, write_json_atomic};
 
 const ARCH_NEWS_URL: &str = "https://archlinux.org/feeds/news/";
 const MAX_RSS_BYTES: u64 = 512 * 1024;
@@ -104,8 +69,51 @@ pub struct PacnewDismissal {
 
 pub fn fetch_news(days: u32) -> Result<()> {
     let days = days.min(365);
-    let items = fetch_news_items(days)?;
-    emit_json(&NewsResponse { items })
+    match fetch_news_items(days) {
+        Ok(items) => {
+            let response = NewsResponse {
+                items,
+                stale: false,
+            };
+            if let Ok(path) = news_cache_path() {
+                let _ = write_json_atomic(&path, &response);
+            }
+            emit_json(&response)
+        }
+        Err(e) => match news_cache_path().ok().and_then(read_news_cache) {
+            Some(items) => emit_json(&NewsResponse {
+                items: filter_items_within_days(items, days),
+                stale: true,
+            }),
+            None => Err(e),
+        },
+    }
+}
+
+/// Keep only items published within the last `days`. The cache is written from
+/// whatever lookback the last live fetch used, so an offline response is
+/// re-filtered to honour the caller's requested window.
+pub(crate) fn filter_items_within_days(items: Vec<NewsItem>, days: u32) -> Vec<NewsItem> {
+    let cutoff = Utc::now() - chrono::Duration::days(i64::from(days));
+    items
+        .into_iter()
+        .filter(|item| {
+            chrono::DateTime::parse_from_rfc3339(&item.published)
+                .map(|d| d.with_timezone(&Utc) >= cutoff)
+                .unwrap_or(true)
+        })
+        .collect()
+}
+
+fn news_cache_path() -> Result<PathBuf> {
+    let home = std::env::var("HOME").context("HOME environment variable is not set")?;
+    Ok(PathBuf::from(home).join(".config/cockpit-pacman/news-cache.json"))
+}
+
+fn read_news_cache(path: PathBuf) -> Option<Vec<NewsItem>> {
+    let content = std::fs::read_to_string(&path).ok()?;
+    let cached: NewsResponse = serde_json::from_str(&content).ok()?;
+    Some(cached.items)
 }
 
 fn fetch_news_items(days: u32) -> Result<Vec<NewsItem>> {

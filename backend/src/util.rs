@@ -1,8 +1,10 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::Serialize;
 use std::cmp::Ordering;
+use std::fs::File;
 use std::io::{self, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::path::Path;
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
@@ -99,6 +101,110 @@ pub fn emit_event(event: &StreamEvent) {
 pub fn emit_json<T: Serialize>(response: &T) -> Result<()> {
     println!("{}", serde_json::to_string(response)?);
     Ok(())
+}
+
+/// Serialize `state` to `path` via a temp file and atomic rename, so a crash
+/// mid-write can't leave a partially-written file. Shared by state and cache
+/// writers across handlers.
+pub fn write_json_atomic<T: Serialize>(path: &Path, state: &T) -> Result<()> {
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("Invalid state path: {:?}", path))?;
+
+    let content = serde_json::to_string_pretty(state).context("Failed to serialize state")?;
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_nanos();
+    let tid: String = format!("{:?}", std::thread::current().id())
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    let base = file_name.to_string_lossy();
+    let tmp_path = path.with_file_name(format!("{base}.{nanos}.{tid}.tmp"));
+
+    let write_result = (|| -> Result<()> {
+        let mut tmp = File::create(&tmp_path)
+            .with_context(|| format!("Failed to create temp file {:?}", tmp_path))?;
+        tmp.write_all(content.as_bytes())
+            .with_context(|| format!("Failed to write temp file {:?}", tmp_path))?;
+        let _ = tmp.sync_all();
+        std::fs::rename(&tmp_path, path)
+            .with_context(|| format!("Failed to rename {:?} to {:?}", tmp_path, path))?;
+        Ok(())
+    })();
+
+    if write_result.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+    write_result
+}
+
+/// Classify an error message into a frontend ErrorCode by keyword. Returns None
+/// when nothing matches confidently. Mirrors parseErrorCode in api.ts so both
+/// ends agree on the same buckets.
+pub fn classify_message(message: &str) -> Option<&'static str> {
+    let lower = message.to_lowercase();
+    if lower.contains("timed out") || lower.contains("timeout") {
+        return Some("timeout");
+    }
+    if lower.contains("unable to lock database") || lower.contains("database is locked") {
+        return Some("database_locked");
+    }
+    if lower.contains("network")
+        || lower.contains("connection")
+        || lower.contains("could not connect")
+        || lower.contains("connection refused")
+        || lower.contains("resolve host")
+        || lower.contains("host not found")
+        || lower.contains("name resolution")
+        || lower.contains("failed retrieving file")
+        || lower.contains("download library error")
+        || lower.contains("temporary failure in name resolution")
+    {
+        return Some("network_error");
+    }
+    None
+}
+
+/// Classify an anyhow error chain into a frontend ErrorCode. Inspects ureq and
+/// io errors in the chain first (authoritative), then falls back to keyword
+/// matching on the rendered message.
+pub fn classify_error(err: &anyhow::Error) -> Option<&'static str> {
+    for cause in err.chain() {
+        if let Some(ureq_err) = cause.downcast_ref::<ureq::Error>() {
+            return Some(classify_ureq(ureq_err));
+        }
+        if let Some(io_err) = cause.downcast_ref::<io::Error>()
+            && let Some(code) = classify_io(io_err.kind())
+        {
+            return Some(code);
+        }
+    }
+    classify_message(&format!("{:#}", err))
+}
+
+fn classify_ureq(err: &ureq::Error) -> &'static str {
+    use ureq::Error;
+    match err {
+        Error::Timeout(_) => "timeout",
+        Error::HostNotFound | Error::ConnectionFailed => "network_error",
+        Error::Io(io_err) => classify_io(io_err.kind()).unwrap_or("network_error"),
+        Error::StatusCode(404) => "not_found",
+        Error::Tls(_) => "network_error",
+        _ => "network_error",
+    }
+}
+
+fn classify_io(kind: io::ErrorKind) -> Option<&'static str> {
+    use io::ErrorKind::*;
+    match kind {
+        TimedOut => Some("timeout"),
+        ConnectionRefused | ConnectionReset | ConnectionAborted | NotConnected
+        | HostUnreachable | NetworkUnreachable | AddrNotAvailable => Some("network_error"),
+        _ => None,
+    }
 }
 
 pub fn sort_with_direction<T, F>(items: &mut [T], ascending: bool, cmp_fn: F)

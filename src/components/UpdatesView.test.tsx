@@ -33,6 +33,7 @@ vi.mock("../api", async () => {
     getCacheInfo: vi.fn(),
     getKeyringStatus: vi.fn(),
     fetchNews: vi.fn(),
+    checkSecurity: vi.fn(),
     getNewsReadState: vi.fn(),
     markNewsRead: vi.fn(),
     getServicesDismissal: vi.fn(),
@@ -58,6 +59,7 @@ const mockListOrphans = vi.mocked(api.listOrphans);
 const mockGetCacheInfo = vi.mocked(api.getCacheInfo);
 const mockGetKeyringStatus = vi.mocked(api.getKeyringStatus);
 const mockFetchNews = vi.mocked(api.fetchNews);
+const mockCheckSecurity = vi.mocked(api.checkSecurity);
 const mockCheckLock = vi.mocked(api.checkLock);
 const mockRemoveStaleLock = vi.mocked(api.removeStaleLock);
 const mockAddIgnoredPackage = vi.mocked(api.addIgnoredPackage);
@@ -100,6 +102,7 @@ describe("UpdatesView", () => {
       warnings: [],
     });
     mockFetchNews.mockResolvedValue(mockNewsResponseEmpty);
+    mockCheckSecurity.mockResolvedValue({ advisories: [] });
     mockCheckLock.mockResolvedValue({ locked: true, stale: true, lock_path: "/var/lib/pacman/db.lck" });
     mockRemoveStaleLock.mockResolvedValue({ removed: true });
     mockAddIgnoredPackage.mockResolvedValue({ success: true, package: "linux", message: "Package ignored" });
@@ -687,10 +690,10 @@ describe("UpdatesView", () => {
       render(<UpdatesView />);
 
       await waitFor(() => {
-        expect(screen.getByText(/failed to retrieve some files/)).toBeInTheDocument();
+        expect(screen.getByText("Can't reach Arch Linux services")).toBeInTheDocument();
       });
       expect(screen.getByText("Arch Linux status page")).toBeInTheDocument();
-      expect(screen.getByText(/Check your network connection/)).toBeInTheDocument();
+      expect(screen.getByText(/Check the host's network connection/)).toBeInTheDocument();
     });
 
     it("does not show status page link for non-network errors", async () => {
@@ -1161,7 +1164,40 @@ describe("UpdatesView", () => {
       });
       expect(screen.queryByText("Read more on archlinux.org")).not.toBeInTheDocument();
       expect(screen.getByText("Unable to fetch Arch Linux news")).toBeInTheDocument();
-      expect(screen.getByText(/Check your network connection/)).toBeInTheDocument();
+      expect(screen.getByText(/Check the host's network connection/)).toBeInTheDocument();
+    });
+
+    it("shows the cached-news banner when news is served stale", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
+      mockFetchNews.mockResolvedValue({ ...mockNewsResponse, stale: true });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("Showing cached news")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("Unable to fetch Arch Linux news")).not.toBeInTheDocument();
+    });
+
+    it("shows the cached-advisories banner when security data is served stale", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
+      mockCheckSecurity.mockResolvedValue({ advisories: [], stale: true });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("Showing cached security advisories")).toBeInTheDocument();
+      });
+    });
+
+    it("shows the security-unavailable banner when the check fails with no cache", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
+      mockCheckSecurity.mockRejectedValue(new Error("could not resolve host"));
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("Security status unavailable")).toBeInTheDocument();
+      });
+      // Must not read as a clean "0 vulnerabilities".
+      expect(screen.getByText(/not a clean bill of health/)).toBeInTheDocument();
     });
 
     it("dismissing news error alert removes it", async () => {

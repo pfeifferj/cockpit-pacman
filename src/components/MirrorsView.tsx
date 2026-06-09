@@ -76,9 +76,13 @@ import {
   deleteMirrorBackup,
   formatNumber,
   formatSize,
+  BackendError,
 } from "../api";
+import type { ErrorCode } from "../api";
+import { isNetworkError } from "../offline";
 import { TimeAgo } from "./TimeAgo";
 import { sanitizeErrorMessage } from "../utils";
+import { ARCH_STATUS_URL } from "../constants";
 
 type ViewState = "loading" | "ready" | "saving" | "success" | "error";
 
@@ -116,12 +120,25 @@ function getCachedStatus(): MirrorStatusResponse | null {
       return null;
     }
     if (Date.now() - parsed.timestamp > STATUS_CACHE_TTL_MS) {
-      window.localStorage.removeItem(STATUS_CACHE_KEY);
+      // Keep the entry so it can be served as a stale fallback when a live
+      // fetch fails (offline), but treat it as a miss for the fresh path.
       return null;
     }
     return parsed.data;
   } catch {
     window.localStorage.removeItem(STATUS_CACHE_KEY);
+    return null;
+  }
+}
+
+function getStaleCachedStatus(): MirrorStatusResponse | null {
+  try {
+    const cached = window.localStorage.getItem(STATUS_CACHE_KEY);
+    if (!cached) return null;
+    const parsed: unknown = JSON.parse(cached);
+    if (!isValidCachedStatus(parsed)) return null;
+    return parsed.data;
+  } catch {
     return null;
   }
 }
@@ -176,6 +193,7 @@ export const MirrorsView: React.FC = () => {
   const [mirrorData, setMirrorData] = useState<MirrorListResponse | null>(null);
   const [mirrors, setMirrors] = useState<MirrorWithStatus[]>([]);
   const [statusData, setStatusData] = useState<MirrorStatusResponse | null>(null);
+  const [statusStale, setStatusStale] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   useBackdropClose(confirmModalOpen, () => setConfirmModalOpen(false));
@@ -193,6 +211,7 @@ export const MirrorsView: React.FC = () => {
   const [refreshProtocol, setRefreshProtocol] = useState<RefreshMirrorsProtocol>("https");
   const [refreshSortBy, setRefreshSortBy] = useState<RefreshMirrorsSortBy>("score");
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [refreshErrorCode, setRefreshErrorCode] = useState<ErrorCode | undefined>(undefined);
   useBackdropClose(refreshModalOpen, () => { if (!refreshLoading) setRefreshModalOpen(false); });
   const [backups, setBackups] = useState<MirrorBackup[]>([]);
   const [backupsExpanded, setBackupsExpanded] = useState(false);
@@ -267,9 +286,17 @@ export const MirrorsView: React.FC = () => {
       const response = await fetchMirrorStatus();
       setCachedStatus(response);
       setStatusData(response);
+      setStatusStale(false);
       setMirrors(prev => applyStatusToMirrors(prev, response));
     } catch (ex) {
-      setError(ex instanceof Error ? ex.message : String(ex));
+      const stale = getStaleCachedStatus();
+      if (stale) {
+        setStatusData(stale);
+        setStatusStale(true);
+        setMirrors(prev => applyStatusToMirrors(prev, stale));
+      } else {
+        setError(ex instanceof Error ? ex.message : String(ex));
+      }
     } finally {
       setIsFetchingStatus(false);
     }
@@ -445,6 +472,7 @@ export const MirrorsView: React.FC = () => {
     setRefreshLoading(true);
     setRefreshPreview(null);
     setRefreshError(null);
+    setRefreshErrorCode(undefined);
     try {
       const result = await refreshMirrors({
         count: refreshCount,
@@ -455,6 +483,7 @@ export const MirrorsView: React.FC = () => {
       setRefreshPreview(result);
     } catch (ex) {
       setRefreshError(ex instanceof Error ? ex.message : String(ex));
+      setRefreshErrorCode(ex instanceof BackendError ? ex.code : undefined);
     } finally {
       setRefreshLoading(false);
     }
@@ -990,6 +1019,7 @@ export const MirrorsView: React.FC = () => {
           <div className="pf-v6-u-mt-md" style={{ fontSize: "0.75rem", color: "var(--pf-t--global--text--color--subtle)" }}>
             Mirror status from archlinux.org: {statusData.last_check || "Unknown"}
             {getCacheAge() !== null && ` (cached ${formatCacheAge(getCacheAge()!)})`}
+            {statusStale && " - couldn't refresh, may be outdated"}
           </div>
         )}
       </CardBody>
@@ -1109,7 +1139,19 @@ export const MirrorsView: React.FC = () => {
           </div>
 
           {refreshError && (
-            <Alert variant="danger" isInline isPlain title={refreshError} className="pf-v6-u-mt-md" />
+            isNetworkError(null, refreshErrorCode) ? (
+              <Alert
+                variant="warning"
+                isInline
+                title="Can't reach the Arch mirror status service"
+                className="pf-v6-u-mt-md"
+              >
+                The host may be offline. Check its network connection or the{" "}
+                <a href={ARCH_STATUS_URL} target="_blank" rel="noopener noreferrer">Arch Linux status page</a>.
+              </Alert>
+            ) : (
+              <Alert variant="danger" isInline isPlain title={refreshError} className="pf-v6-u-mt-md" />
+            )
           )}
 
           {refreshPreview && refreshDiff && (

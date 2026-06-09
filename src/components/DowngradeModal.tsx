@@ -33,7 +33,11 @@ import {
   listArchiveVersions,
   downgradeFromArchive,
   formatSize,
+  BackendError,
 } from "../api";
+import type { ErrorCode } from "../api";
+import { isNetworkError } from "../offline";
+import { NetworkErrorState } from "./NetworkErrorState";
 import { sanitizeErrorMessage } from "../utils";
 
 type ModalState = "loading" | "select" | "confirm" | "downgrading" | "success" | "error";
@@ -58,6 +62,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
   const [versions, setVersions] = useState<CachedVersion[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<CachedVersion | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
   const [log, setLog] = useState("");
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
@@ -73,6 +78,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
     const loadId = ++loadIdRef.current;
     setState("loading");
     setError(null);
+    setErrorCode(undefined);
     try {
       const response = src === "archive"
         ? await listArchiveVersions(packageName)
@@ -84,6 +90,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
       if (loadId !== loadIdRef.current) return;
       setState("error");
       setError(ex instanceof Error ? ex.message : String(ex));
+      setErrorCode(ex instanceof BackendError ? ex.code : undefined);
     }
   }, [packageName]);
 
@@ -139,9 +146,10 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
         setState("success");
         cancelRef.current = null;
       },
-      onError: (err: string) => {
+      onError: (err: string, code?: ErrorCode) => {
         setState("error");
         setError(err);
+        setErrorCode(code);
         cancelRef.current = null;
       },
     };
@@ -247,6 +255,15 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
         );
 
       case "error":
+        if (isNetworkError(null, errorCode)) {
+          return (
+            <NetworkErrorState
+              resource={source === "archive" ? "archive versions" : "package versions"}
+              onRetry={() => loadVersions(source)}
+              headingLevel="h3"
+            />
+          );
+        }
         return (
           <Alert variant="danger" title="Error">
             {sanitizeErrorMessage(error)}

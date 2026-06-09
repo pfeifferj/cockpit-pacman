@@ -67,6 +67,31 @@ describe("DowngradeModal", () => {
     expect(screen.getByText("5.1.016-1")).toBeInTheDocument();
   });
 
+  it("shows the offline network error state when the archive load fails with a network code", async () => {
+    mockListArchiveVersions.mockRejectedValue(
+      new api.BackendError("could not resolve host", "network_error")
+    );
+
+    render(
+      <DowngradeModal
+        packageName="bash"
+        currentVersion="5.2.015-1"
+        isOpen={true}
+        onClose={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(mockListDowngrades).toHaveBeenCalled());
+    await act(async () => {
+      fireEvent.click(screen.getByText("Archive"));
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText("Can't reach Arch Linux services")).toBeInTheDocument()
+    );
+    expect(screen.getByRole("link", { name: "Arch Linux status page" })).toBeInTheDocument();
+  });
+
   it("switching to the Archive tab fetches archive versions", async () => {
     render(
       <DowngradeModal

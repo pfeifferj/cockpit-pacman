@@ -20,6 +20,8 @@ import {
   listArchiveVersions,
   downgradeFromArchive,
   StreamEvent,
+  BackendError,
+  isNetworkErrorCode,
 } from "./api";
 
 describe("formatSize", () => {
@@ -146,6 +148,47 @@ describe("listInstalled", () => {
 
     await expect(listInstalled()).rejects.toThrow("Permission denied");
   });
+
+  it("parses a structured error envelope into a coded BackendError", async () => {
+    mockSpawn.mockReturnValue(
+      createMockSpawnPromise(
+        JSON.stringify({
+          code: "network_error",
+          message: "could not resolve host",
+          details: "ureq: host not found",
+        })
+      )
+    );
+
+    await expect(listInstalled()).rejects.toMatchObject({
+      name: "BackendError",
+      code: "network_error",
+      message: "could not resolve host",
+    });
+  });
+
+  it("does not treat a success response with an unknown code value as an error", async () => {
+    mockSpawn.mockReturnValue(
+      createMockSpawnPromise(
+        JSON.stringify({ code: "ok", message: "done", packages: [], total: 0 })
+      )
+    );
+
+    await expect(listInstalled()).resolves.toMatchObject({ total: 0 });
+  });
+});
+
+describe("isNetworkErrorCode", () => {
+  it("treats network_error and timeout as connectivity failures", () => {
+    expect(isNetworkErrorCode("network_error")).toBe(true);
+    expect(isNetworkErrorCode("timeout")).toBe(true);
+  });
+
+  it("treats other codes as non-connectivity", () => {
+    expect(isNetworkErrorCode("database_locked")).toBe(false);
+    expect(isNetworkErrorCode("internal_error")).toBe(false);
+    expect(BackendError.name).toBe("BackendError");
+  });
 });
 
 describe("checkUpdates", () => {
@@ -271,7 +314,28 @@ describe("runUpgrade", () => {
     };
     mockProc._emit(JSON.stringify(completeEvent) + "\n");
 
-    expect(callbacks.onError).toHaveBeenCalledWith("Package conflict");
+    expect(callbacks.onError).toHaveBeenCalledWith("Package conflict", "internal_error");
+    expect(callbacks.onComplete).not.toHaveBeenCalled();
+  });
+
+  it("treats a structured error envelope on stdout as a terminal error with its code", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+    };
+
+    runUpgrade(callbacks);
+
+    // A handler that returns Err makes main.rs print this envelope (no `type`)
+    // instead of a complete event.
+    mockProc._emit(
+      JSON.stringify({ code: "network_error", message: "failed retrieving file" }) + "\n"
+    );
+
+    expect(callbacks.onError).toHaveBeenCalledWith("failed retrieving file", "network_error");
     expect(callbacks.onComplete).not.toHaveBeenCalled();
   });
 
@@ -396,7 +460,7 @@ describe("runUpgrade", () => {
 
     mockProc._fail({ message: "Permission denied" });
 
-    expect(callbacks.onError).toHaveBeenCalledWith("Permission denied");
+    expect(callbacks.onError).toHaveBeenCalledWith("Permission denied", "permission_denied");
     expect(callbacks.onComplete).not.toHaveBeenCalled();
   });
 
@@ -468,7 +532,8 @@ describe("runUpgrade", () => {
     mockProc._complete();
 
     expect(callbacks.onError).toHaveBeenCalledWith(
-      "Backend process ended without sending completion status"
+      "Backend process ended without sending completion status",
+      "internal_error"
     );
     expect(callbacks.onComplete).not.toHaveBeenCalled();
   });

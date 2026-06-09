@@ -185,6 +185,22 @@ export type ErrorCode =
   | "permission_denied"
   | "internal_error";
 
+const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<ErrorCode>([
+  "timeout",
+  "database_locked",
+  "network_error",
+  "transaction_failed",
+  "validation_error",
+  "cancelled",
+  "not_found",
+  "permission_denied",
+  "internal_error",
+]);
+
+export function isNetworkErrorCode(code: ErrorCode): boolean {
+  return code === "network_error" || code === "timeout";
+}
+
 export interface StructuredError {
   code: ErrorCode;
   message: string;
@@ -216,7 +232,16 @@ function parseErrorCode(message: string): ErrorCode {
   if (lower.includes("unable to lock database") || lower.includes("database is locked")) {
     return "database_locked";
   }
-  if (lower.includes("connection") || lower.includes("network") || lower.includes("resolve host")) {
+  if (
+    lower.includes("connection") ||
+    lower.includes("network") ||
+    lower.includes("could not connect") ||
+    lower.includes("resolve host") ||
+    lower.includes("host not found") ||
+    lower.includes("name resolution") ||
+    lower.includes("failed retrieving file") ||
+    lower.includes("download library error")
+  ) {
     return "network_error";
   }
   if (lower.includes("transaction") || lower.includes("commit")) {
@@ -285,7 +310,13 @@ async function runBackend<T>(command: string, args: string[] = [], options?: { s
 
   try {
     const parsed = JSON.parse(output);
-    if (parsed && typeof parsed === "object" && "code" in parsed && "message" in parsed) {
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "message" in parsed &&
+      typeof (parsed as Record<string, unknown>).code === "string" &&
+      KNOWN_ERROR_CODES.has((parsed as Record<string, unknown>).code as string)
+    ) {
       throw BackendError.fromStructured(parsed as StructuredError);
     }
     return parsed as T;
@@ -351,6 +382,8 @@ export interface PackageSecurityAdvisory {
 
 export interface SecurityResponse {
   advisories: PackageSecurityAdvisory[];
+  /** True when served from the on-disk cache because the live fetch failed. */
+  stale?: boolean;
 }
 
 export interface SecurityInfoAdvisory {
@@ -471,8 +504,8 @@ export interface UpgradeCallbacks {
   onData?: (data: string) => void;
   /** Called when the operation completes successfully */
   onComplete: () => void;
-  /** Called when the operation fails with an error message */
-  onError: (error: string) => void;
+  /** Called when the operation fails with an error message and a classified code */
+  onError: (error: string, code?: ErrorCode) => void;
   /** Timeout in seconds for the operation (default: 300) */
   timeout?: number;
   /** Superuser mode for cockpit.spawn (default: "require") */
@@ -502,7 +535,7 @@ function runStreamingBackend(
   let buffer = "";
   let completionHandled = false;
 
-  const markComplete = (success: boolean, message?: string) => {
+  const markComplete = (success: boolean, message?: string, code?: ErrorCode) => {
     // Guard against duplicate callbacks from concurrent paths (stream, then, catch)
     // Set flag immediately before any other work to prevent re-entry
     if (completionHandled) return;
@@ -513,11 +546,28 @@ function runStreamingBackend(
       if (success) {
         callbacks.onComplete();
       } else {
-        callbacks.onError(message || "Operation failed");
+        const msg = message || "Operation failed";
+        callbacks.onError(msg, code ?? parseErrorCode(msg));
       }
     } catch (callbackError) {
       console.error("Callback error in markComplete:", callbackError);
     }
+  };
+
+  // A handler that returns Err (rather than emitting a complete event) makes
+  // main.rs print a structured error envelope on stdout. It has a known code
+  // and message but no StreamEvent `type`; treat it as a terminal error so the
+  // backend's classification is not lost as an unknown event.
+  const asErrorEnvelope = (parsed: Record<string, unknown>): { code: ErrorCode; message: string } | null => {
+    if (
+      !("type" in parsed) &&
+      typeof parsed.message === "string" &&
+      typeof parsed.code === "string" &&
+      KNOWN_ERROR_CODES.has(parsed.code)
+    ) {
+      return { code: parsed.code as ErrorCode, message: parsed.message };
+    }
+    return null;
   };
 
   const proc = cockpit.spawn(
@@ -536,6 +586,12 @@ function runStreamingBackend(
         const parsed = JSON.parse(line) as Record<string, unknown>;
 
         if (callbacks.onRawEvent?.(parsed)) continue;
+
+        const envelope = asErrorEnvelope(parsed);
+        if (envelope) {
+          markComplete(false, envelope.message, envelope.code);
+          continue;
+        }
 
         const event = parsed as unknown as StreamEvent;
         callbacks.onEvent?.(event);
@@ -568,7 +624,13 @@ function runStreamingBackend(
     // Process any remaining buffer
     if (buffer.trim()) {
       try {
-        const event = JSON.parse(buffer) as StreamEvent;
+        const parsed = JSON.parse(buffer) as Record<string, unknown>;
+        const envelope = asErrorEnvelope(parsed);
+        if (envelope) {
+          markComplete(false, envelope.message, envelope.code);
+          return;
+        }
+        const event = parsed as unknown as StreamEvent;
         if (event.type === "complete") {
           markComplete(event.success, event.message);
           return;
@@ -1064,7 +1126,7 @@ export interface MirrorTestCallbacks {
   onTestResult?: (result: MirrorTestResult, current: number, total: number) => void;
   onData?: (data: string) => void;
   onComplete: () => void;
-  onError: (error: string) => void;
+  onError: (error: string, code?: ErrorCode) => void;
   timeout?: number;
 }
 
@@ -1215,6 +1277,8 @@ export interface NewsItem {
 
 export interface NewsResponse {
   items: NewsItem[];
+  /** True when served from the on-disk cache because the live fetch failed. */
+  stale?: boolean;
 }
 
 export async function fetchNews(days: number = 30): Promise<NewsResponse> {

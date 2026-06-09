@@ -101,8 +101,10 @@ import {
   getSignoffList,
   checkLock,
   removeStaleLock,
+  BackendError,
 } from "../api";
-import type { KeyringCredentials } from "../api";
+import type { KeyringCredentials, ErrorCode } from "../api";
+import { NetworkErrorState } from "./NetworkErrorState";
 
 import { sanitizeUrl } from "../utils";
 import { TimeAgo } from "./TimeAgo";
@@ -169,12 +171,13 @@ const SystemOverviewCard: React.FC<{
   updates: UpdateInfo[];
   securityCount: number;
   securityLoading: boolean;
+  securityUnavailable: boolean;
   orphanCount: number | null;
   cacheSize: number | null;
   keyringStatus: KeyringStatusResponse | null;
   summaryLoading: boolean;
   pendingSignoffs?: number | null;
-}> = ({ updates, securityCount, securityLoading, orphanCount, cacheSize, keyringStatus, summaryLoading, pendingSignoffs }) => {
+}> = ({ updates, securityCount, securityLoading, securityUnavailable, orphanCount, cacheSize, keyringStatus, summaryLoading, pendingSignoffs }) => {
   const { onViewOrphans, onViewCache, onViewKeyring, onViewSignoffs } = useNavigation();
   return (
   <Card className="pf-v6-u-mb-md">
@@ -191,8 +194,8 @@ const SystemOverviewCard: React.FC<{
         <FlexItem>
           <StatBox
             label="Security"
-            value={securityLoading ? "-" : formatNumber(securityCount)}
-            color={securityCount > 0 ? "danger" : "default"}
+            value={securityLoading || securityUnavailable ? "-" : formatNumber(securityCount)}
+            color={!securityUnavailable && securityCount > 0 ? "danger" : "default"}
             isLoading={securityLoading}
           />
         </FlexItem>
@@ -336,6 +339,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [updates, setUpdates] = useState<UpdateInfo[]>([]);
   const [log, setLog] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
   const [warnings, setWarnings] = useState<string[]>([]);
   const cancelRef = useRef<(() => void) | null>(null);
   const logContainerRef = useAutoScrollLog(log);
@@ -381,8 +385,11 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [securityMap, setSecurityMap] = useState<Map<string, PackageSecurityAdvisory[]>>(new Map());
   const [securityLoading, setSecurityLoading] = useState(true);
+  const [securityStale, setSecurityStale] = useState(false);
+  const [securityUnavailable, setSecurityUnavailable] = useState(false);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [newsError, setNewsError] = useState(false);
+  const [newsStale, setNewsStale] = useState(false);
   const [dismissedNews, setDismissedNews] = useState<Set<string>>(new Set<string>());
 
   useEffect(() => {
@@ -555,8 +562,12 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         map.set(advisory.package, existing);
       }
       setSecurityMap(map);
+      setSecurityStale(response.stale ?? false);
+      setSecurityUnavailable(false);
     } catch {
       setSecurityMap(new Map());
+      setSecurityStale(false);
+      setSecurityUnavailable(true);
     } finally {
       setSecurityLoading(false);
     }
@@ -565,6 +576,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const loadUpdates = useCallback(async () => {
     setState("checking");
     setError(null);
+    setErrorCode(undefined);
     setWarnings([]);
     publishPageStatus({
       type: null,
@@ -594,6 +606,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     } catch (ex) {
       setState("error");
       setError(ex instanceof Error ? ex.message : String(ex));
+      setErrorCode(ex instanceof BackendError ? ex.code : undefined);
       publishPageStatus({
         type: "error",
         title: "Failed to check for package updates",
@@ -608,9 +621,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
       }),
       onComplete: () => loadUpdates(),
-      onError: (err) => {
+      onError: (err, code) => {
         setState("error");
         setError(err);
+        setErrorCode(code);
       },
     });
     return () => cancel();
@@ -670,13 +684,13 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
   useEffect(() => {
     let cancelled = false;
-    type NewsResult = { ok: true; items: NewsItem[] } | { ok: false };
+    type NewsResult = { ok: true; items: NewsItem[]; stale: boolean } | { ok: false };
     Promise.all([
       listOrphans().catch(() => null),
       getCacheInfo().catch(() => null),
       getKeyringStatus().catch(() => null),
       fetchNews(NEWS_LOOKBACK_DAYS)
-        .then((r): NewsResult => ({ ok: true, items: r.items }))
+        .then((r): NewsResult => ({ ok: true, items: r.items, stale: r.stale ?? false }))
         .catch((): NewsResult => ({ ok: false })),
     ]).then(([orphans, cache, keyring, newsResult]) => {
       if (cancelled) return;
@@ -685,9 +699,11 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       setKeyringStatus(keyring);
       if (newsResult.ok) {
         setNewsError(false);
+        setNewsStale(newsResult.stale);
         setNewsItems(newsResult.items);
       } else {
         setNewsError(true);
+        setNewsStale(false);
         setNewsItems([]);
       }
       setSummaryLoading(false);
@@ -762,9 +778,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
       }),
       onComplete: () => loadUpdates(),
-      onError: (err) => {
+      onError: (err, code) => {
         setState("error");
         setError(err);
+        setErrorCode(code);
       },
     });
     cancelRef.current = cancel;
@@ -774,6 +791,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     // Run preflight check first
     setPreflightLoading(true);
     setError(null);
+    setErrorCode(undefined);
     try {
       const preflight = await preflightUpgrade(ignoredPackages);
       setPreflightData(preflight);
@@ -809,6 +827,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     } catch (ex) {
       setPreflightLoading(false);
       setError(ex instanceof Error ? ex.message : String(ex));
+      setErrorCode(ex instanceof BackendError ? ex.code : undefined);
       setState("error");
     }
   };
@@ -883,9 +902,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
           }
         });
       },
-      onError: (err) => {
+      onError: (err, code) => {
         setState("error");
         setError(err);
+        setErrorCode(code);
         cancelRef.current = null;
       },
     }, ignoredPackages);
@@ -943,9 +963,40 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       actionClose={<AlertActionCloseButton onClose={() => setNewsError(false)} />}
       className="pf-v6-u-mb-md"
     >
-      Could not retrieve the latest news from archlinux.org. Check your network connection or visit the{" "}
+      Could not retrieve the latest news from archlinux.org. Check the host&apos;s network connection or visit the{" "}
       <a href={ARCH_STATUS_URL} target="_blank" rel="noopener noreferrer">Arch Linux status page</a>
       {" "}for service updates.
+    </Alert>
+  ) : newsStale ? (
+    <Alert
+      variant="info"
+      isInline
+      title="Showing cached news"
+      className="pf-v6-u-mb-md"
+    >
+      Couldn&apos;t reach archlinux.org. The news below is from the last successful fetch.
+    </Alert>
+  ) : null;
+
+  const securityStaleAlert = securityStale ? (
+    <Alert
+      variant="warning"
+      isInline
+      title="Showing cached security advisories"
+      className="pf-v6-u-mb-md"
+    >
+      Couldn&apos;t reach the Arch security tracker. Advisories below are from the last successful
+      fetch and may not reflect recently disclosed or fixed issues.
+    </Alert>
+  ) : securityUnavailable ? (
+    <Alert
+      variant="warning"
+      isInline
+      title="Security status unavailable"
+      className="pf-v6-u-mb-md"
+    >
+      Couldn&apos;t reach the Arch security tracker and no cached data is available, so known
+      vulnerabilities can&apos;t be checked. This is not a clean bill of health.
     </Alert>
   ) : null;
 
@@ -1132,35 +1183,42 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
   if (state === "error") {
     const isLockError = error ? /unable to lock database|failed to initialize transaction/i.test(error) : false;
-    const isNetworkError = error ? /failed to retrieve|unable to connect|could not resolve|timed\s+out|timeout|dns|connection refused/i.test(error) : false;
+    // Only a genuine connectivity failure shows the offline state here. A bare
+    // operation timeout (the sync/upgrade exceeded its budget) is not an
+    // unreachable-host condition, so it keeps its specific message.
+    const networkError = !isLockError && (
+      errorCode === "network_error" ||
+      (error ? /failed to retrieve|unable to connect|could not resolve|dns|connection refused/i.test(error) : false)
+    );
     return (
       <Card>
         <CardBody>
-          <EmptyState
-            headingLevel="h2"
-            icon={ExclamationCircleIcon}
-            titleText={isLockError ? "Database is locked" : "Error checking for updates"}
-            status={isLockError ? "warning" : "danger"}
-          >
-            <EmptyStateBody>
-              {isLockError
-                ? <LockErrorBody onRetry={loadUpdates} />
-                : error}
-              {isNetworkError && !isLockError && (
-                <Content component={ContentVariants.p} className="pf-v6-u-mt-sm">
-                  Check your network connection or visit the{" "}
-                  <a href={ARCH_STATUS_URL} target="_blank" rel="noopener noreferrer">Arch Linux status page</a>
-                  {" "}for service updates.
-                </Content>
-              )}
-            </EmptyStateBody>
-            <EmptyStateFooter>
-              <EmptyStateActions>
-                <Button variant="primary" onClick={loadUpdates}>Retry</Button>
-                <Button variant="link" onClick={() => setState("uptodate")}>Dismiss</Button>
-              </EmptyStateActions>
-            </EmptyStateFooter>
-          </EmptyState>
+          {networkError ? (
+            <NetworkErrorState
+              resource="updates"
+              onRetry={loadUpdates}
+              onDismiss={() => setState("uptodate")}
+            />
+          ) : (
+            <EmptyState
+              headingLevel="h2"
+              icon={ExclamationCircleIcon}
+              titleText={isLockError ? "Database is locked" : "Error checking for updates"}
+              status={isLockError ? "warning" : "danger"}
+            >
+              <EmptyStateBody>
+                {isLockError
+                  ? <LockErrorBody onRetry={loadUpdates} />
+                  : error}
+              </EmptyStateBody>
+              <EmptyStateFooter>
+                <EmptyStateActions>
+                  <Button variant="primary" onClick={loadUpdates}>Retry</Button>
+                  <Button variant="link" onClick={() => setState("uptodate")}>Dismiss</Button>
+                </EmptyStateActions>
+              </EmptyStateFooter>
+            </EmptyState>
+          )}
         </CardBody>
       </Card>
     );
@@ -1330,6 +1388,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
           </Alert>
         )}
         {newsErrorAlert}
+        {securityStaleAlert}
         {newsAlerts}
         {keyringStatus && !keyringStatus.master_key_initialized && (
           <Alert variant="warning" title="Keyring not initialized" isInline className="pf-v6-u-mb-md">
@@ -1344,6 +1403,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
           updates={updates}
           securityCount={securityUpdateCount}
           securityLoading={securityLoading}
+          securityUnavailable={securityUnavailable}
           orphanCount={orphanCount}
           cacheSize={cacheSize}
           keyringStatus={keyringStatus}
@@ -1421,6 +1481,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         </Alert>
       )}
       {newsErrorAlert}
+      {securityStaleAlert}
       {newsAlerts}
       {keyringStatus && !keyringStatus.master_key_initialized && (
         <Alert variant="warning" title="Keyring not initialized" isInline className="pf-v6-u-mb-md">
@@ -1440,6 +1501,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         updates={updates}
         securityCount={securityUpdateCount}
         securityLoading={securityLoading}
+        securityUnavailable={securityUnavailable}
         orphanCount={orphanCount}
         cacheSize={cacheSize}
         keyringStatus={keyringStatus}

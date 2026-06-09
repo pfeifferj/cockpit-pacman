@@ -45,16 +45,20 @@ import type {
   KeyringCredentials,
   SignoffGroupWithLocal,
   SignoffListResponse,
+  ErrorCode,
 } from "../api";
 import {
   getSignoffList,
   signoffPackage,
   revokeSignoff,
+  BackendError,
 } from "../api";
+import { isNetworkError } from "../offline";
 import { usePackageDetails } from "../hooks/usePackageDetails";
 import { usePagination } from "../hooks/usePagination";
 import { useSortableTable } from "../hooks/useSortableTable";
 import { PackageDetailsModal } from "./PackageDetailsModal";
+import { NetworkErrorState } from "./NetworkErrorState";
 import { sanitizeErrorMessage } from "../utils";
 import { PER_PAGE_OPTIONS } from "../constants";
 
@@ -77,6 +81,7 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<SignoffListResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<Set<SignoffFilter>>(new Set(["installed"]));
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
@@ -95,18 +100,24 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
     defaultDirection: "asc",
   });
 
+  const reportError = useCallback((err: unknown) => {
+    setError(sanitizeErrorMessage(err instanceof Error ? err.message : null));
+    setErrorCode(err instanceof BackendError ? err.code : undefined);
+  }, []);
+
   const fetchSignoffs = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setErrorCode(undefined);
     try {
       const result = await getSignoffList(credentials);
       setData(result);
     } catch (err) {
-      setError(sanitizeErrorMessage(err instanceof Error ? err.message : null));
+      reportError(err);
     } finally {
       setLoading(false);
     }
-  }, [credentials]);
+  }, [credentials, reportError]);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,11 +129,11 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(sanitizeErrorMessage(err instanceof Error ? err.message : null));
+        reportError(err);
         setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [credentials]);
+  }, [credentials, reportError]);
 
   const handleSignoff = async (group: SignoffGroupWithLocal) => {
     setActionInProgress(signoffKey(group));
@@ -138,7 +149,7 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
       }
       await fetchSignoffs();
     } catch (err) {
-      setError(sanitizeErrorMessage(err instanceof Error ? err.message : null));
+      reportError(err);
     } finally {
       setActionInProgress(null);
     }
@@ -158,7 +169,7 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
       }
       await fetchSignoffs();
     } catch (err) {
-      setError(sanitizeErrorMessage(err instanceof Error ? err.message : null));
+      reportError(err);
     } finally {
       setActionInProgress(null);
     }
@@ -300,6 +311,16 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
   };
 
   const hasFilters = filters.size > 0 || !!search || repoFilter !== "all";
+
+  if (!data && error && isNetworkError(null, errorCode)) {
+    return (
+      <Card>
+        <CardBody>
+          <NetworkErrorState resource="the signoff list" onRetry={fetchSignoffs} />
+        </CardBody>
+      </Card>
+    );
+  }
 
   return (
     <>

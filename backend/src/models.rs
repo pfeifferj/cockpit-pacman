@@ -12,6 +12,9 @@ pub struct NewsItem {
 #[derive(Serialize, Deserialize)]
 pub struct NewsResponse {
     pub items: Vec<NewsItem>,
+    /// True when served from the on-disk cache because the live fetch failed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stale: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -197,6 +200,16 @@ pub struct PreflightState {
     pub removals: Vec<String>,
     pub providers: Vec<ProviderChoice>,
     pub import_keys: Vec<KeyInfo>,
+}
+
+/// Error envelope emitted to stdout for classified failures, consumed by the
+/// frontend as an authoritative error code (see runBackend in api.ts).
+#[derive(Serialize, Deserialize)]
+pub struct StructuredError {
+    pub code: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -595,6 +608,9 @@ pub struct PackageSecurityAdvisory {
 #[derive(Serialize, Deserialize)]
 pub struct SecurityResponse {
     pub advisories: Vec<PackageSecurityAdvisory>,
+    /// True when served from the on-disk cache because the live fetch failed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stale: bool,
 }
 
 #[derive(Serialize, Deserialize)]

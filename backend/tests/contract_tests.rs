@@ -1517,6 +1517,7 @@ fn news_response_shape() {
             published: "2024-02-01T00:00:00+00:00".into(),
             summary: "Users of grub need to reinstall grub.".into(),
         }],
+        stale: false,
     };
     let v = to_json(&resp);
 
