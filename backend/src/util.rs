@@ -201,9 +201,8 @@ pub fn load_cache_packages(
         .collect()
 }
 
-/// Parse a pacman package filename into (name, version).
-/// Used by find_package_file to locate a specific cached package.
-pub(crate) fn parse_package_filename(filename: &str) -> Option<(String, String)> {
+/// Parse a pacman package filename into (name, version, arch).
+pub(crate) fn parse_package_filename(filename: &str) -> Option<(String, String, String)> {
     let base = filename
         .strip_suffix(".pkg.tar.zst")
         .or_else(|| filename.strip_suffix(".pkg.tar.xz"))
@@ -212,10 +211,10 @@ pub(crate) fn parse_package_filename(filename: &str) -> Option<(String, String)>
     // Split into [arch, pkgrel, pkgver, ...name_parts]
     let parts: Vec<&str> = base.rsplitn(4, '-').collect();
     if parts.len() >= 4 {
-        // parts[0] = arch (ignored), parts[1] = pkgrel, parts[2] = pkgver
+        let arch = parts[0].to_string();
         let version = format!("{}-{}", parts[2], parts[1]);
         let pkg_name = parts[3..].join("-");
-        Some((pkg_name, version))
+        Some((pkg_name, version, arch))
     } else {
         None
     }

@@ -1,3 +1,4 @@
+pub mod archive;
 pub mod cache;
 pub mod config;
 pub mod dependency;
@@ -17,6 +18,7 @@ pub mod security;
 pub mod services;
 pub mod signoff;
 
+pub use archive::{downgrade_from_archive, list_archive_versions};
 pub use cache::{clean_cache, get_cache_info};
 pub use config::{add_ignored, list_ignored, remove_ignored};
 pub use dependency::get_dependency_tree;

@@ -17,6 +17,8 @@ import {
   searchPackages,
   runUpgrade,
   syncDatabase,
+  listArchiveVersions,
+  downgradeFromArchive,
   StreamEvent,
 } from "./api";
 
@@ -561,5 +563,128 @@ describe("syncDatabase", () => {
     mockProc._emit(JSON.stringify(downloadEvent) + "\n");
 
     expect(callbacks.onData).toHaveBeenCalledWith("Downloaded core.db\n");
+  });
+});
+
+describe("listArchiveVersions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("calls the list-archive-versions backend command with the package name", async () => {
+    mockSpawn.mockReturnValue(
+      createMockSpawnPromise(JSON.stringify({ packages: [], total: 0 }))
+    );
+
+    await listArchiveVersions("bash");
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      [
+        "/usr/libexec/cockpit-pacman/cockpit-pacman-backend",
+        "list-archive-versions",
+        "bash",
+      ],
+      expect.any(Object)
+    );
+  });
+
+  it("passes the version query as a fourth argument when provided", async () => {
+    mockSpawn.mockReturnValue(
+      createMockSpawnPromise(JSON.stringify({ packages: [], total: 0 }))
+    );
+
+    await listArchiveVersions("bash", "5.1");
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      [
+        "/usr/libexec/cockpit-pacman/cockpit-pacman-backend",
+        "list-archive-versions",
+        "bash",
+        "5.1",
+      ],
+      expect.any(Object)
+    );
+  });
+
+  it("omits the query argument when blank", async () => {
+    mockSpawn.mockReturnValue(
+      createMockSpawnPromise(JSON.stringify({ packages: [], total: 0 }))
+    );
+
+    await listArchiveVersions("bash", "   ");
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      [
+        "/usr/libexec/cockpit-pacman/cockpit-pacman-backend",
+        "list-archive-versions",
+        "bash",
+      ],
+      expect.any(Object)
+    );
+  });
+
+  it("parses the DowngradeResponse shape", async () => {
+    const response = {
+      packages: [
+        {
+          name: "bash",
+          version: "5.1.016-1",
+          filename: "bash-5.1.016-1-x86_64.pkg.tar.zst",
+          size: 0,
+          installed_version: "5.2.015-1",
+          is_older: true,
+        },
+      ],
+      total: 1,
+    };
+    mockSpawn.mockReturnValue(createMockSpawnPromise(JSON.stringify(response)));
+
+    const result = await listArchiveVersions("bash");
+
+    expect(result.total).toBe(1);
+    expect(result.packages[0].filename).toBe("bash-5.1.016-1-x86_64.pkg.tar.zst");
+    expect(result.packages[0].is_older).toBe(true);
+  });
+});
+
+describe("downgradeFromArchive", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("streams the downgrade-archive command with name and filename", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+    };
+
+    downgradeFromArchive(callbacks, "bash", "bash-5.1.016-1-x86_64.pkg.tar.zst");
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      [
+        "/usr/libexec/cockpit-pacman/cockpit-pacman-backend",
+        "downgrade-archive",
+        "bash",
+        "bash-5.1.016-1-x86_64.pkg.tar.zst",
+      ],
+      { superuser: "require", err: "out" }
+    );
+  });
+
+  it("calls onComplete on a success event", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = { onComplete: vi.fn(), onError: vi.fn() };
+    downgradeFromArchive(callbacks, "bash", "bash-5.1.016-1-x86_64.pkg.tar.zst");
+
+    const completeEvent: StreamEvent = { type: "complete", success: true };
+    mockProc._emit(JSON.stringify(completeEvent) + "\n");
+
+    expect(callbacks.onComplete).toHaveBeenCalledTimes(1);
+    expect(callbacks.onError).not.toHaveBeenCalled();
   });
 });

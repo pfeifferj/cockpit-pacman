@@ -5,9 +5,10 @@ use crate::models::{
 };
 use crate::util::parse_package_filename;
 use crate::validation::{
-    validate_depth, validate_direction, validate_json_payload_size, validate_keep_versions,
-    validate_max_packages, validate_mirror_timeout, validate_mirror_url, validate_package_name,
-    validate_pagination, validate_schedule, validate_search_query, validate_version,
+    validate_archive_filename, validate_depth, validate_direction, validate_json_payload_size,
+    validate_keep_versions, validate_max_packages, validate_mirror_timeout, validate_mirror_url,
+    validate_package_name, validate_pagination, validate_schedule, validate_search_query,
+    validate_version,
 };
 
 // --- Serialization tests ---
@@ -157,8 +158,38 @@ fn test_validate_package_name_invalid() {
     assert!(validate_package_name("foo;bar").is_err()); // shell metachar
     assert!(validate_package_name("foo/bar").is_err()); // path separator
     assert!(validate_package_name("../etc/passwd").is_err()); // path traversal
+    assert!(validate_package_name("..").is_err()); // bare traversal, no slash
     assert!(validate_package_name("foo?x=1").is_err()); // query string
     assert!(validate_package_name("foo bar").is_err()); // space
+}
+
+#[test]
+fn test_validate_archive_filename_valid() {
+    assert!(validate_archive_filename("bash-5.1.016-1-x86_64.pkg.tar.zst", "bash").is_ok());
+    assert!(
+        validate_archive_filename(
+            "ca-certificates-20240618-1-any.pkg.tar.zst",
+            "ca-certificates"
+        )
+        .is_ok()
+    );
+    assert!(validate_archive_filename("grub-2:2.06.r499-1-x86_64.pkg.tar.zst", "grub").is_ok());
+    assert!(validate_archive_filename("foo-1.0-1-x86_64.pkg.tar.xz", "foo").is_ok());
+}
+
+#[test]
+fn test_validate_archive_filename_invalid() {
+    assert!(validate_archive_filename("", "bash").is_err());
+    assert!(validate_archive_filename("bash-5.1.016-1-x86_64.pkg.tar.zst.sig", "bash").is_err());
+    assert!(validate_archive_filename("bash-5.1.016-1-x86_64.txt", "bash").is_err()); // not a pkg
+    assert!(validate_archive_filename("../bash-5.1.016-1-x86_64.pkg.tar.zst", "bash").is_err()); // traversal
+    assert!(validate_archive_filename("sub/bash-5.1.016-1-x86_64.pkg.tar.zst", "bash").is_err()); // path sep
+    assert!(validate_archive_filename("evil-1-1-x86_64.pkg.tar.zst", "bash").is_err()); // name mismatch
+    assert!(validate_archive_filename("bash 1-1-x86_64.pkg.tar.zst", "bash").is_err()); // space in charset
+    assert!(
+        validate_archive_filename(&format!("{}-1-1-x86_64.pkg.tar.zst", "a".repeat(600)), "a")
+            .is_err()
+    ); // over length cap
 }
 
 #[test]
@@ -297,7 +328,14 @@ fn test_validate_mirror_timeout_invalid() {
 #[test]
 fn test_parse_package_filename_simple() {
     let result = parse_package_filename("ada-1.0.0-1-x86_64.pkg.tar.zst");
-    assert_eq!(result, Some(("ada".to_string(), "1.0.0-1".to_string())));
+    assert_eq!(
+        result,
+        Some((
+            "ada".to_string(),
+            "1.0.0-1".to_string(),
+            "x86_64".to_string()
+        ))
+    );
 }
 
 #[test]
@@ -305,7 +343,11 @@ fn test_parse_package_filename_with_dashes_in_name() {
     let result = parse_package_filename("lib32-glibc-2.39-1-x86_64.pkg.tar.zst");
     assert_eq!(
         result,
-        Some(("lib32-glibc".to_string(), "2.39-1".to_string()))
+        Some((
+            "lib32-glibc".to_string(),
+            "2.39-1".to_string(),
+            "x86_64".to_string()
+        ))
     );
 }
 
@@ -314,20 +356,38 @@ fn test_parse_package_filename_complex_version() {
     let result = parse_package_filename("linux-6.7.0.arch1-1-x86_64.pkg.tar.zst");
     assert_eq!(
         result,
-        Some(("linux".to_string(), "6.7.0.arch1-1".to_string()))
+        Some((
+            "linux".to_string(),
+            "6.7.0.arch1-1".to_string(),
+            "x86_64".to_string()
+        ))
     );
 }
 
 #[test]
 fn test_parse_package_filename_xz_extension() {
     let result = parse_package_filename("pacman-6.0.2-7-x86_64.pkg.tar.xz");
-    assert_eq!(result, Some(("pacman".to_string(), "6.0.2-7".to_string())));
+    assert_eq!(
+        result,
+        Some((
+            "pacman".to_string(),
+            "6.0.2-7".to_string(),
+            "x86_64".to_string()
+        ))
+    );
 }
 
 #[test]
 fn test_parse_package_filename_gz_extension() {
     let result = parse_package_filename("gzip-1.13-1-x86_64.pkg.tar.gz");
-    assert_eq!(result, Some(("gzip".to_string(), "1.13-1".to_string())));
+    assert_eq!(
+        result,
+        Some((
+            "gzip".to_string(),
+            "1.13-1".to_string(),
+            "x86_64".to_string()
+        ))
+    );
 }
 
 #[test]
@@ -347,7 +407,11 @@ fn test_parse_package_filename_any_arch() {
     let result = parse_package_filename("bash-completion-2.11-2-any.pkg.tar.zst");
     assert_eq!(
         result,
-        Some(("bash-completion".to_string(), "2.11-2".to_string()))
+        Some((
+            "bash-completion".to_string(),
+            "2.11-2".to_string(),
+            "any".to_string()
+        ))
     );
 }
 

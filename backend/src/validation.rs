@@ -7,6 +7,9 @@ pub fn validate_package_name(name: &str) -> Result<()> {
     if name.len() > 256 {
         anyhow::bail!("Package name too long (max 256)");
     }
+    if name.contains("..") {
+        anyhow::bail!("Package name contains invalid path sequence");
+    }
     if !name
         .bytes()
         .all(|b| b.is_ascii_alphanumeric() || b"@._+-".contains(&b))
@@ -51,6 +54,39 @@ pub fn validate_version(version: &str) -> Result<()> {
     }
     if version.chars().any(|c| c.is_control()) {
         anyhow::bail!("Version contains invalid control characters");
+    }
+    Ok(())
+}
+
+pub fn validate_archive_filename(filename: &str, expected_name: &str) -> Result<()> {
+    if filename.is_empty() {
+        anyhow::bail!("Archive filename cannot be empty");
+    }
+    if filename.len() > 512 {
+        anyhow::bail!("Archive filename too long (max 512)");
+    }
+    if filename.contains('/') || filename.contains('\\') || filename.contains("..") {
+        anyhow::bail!("Archive filename contains invalid path characters");
+    }
+    if !filename.ends_with(".pkg.tar.zst")
+        && !filename.ends_with(".pkg.tar.xz")
+        && !filename.ends_with(".pkg.tar.gz")
+    {
+        anyhow::bail!("Archive filename is not a package file");
+    }
+    if !filename
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b"@._+:-".contains(&b))
+    {
+        anyhow::bail!("Archive filename contains invalid characters");
+    }
+    let (parsed_name, _, _) = crate::util::parse_package_filename(filename)
+        .ok_or_else(|| anyhow::anyhow!("Archive filename is malformed"))?;
+    if parsed_name != expected_name {
+        anyhow::bail!(
+            "Archive filename does not match package '{}'",
+            expected_name
+        );
     }
     Ok(())
 }
