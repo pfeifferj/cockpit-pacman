@@ -40,7 +40,11 @@ import {
   getKeyringStatus,
   refreshKeyring,
   initKeyring,
+  BackendError,
 } from "../api";
+import type { ErrorCode } from "../api";
+import { isNetworkError } from "../offline";
+import { NetworkErrorState } from "./NetworkErrorState";
 import { TimeAgo } from "./TimeAgo";
 import { sanitizeErrorMessage } from "../utils";
 
@@ -50,6 +54,7 @@ export const KeyringView: React.FC = () => {
   const [state, setState] = useState<ViewState>("loading");
   const [keyringData, setKeyringData] = useState<KeyringStatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
   const [log, setLog] = useState("");
   const [searchFilter, setSearchFilter] = useState("");
   const [trustFilter, setTrustFilter] = useState("all");
@@ -67,6 +72,7 @@ export const KeyringView: React.FC = () => {
   const loadKeyringStatus = useCallback(async () => {
     setState("loading");
     setError(null);
+    setErrorCode(undefined);
     try {
       const response = await getKeyringStatus();
       setKeyringData(response);
@@ -74,6 +80,7 @@ export const KeyringView: React.FC = () => {
     } catch (ex) {
       setState("error");
       setError(ex instanceof Error ? ex.message : String(ex));
+      setErrorCode(ex instanceof BackendError ? ex.code : undefined);
     }
   }, []);
 
@@ -89,6 +96,7 @@ export const KeyringView: React.FC = () => {
         if (cancelled) return;
         setState("error");
         setError(ex instanceof Error ? ex.message : String(ex));
+        setErrorCode(ex instanceof BackendError ? ex.code : undefined);
       });
     return () => { cancelled = true; };
   }, []);
@@ -115,9 +123,10 @@ export const KeyringView: React.FC = () => {
         cancelRef.current = null;
         loadKeyringStatus();
       },
-      onError: (err) => {
+      onError: (err, code) => {
         setState("error");
         setError(err);
+        setErrorCode(code);
         cancelRef.current = null;
       },
     });
@@ -137,9 +146,10 @@ export const KeyringView: React.FC = () => {
         cancelRef.current = null;
         loadKeyringStatus();
       },
-      onError: (err) => {
+      onError: (err, code) => {
         setState("error");
         setError(err);
+        setErrorCode(code);
         cancelRef.current = null;
       },
     });
@@ -262,14 +272,23 @@ export const KeyringView: React.FC = () => {
     return (
       <Card>
         <CardBody>
-          <Alert variant="danger" title="Error loading keyring status">
-            {sanitizeErrorMessage(error)}
-          </Alert>
-          <div className="pf-v6-u-mt-md">
-            <Button variant="primary" onClick={loadKeyringStatus}>
-              Retry
-            </Button>
-          </div>
+          {isNetworkError(null, errorCode) ? (
+            <NetworkErrorState
+              resource="the keyring"
+              onRetry={loadKeyringStatus}
+            />
+          ) : (
+            <>
+              <Alert variant="danger" title="Error loading keyring status">
+                {sanitizeErrorMessage(error)}
+              </Alert>
+              <div className="pf-v6-u-mt-md">
+                <Button variant="primary" onClick={loadKeyringStatus}>
+                  Retry
+                </Button>
+              </div>
+            </>
+          )}
         </CardBody>
       </Card>
     );

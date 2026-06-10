@@ -893,9 +893,45 @@ fn test_news_item_serialization() {
 
 #[test]
 fn test_news_response_serialization_empty() {
-    let response = NewsResponse { items: vec![] };
+    let response = NewsResponse {
+        items: vec![],
+        stale: false,
+    };
     let json = serde_json::to_string(&response).unwrap();
     assert_eq!(json, "{\"items\":[]}");
+
+    let stale = NewsResponse {
+        items: vec![],
+        stale: true,
+    };
+    let json = serde_json::to_string(&stale).unwrap();
+    assert_eq!(json, "{\"items\":[],\"stale\":true}");
+}
+
+#[test]
+fn test_filter_items_within_days_honours_lookback() {
+    use crate::handlers::news::filter_items_within_days;
+    let now = chrono::Utc::now();
+    let mk = |days_ago: i64| NewsItem {
+        title: "t".into(),
+        link: format!("https://archlinux.org/news/{days_ago}/"),
+        published: (now - chrono::Duration::days(days_ago)).to_rfc3339(),
+        summary: "s".into(),
+    };
+
+    let within_7 = filter_items_within_days(vec![mk(1), mk(10), mk(40)], 7);
+    assert_eq!(
+        within_7.len(),
+        1,
+        "only the 1-day-old item is within 7 days"
+    );
+
+    let within_30 = filter_items_within_days(vec![mk(1), mk(10), mk(40)], 30);
+    assert_eq!(
+        within_30.len(),
+        2,
+        "1- and 10-day-old items are within 30 days"
+    );
 }
 
 #[test]
@@ -915,6 +951,7 @@ fn test_news_response_serialization_with_items() {
                 summary: "Summary B".to_string(),
             },
         ],
+        stale: false,
     };
 
     let json = serde_json::to_string(&response).unwrap();
@@ -1559,4 +1596,70 @@ fn test_build_update_stats_map_counts_per_package() {
     let git = stats.get("git").expect("git stats missing");
     assert_eq!(git.update_count, 1);
     assert!(git.first_installed.is_some());
+}
+
+#[test]
+fn test_classify_message_buckets() {
+    use crate::util::classify_message;
+    assert_eq!(classify_message("operation timed out"), Some("timeout"));
+    assert_eq!(
+        classify_message("unable to lock database"),
+        Some("database_locked")
+    );
+    assert_eq!(
+        classify_message("failed retrieving file 'core.db' from mirror"),
+        Some("network_error")
+    );
+    assert_eq!(
+        classify_message("could not connect to server"),
+        Some("network_error")
+    );
+    assert_eq!(classify_message("some unrelated failure"), None);
+}
+
+#[test]
+fn test_classify_error_downcasts_ureq() {
+    use crate::util::classify_error;
+
+    let host: anyhow::Error =
+        anyhow::Error::new(ureq::Error::HostNotFound).context("fetching news feed");
+    assert_eq!(classify_error(&host), Some("network_error"));
+
+    let conn: anyhow::Error = anyhow::Error::new(ureq::Error::ConnectionFailed);
+    assert_eq!(classify_error(&conn), Some("network_error"));
+
+    let io_err = ureq::Error::Io(std::io::Error::from(std::io::ErrorKind::ConnectionRefused));
+    assert_eq!(
+        classify_error(&anyhow::Error::new(io_err)),
+        Some("network_error")
+    );
+
+    let not_found = anyhow::Error::new(ureq::Error::StatusCode(404));
+    assert_eq!(classify_error(&not_found), Some("not_found"));
+}
+
+#[test]
+fn test_classify_error_top_level_io() {
+    use crate::util::classify_error;
+
+    let timed_out =
+        anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::TimedOut)).context("syncing");
+    assert_eq!(classify_error(&timed_out), Some("timeout"));
+
+    let refused = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::ConnectionReset));
+    assert_eq!(classify_error(&refused), Some("network_error"));
+
+    // A non-network io kind with no matching keyword stays unclassified.
+    let other = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+    assert_eq!(classify_error(&other), None);
+}
+
+#[test]
+fn test_classify_error_falls_back_to_message() {
+    use crate::util::classify_error;
+    let plain = anyhow::anyhow!("connection refused while syncing");
+    assert_eq!(classify_error(&plain), Some("network_error"));
+
+    let unknown = anyhow::anyhow!("package conflict detected");
+    assert_eq!(classify_error(&unknown), None);
 }

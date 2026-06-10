@@ -1,22 +1,48 @@
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use arch_security_client::SecurityClient;
 use arch_security_client::models::{AvgStatus, Severity};
 
 use crate::alpm::get_handle;
 use crate::models::{PackageSecurityAdvisory, SecurityInfoResponse, SecurityResponse};
-use crate::util::emit_json;
+use crate::util::{emit_json, write_json_atomic};
+
+fn security_cache_path() -> Result<PathBuf> {
+    let home = std::env::var("HOME").context("HOME environment variable is not set")?;
+    Ok(PathBuf::from(home).join(".config/cockpit-pacman/security-cache.json"))
+}
+
+fn read_security_cache(path: PathBuf) -> Option<Vec<PackageSecurityAdvisory>> {
+    let content = std::fs::read_to_string(&path).ok()?;
+    let cached: SecurityResponse = serde_json::from_str(&content).ok()?;
+    Some(cached.advisories)
+}
+
+fn write_security_cache(path: &Path, response: &SecurityResponse) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    write_json_atomic(path, response)
+}
 
 pub fn check_security() -> Result<()> {
     let client = SecurityClient::new(crate::util::detected_ip_family());
     let avgs = match client.fetch_vulnerable() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("Warning: failed to fetch security data: {:#}", e);
-            return emit_json(&SecurityResponse {
-                advisories: Vec::new(),
-            });
+            // Serve cached advisories (marked stale) if we have them. With no
+            // cache, propagate the error: an empty list would be
+            // indistinguishable from "no known vulnerabilities", a false
+            // sense of safety. The frontend renders this as "unavailable".
+            if let Some(advisories) = security_cache_path().ok().and_then(read_security_cache) {
+                return emit_json(&SecurityResponse {
+                    advisories,
+                    stale: true,
+                });
+            }
+            return Err(e);
         }
     };
 
@@ -80,7 +106,14 @@ pub fn check_security() -> Result<()> {
         sev_b.cmp(&sev_a).then(a.package.cmp(&b.package))
     });
 
-    emit_json(&SecurityResponse { advisories })
+    let response = SecurityResponse {
+        advisories,
+        stale: false,
+    };
+    if let Ok(path) = security_cache_path() {
+        let _ = write_security_cache(&path, &response);
+    }
+    emit_json(&response)
 }
 
 pub fn security_info(name: &str) -> Result<()> {

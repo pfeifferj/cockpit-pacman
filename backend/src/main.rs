@@ -15,7 +15,8 @@ use cockpit_pacman_backend::handlers::{
     set_schedule_config, signoff_list, signoff_revoke, signoff_sign, sync_database,
     sync_package_info, test_mirrors,
 };
-use cockpit_pacman_backend::models::{MirrorEntry, RepoEntry};
+use cockpit_pacman_backend::models::{MirrorEntry, RepoEntry, StructuredError};
+use cockpit_pacman_backend::util::{classify_error, emit_json};
 use cockpit_pacman_backend::validation::{
     validate_archive_filename, validate_depth, validate_direction, validate_json_payload_size,
     validate_keep_versions, validate_mirror_timeout, validate_mirror_url, validate_package_name,
@@ -591,6 +592,19 @@ fn main() {
     };
 
     if let Err(e) = result {
+        // The structured envelope + exit 0 is for commands whose stdout the
+        // frontend parses. scheduled-run is invoked by a systemd oneshot unit
+        // with no such consumer, so it must exit non-zero on failure for the
+        // unit result to reflect reality.
+        let emit_envelope = args[1] != "scheduled-run";
+        if emit_envelope && let Some(code) = classify_error(&e) {
+            let _ = emit_json(&StructuredError {
+                code: code.to_string(),
+                message: format!("{}", e),
+                details: Some(format!("{:#}", e)),
+            });
+            std::process::exit(0);
+        }
         eprintln!("Error: {:#}", e);
         std::process::exit(1);
     }
