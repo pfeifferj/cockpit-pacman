@@ -1,6 +1,7 @@
 node_modules/
 dist/
 backend/target/
+backend/target-devel/
 backend/crates/*/target/
 *.log
 *.tsbuildinfo

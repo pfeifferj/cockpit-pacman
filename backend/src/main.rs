@@ -6,12 +6,12 @@ use cockpit_pacman_backend::handlers::{
     get_dependency_tree, get_grouped_history, get_history, get_pacnew_status, get_reboot_status,
     get_schedule_config, get_scheduled_runs, get_services_status, init_keyring, install_package,
     keyring_status, list_archive_versions, list_downgrades, list_ignored, list_installed,
-    list_mirror_backups, list_mirrors, list_orphans, list_repo_mirrors, list_repos,
-    local_package_info, mark_dismissed, mark_news_read, preflight_upgrade, read_dismissal,
-    read_news_state, refresh_keyring, refresh_mirrors, remove_ignored, remove_orphans,
-    remove_package, remove_stale_lock, restore_mirror_backup, run_upgrade, save_mirrorlist,
-    save_repos, scheduled_run, search, security_info, set_schedule_config, signoff_list,
-    signoff_revoke, signoff_sign, sync_database, sync_package_info, test_mirrors,
+    list_mirror_backups, list_mirrors, list_orphans, list_repos, local_package_info,
+    mark_dismissed, mark_news_read, preflight_upgrade, read_dismissal, read_news_state,
+    refresh_keyring, refresh_mirrors, remove_ignored, remove_orphans, remove_package,
+    remove_stale_lock, restore_mirror_backup, run_upgrade, save_mirrorlist, save_repos,
+    scheduled_run, search, security_info, set_schedule_config, signoff_list, signoff_revoke,
+    signoff_sign, sync_database, sync_package_info, test_mirrors,
 };
 use cockpit_pacman_backend::models::{MirrorEntry, RepoEntry, StructuredError};
 use cockpit_pacman_backend::util::{classify_error, emit_json};
@@ -110,7 +110,6 @@ fn print_usage() {
     eprintln!("  services-status        List running services whose binaries were replaced");
     eprintln!("  pacnew-status          List .pacnew/.pacsave config files needing manual merge");
     eprintln!("  list-mirrors           List mirrors from /etc/pacman.d/mirrorlist");
-    eprintln!("  list-repo-mirrors      List per-repository mirror servers from pacman.conf");
     eprintln!("  fetch-mirror-status    Fetch mirror status from archlinux.org API");
     eprintln!("  refresh-mirrors [count] [country] [protocol] [sort_by]");
     eprintln!("                         Generate a ranked mirrorlist from archlinux.org API");
@@ -405,7 +404,6 @@ fn main() {
         "services-status" => get_services_status(),
         "pacnew-status" => get_pacnew_status(),
         "list-mirrors" => list_mirrors(),
-        "list-repo-mirrors" => list_repo_mirrors(),
         "fetch-mirror-status" => fetch_mirror_status(),
         "refresh-mirrors" => {
             let count = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(20usize);
