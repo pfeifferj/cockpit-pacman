@@ -732,6 +732,51 @@ describe("UpdatesView", () => {
       });
     });
 
+    it("resumes the operation the lock removal belonged to, not the latest error", async () => {
+      mockPreflightUpgrade.mockRejectedValueOnce(new Error("Unable to lock database"));
+      let resolveRemove: ((value: { removed: boolean }) => void) | undefined;
+      mockRemoveStaleLock.mockImplementation(
+        () => new Promise((resolve) => { resolveRemove = resolve; })
+      );
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Apply 1 Update/i }));
+      });
+
+      const removeButton = await screen.findByRole("button", { name: /Remove stale lock/ });
+      await act(async () => {
+        fireEvent.click(removeButton);
+      });
+
+      // While the removal is still in flight, a sync failure starts a new
+      // error episode with a different origin.
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Dismiss/ }));
+      });
+      mockSyncDatabase.mockImplementationOnce((callbacks) => {
+        setTimeout(() => callbacks.onError?.("unable to lock database"), 0);
+        return { cancel: vi.fn() };
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Refresh/i }));
+      });
+      await screen.findByText("Database is locked");
+
+      await act(async () => {
+        resolveRemove?.({ removed: true });
+      });
+
+      await waitFor(() => {
+        expect(mockPreflightUpgrade).toHaveBeenCalledTimes(2);
+      });
+      expect(mockSyncDatabase).toHaveBeenCalledTimes(2);
+    });
+
     it("stops auto-resuming when the failure is not a lock", async () => {
       mockCheckLock.mockResolvedValue({
         locked: false,

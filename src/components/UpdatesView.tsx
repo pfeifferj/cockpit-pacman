@@ -255,6 +255,8 @@ interface UpdatesViewProps {
   signoffCredentials?: KeyringCredentials | null;
 }
 
+type ErrorOrigin = "check" | "sync" | "preflight" | "upgrade";
+
 const LockErrorBody: React.FC<{ onRetry: () => void; onAutoRetry: () => void }> = ({ onRetry, onAutoRetry }) => {
   const [checking, setChecking] = useState(true);
   const [removing, setRemoving] = useState(false);
@@ -340,7 +342,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
   const [warnings, setWarnings] = useState<string[]>([]);
   const cancelRef = useRef<(() => void) | null>(null);
-  const errorOriginRef = useRef<"check" | "sync" | "preflight" | "upgrade">("check");
+  const [errorOrigin, setErrorOrigin] = useState<ErrorOrigin>("check");
   const autoResumedRef = useRef(false);
   const [lockRetryExhausted, setLockRetryExhausted] = useState(false);
   const [errorEpoch, setErrorEpoch] = useState(0);
@@ -348,8 +350,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   // Consecutive errors can commit in one render batch without ever showing
   // the intermediate state, so the epoch forces LockErrorBody to remount
   // (and re-check the lock) for each new error.
-  const failWith = useCallback((origin: "check" | "sync" | "preflight" | "upgrade", message: string, code?: ErrorCode) => {
-    errorOriginRef.current = origin;
+  const failWith = useCallback((origin: ErrorOrigin, message: string, code?: ErrorCode) => {
+    setErrorOrigin(origin);
     setError(message);
     setErrorCode(code);
     setErrorEpoch((e) => e + 1);
@@ -895,11 +897,13 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
   // Re-runs the operation that hit the lock instead of bouncing back to the
   // list. Interrupted upgrades resume through a fresh preflight because
-  // whoever held the lock may have changed package state.
-  const resumeAfterLock = useCallback(() => {
-    if (errorOriginRef.current === "preflight" || errorOriginRef.current === "upgrade") {
+  // whoever held the lock may have changed package state. The origin is bound
+  // at error time, so a recovery flow that outlives its error episode still
+  // resumes the operation it belonged to rather than whichever failed last.
+  const resumeAfterLock = useCallback((origin: ErrorOrigin) => {
+    if (origin === "preflight" || origin === "upgrade") {
       resumeRef.current.apply();
-    } else if (errorOriginRef.current === "sync") {
+    } else if (origin === "sync") {
       resumeRef.current.refresh();
     } else {
       loadUpdates();
@@ -908,8 +912,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
   const manualResumeAfterLock = useCallback(() => {
     autoResumedRef.current = false;
-    resumeAfterLock();
-  }, [resumeAfterLock]);
+    resumeAfterLock(errorOrigin);
+  }, [resumeAfterLock, errorOrigin]);
 
   // The lock-error heuristic also matches transaction failures that are not
   // lock related, so the no-lock-found auto retry gets one attempt before
@@ -920,8 +924,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       return;
     }
     autoResumedRef.current = true;
-    resumeAfterLock();
-  }, [resumeAfterLock]);
+    resumeAfterLock(errorOrigin);
+  }, [resumeAfterLock, errorOrigin]);
 
   const handleCancelClick = () => {
     setCancelModalOpen(true);
