@@ -16,8 +16,9 @@ import {
   ContentVariants,
 } from "@patternfly/react-core";
 import { ExpandableLogViewer } from "./LogViewer";
+import { ErrorAlert } from "./ErrorAlert";
 import { CheckCircleIcon } from "@patternfly/react-icons";
-import { installPackage, removePackage, UpgradeCallbacks } from "../api";
+import { installPackage, removePackage, ErrorCode, UpgradeCallbacks } from "../api";
 import { appendCapped, sanitizeErrorMessage } from "../utils";
 
 type ModalState = "confirm" | "running" | "success" | "error";
@@ -53,6 +54,7 @@ const PackageActionModal: React.FC<PackageActionModalProps & { config: ActionCon
   useBackdropClose(isOpen, onClose);
   const [state, setState] = useState<ModalState>("confirm");
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
   const [log, setLog] = useState("");
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const cancelRef = useRef<(() => void) | null>(null);
@@ -60,6 +62,7 @@ const PackageActionModal: React.FC<PackageActionModalProps & { config: ActionCon
   const resetState = useCallback(() => {
     setState("confirm");
     setError(null);
+    setErrorCode(undefined);
     setLog("");
     setIsDetailsExpanded(false);
   }, []);
@@ -90,9 +93,10 @@ const PackageActionModal: React.FC<PackageActionModalProps & { config: ActionCon
           cancelRef.current = null;
           onSuccess?.();
         },
-        onError: (err) => {
+        onError: (err, code) => {
           setState("error");
           setError(err);
+          setErrorCode(code);
           cancelRef.current = null;
         },
       },
@@ -161,9 +165,7 @@ const PackageActionModal: React.FC<PackageActionModalProps & { config: ActionCon
 
       case "error":
         return (
-          <Alert variant="danger" title="Error">
-            {sanitizeErrorMessage(error)}
-          </Alert>
+          <ErrorAlert error={sanitizeErrorMessage(error)} code={errorCode} title="Error" />
         );
 
       default:

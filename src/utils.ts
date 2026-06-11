@@ -9,7 +9,10 @@ export function appendCapped(prev: string, data: string, cap = MAX_LOG_SIZE_BYTE
   return next.length > cap ? next.slice(-cap) : next;
 }
 
-export function isDbLockError(message: string): boolean {
+// The substring fallback covers errors that arrive as raw stream output
+// without the structured envelope; the backend's code is authoritative.
+export function isDbLockError(message: string, code?: string): boolean {
+  if (code === "database_locked") return true;
   const lower = message.toLowerCase();
   return lower.includes("unable to lock database") || lower.includes("database is locked");
 }

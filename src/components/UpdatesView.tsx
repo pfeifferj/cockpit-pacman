@@ -1182,7 +1182,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   }
 
   if (state === "error") {
-    const isLockError = error ? /unable to lock database|failed to initialize transaction/i.test(error) : false;
+    const isLockError = errorCode === "database_locked"
+      || (error ? /unable to lock database|failed to initialize transaction/i.test(error) : false);
     const showLockRecovery = isLockError && !lockRetryExhausted;
     // Only a genuine connectivity failure shows the offline state here. A bare
     // operation timeout (the sync/upgrade exceeded its budget) is not an
