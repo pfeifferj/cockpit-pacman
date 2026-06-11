@@ -1,0 +1,38 @@
+{
+  "name": "openssl",
+  "advisories": [
+    {
+      "name": "AVG-2024-1234",
+      "date": "2024-01-15",
+      "severity": "High",
+      "advisory_type": "multiple issues"
+    },
+    {
+      "name": "AVG-2023-5678",
+      "date": "2023-11-01",
+      "severity": "Medium",
+      "advisory_type": "information disclosure"
+    }
+  ],
+  "groups": [
+    {
+      "name": "openssl",
+      "status": "Fixed",
+      "severity": "High"
+    }
+  ],
+  "issues": [
+    {
+      "name": "CVE-2024-0001",
+      "severity": "High",
+      "issue_type": "arbitrary code execution",
+      "status": "Fixed"
+    },
+    {
+      "name": "CVE-2023-9999",
+      "severity": "Medium",
+      "issue_type": "information disclosure",
+      "status": "Fixed"
+    }
+  ]
+}

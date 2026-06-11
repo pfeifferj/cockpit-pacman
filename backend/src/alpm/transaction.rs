@@ -1,5 +1,5 @@
 use alpm::{Alpm, TransFlag};
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 pub struct TransactionGuard<'a> {
     handle: &'a mut Alpm,
@@ -7,9 +7,11 @@ pub struct TransactionGuard<'a> {
 
 impl<'a> TransactionGuard<'a> {
     pub fn new(handle: &'a mut Alpm, flags: TransFlag) -> Result<Self> {
+        // Flattened so the lock detail survives in the envelope message,
+        // which only renders the outermost error.
         handle
             .trans_init(flags)
-            .context("Failed to initialize transaction")?;
+            .map_err(|e| anyhow::anyhow!("Failed to initialize transaction: {}", e))?;
         Ok(Self { handle })
     }
 
@@ -37,7 +39,15 @@ impl<'a> TransactionGuard<'a> {
         self.handle.localdb()
     }
 
-    pub fn remove_pkg(&mut self, pkg: &alpm::Package) -> Result<(), alpm::Error> {
+    pub fn syncdbs(&self) -> alpm::AlpmList<'_, &alpm::Db> {
+        self.handle.syncdbs()
+    }
+
+    pub fn add_pkg<P: alpm::IntoPkgAdd>(&self, pkg: P) -> Result<(), alpm::AddError<P>> {
+        self.handle.trans_add_pkg(pkg)
+    }
+
+    pub fn remove_pkg(&self, pkg: &alpm::Package) -> Result<(), alpm::Error> {
         self.handle.trans_remove_pkg(pkg)
     }
 }
