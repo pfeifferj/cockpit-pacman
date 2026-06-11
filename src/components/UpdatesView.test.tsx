@@ -683,7 +683,7 @@ describe("UpdatesView", () => {
       expect(mockCheckUpdates).toHaveBeenCalledTimes(1);
     });
 
-    it("restarts the upgrade after removing a stale lock", async () => {
+    it("re-runs preflight before restarting an upgrade interrupted by a lock", async () => {
       mockRunUpgrade.mockImplementationOnce((callbacks) => {
         setTimeout(() => callbacks.onError("Failed to initialize transaction: unable to lock database"), 0);
         return { cancel: vi.fn() };
@@ -707,8 +707,29 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(mockRunUpgrade).toHaveBeenCalledTimes(2);
       });
-      expect(mockPreflightUpgrade).toHaveBeenCalledTimes(1);
+      expect(mockPreflightUpgrade).toHaveBeenCalledTimes(2);
       expect(screen.getByText("Applying Updates")).toBeInTheDocument();
+    });
+
+    it("re-runs the database sync after removing a stale lock", async () => {
+      mockSyncDatabase.mockImplementationOnce((callbacks) => {
+        setTimeout(() => callbacks.onError?.("unable to lock database"), 0);
+        return { cancel: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+
+      const removeButton = await screen.findByRole("button", { name: /Remove stale lock/ });
+      await act(async () => {
+        fireEvent.click(removeButton);
+      });
+
+      await waitFor(() => {
+        expect(mockSyncDatabase).toHaveBeenCalledTimes(2);
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
     });
 
     it("stops auto-resuming when the failure is not a lock", async () => {

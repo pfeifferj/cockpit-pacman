@@ -340,7 +340,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
   const [warnings, setWarnings] = useState<string[]>([]);
   const cancelRef = useRef<(() => void) | null>(null);
-  const errorOriginRef = useRef<"check" | "preflight" | "upgrade">("check");
+  const errorOriginRef = useRef<"check" | "sync" | "preflight" | "upgrade">("check");
   const autoResumedRef = useRef(false);
   const [lockRetryExhausted, setLockRetryExhausted] = useState(false);
   const [errorEpoch, setErrorEpoch] = useState(0);
@@ -348,7 +348,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   // Consecutive errors can commit in one render batch without ever showing
   // the intermediate state, so the epoch forces LockErrorBody to remount
   // (and re-check the lock) for each new error.
-  const failWith = useCallback((origin: "check" | "preflight" | "upgrade", message: string, code?: ErrorCode) => {
+  const failWith = useCallback((origin: "check" | "sync" | "preflight" | "upgrade", message: string, code?: ErrorCode) => {
     errorOriginRef.current = origin;
     setError(message);
     setErrorCode(code);
@@ -630,7 +630,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     const { cancel } = syncDatabase({
       onData: (data) => setLog((prev) => appendCapped(prev, data)),
       onComplete: () => loadUpdates(),
-      onError: (err, code) => failWith("check", err, code),
+      onError: (err, code) => failWith("sync", err, code),
     });
     return () => cancel();
   }, [loadUpdates, failWith]);
@@ -760,11 +760,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     setLog("");
     setSelectedPackages(new Set());
     setLockRetryExhausted(false);
-    autoResumedRef.current = false;
     const { cancel } = syncDatabase({
       onData: (data) => setLog((prev) => appendCapped(prev, data)),
       onComplete: () => loadUpdates(),
-      onError: (err, code) => failWith("check", err, code),
+      onError: (err, code) => failWith("sync", err, code),
     });
     cancelRef.current = cancel;
   };
@@ -784,7 +783,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         failWith("preflight", preflight.error || "Preflight check failed");
         return;
       }
-      autoResumedRef.current = false;
 
       // Check if there are any issues needing confirmation
       const hasIssues =
@@ -890,19 +888,19 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     cancelRef.current = cancel;
   };
 
-  const resumeRef = useRef({ apply: handleApplyUpdates, upgrade: startUpgrade });
+  const resumeRef = useRef({ apply: handleApplyUpdates, refresh: handleRefresh });
   useEffect(() => {
-    resumeRef.current = { apply: handleApplyUpdates, upgrade: startUpgrade };
+    resumeRef.current = { apply: handleApplyUpdates, refresh: handleRefresh };
   });
 
-  // Re-runs the operation that hit the lock (check errors fall back to a
-  // re-check), so removing a stale lock resumes an interrupted apply
-  // instead of bouncing back to the list.
+  // Re-runs the operation that hit the lock instead of bouncing back to the
+  // list. Interrupted upgrades resume through a fresh preflight because
+  // whoever held the lock may have changed package state.
   const resumeAfterLock = useCallback(() => {
-    if (errorOriginRef.current === "preflight") {
+    if (errorOriginRef.current === "preflight" || errorOriginRef.current === "upgrade") {
       resumeRef.current.apply();
-    } else if (errorOriginRef.current === "upgrade") {
-      resumeRef.current.upgrade();
+    } else if (errorOriginRef.current === "sync") {
+      resumeRef.current.refresh();
     } else {
       loadUpdates();
     }
@@ -1423,7 +1421,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
                   <Button
                     variant="secondary"
                     icon={<SyncAltIcon />}
-                    onClick={handleRefresh}
+                    onClick={() => {
+                      autoResumedRef.current = false;
+                      handleRefresh();
+                    }}
                   >
                     Refresh
                   </Button>
@@ -1588,7 +1589,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
                 <Button
                   variant="secondary"
                   icon={<SyncAltIcon />}
-                  onClick={handleRefresh}
+                  onClick={() => {
+                    autoResumedRef.current = false;
+                    handleRefresh();
+                  }}
                 >
                   Refresh
                 </Button>

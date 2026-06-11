@@ -10,7 +10,8 @@ export function appendCapped(prev: string, data: string, cap = MAX_LOG_SIZE_BYTE
 }
 
 export function isDbLockError(message: string): boolean {
-  return message.toLowerCase().includes("unable to lock database");
+  const lower = message.toLowerCase();
+  return lower.includes("unable to lock database") || lower.includes("database is locked");
 }
 
 export function sanitizeSearchInput(input: string): string {
