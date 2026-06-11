@@ -103,6 +103,14 @@ pub fn emit_json<T: Serialize>(response: &T) -> Result<()> {
     Ok(())
 }
 
+/// Path of a state or cache file under ~/.config/cockpit-pacman.
+pub fn config_path(file: &str) -> Result<std::path::PathBuf> {
+    let home = std::env::var("HOME").context("HOME environment variable is not set")?;
+    Ok(std::path::PathBuf::from(home)
+        .join(".config/cockpit-pacman")
+        .join(file))
+}
+
 /// Serialize `state` to `path` via a temp file and atomic rename, so a crash
 /// mid-write can't leave a partially-written file. Shared by state and cache
 /// writers across handlers.

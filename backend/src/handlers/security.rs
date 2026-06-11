@@ -1,17 +1,16 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use arch_security_client::SecurityClient;
 use arch_security_client::models::{AvgStatus, Severity};
 
 use crate::alpm::get_handle;
 use crate::models::{PackageSecurityAdvisory, SecurityInfoResponse, SecurityResponse};
-use crate::util::{emit_json, write_json_atomic};
+use crate::util::{config_path, emit_json, write_json_atomic};
 
 fn security_cache_path() -> Result<PathBuf> {
-    let home = std::env::var("HOME").context("HOME environment variable is not set")?;
-    Ok(PathBuf::from(home).join(".config/cockpit-pacman/security-cache.json"))
+    config_path("security-cache.json")
 }
 
 fn read_security_cache(path: PathBuf) -> Option<Vec<PackageSecurityAdvisory>> {

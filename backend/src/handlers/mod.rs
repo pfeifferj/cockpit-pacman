@@ -33,11 +33,7 @@ pub use mirrors::{
 pub use mutation::{
     install_package, preflight_upgrade, remove_orphans, remove_package, run_upgrade, sync_database,
 };
-pub use news::{
-    fetch_news, mark_news_read, mark_pacnew_dismissed, mark_reboot_dismissed,
-    mark_services_dismissed, read_news_state, read_pacnew_dismissal, read_reboot_dismissal,
-    read_services_dismissal,
-};
+pub use news::{fetch_news, mark_dismissed, mark_news_read, read_dismissal, read_news_state};
 pub use pacnew::get_pacnew_status;
 pub use query::{
     check_updates, list_installed, list_orphans, local_package_info, search, sync_package_info,

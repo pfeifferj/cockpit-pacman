@@ -42,7 +42,7 @@ where
 }
 
 use crate::models::{NewsItem, NewsResponse};
-use crate::util::{emit_json, write_json_atomic};
+use crate::util::{config_path, emit_json, write_json_atomic};
 
 const ARCH_NEWS_URL: &str = "https://archlinux.org/feeds/news/";
 const MAX_RSS_BYTES: u64 = 512 * 1024;
@@ -53,17 +53,7 @@ pub struct NewsReadState {
 }
 
 #[derive(Serialize, Deserialize, Default)]
-pub struct ServicesDismissal {
-    pub signature: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Default)]
-pub struct RebootDismissal {
-    pub signature: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Default)]
-pub struct PacnewDismissal {
+pub struct Dismissal {
     pub signature: Option<String>,
 }
 
@@ -106,8 +96,7 @@ pub(crate) fn filter_items_within_days(items: Vec<NewsItem>, days: u32) -> Vec<N
 }
 
 fn news_cache_path() -> Result<PathBuf> {
-    let home = std::env::var("HOME").context("HOME environment variable is not set")?;
-    Ok(PathBuf::from(home).join(".config/cockpit-pacman/news-cache.json"))
+    config_path("news-cache.json")
 }
 
 fn read_news_cache(path: PathBuf) -> Option<Vec<NewsItem>> {
@@ -196,23 +185,11 @@ pub fn mark_news_read_to(path: &Path, link: &str) -> Result<NewsReadState> {
 }
 
 fn news_state_path() -> Result<PathBuf> {
-    let home = std::env::var("HOME").context("HOME environment variable is not set")?;
-    Ok(PathBuf::from(home).join(".config/cockpit-pacman/news-read.json"))
+    config_path("news-read.json")
 }
 
-fn services_dismissal_path() -> Result<PathBuf> {
-    let home = std::env::var("HOME").context("HOME environment variable is not set")?;
-    Ok(PathBuf::from(home).join(".config/cockpit-pacman/services-dismissed.json"))
-}
-
-fn reboot_dismissal_path() -> Result<PathBuf> {
-    let home = std::env::var("HOME").context("HOME environment variable is not set")?;
-    Ok(PathBuf::from(home).join(".config/cockpit-pacman/reboot-dismissed.json"))
-}
-
-fn pacnew_dismissal_path() -> Result<PathBuf> {
-    let home = std::env::var("HOME").context("HOME environment variable is not set")?;
-    Ok(PathBuf::from(home).join(".config/cockpit-pacman/pacnew-dismissed.json"))
+fn dismissal_path(kind: &str) -> Result<PathBuf> {
+    config_path(&format!("{}-dismissed.json", kind))
 }
 
 pub fn read_news_state() -> Result<()> {
@@ -228,26 +205,26 @@ pub fn mark_news_read(link: &str) -> Result<()> {
     emit_json(&state)
 }
 
-pub fn read_services_dismissal_from(path: &Path) -> Result<ServicesDismissal> {
+pub fn read_dismissal_from(path: &Path, kind: &str) -> Result<Dismissal> {
     match std::fs::read_to_string(path) {
         Ok(content) => {
             if content.trim().is_empty() {
-                return Ok(ServicesDismissal::default());
+                return Ok(Dismissal::default());
             }
-            let state: ServicesDismissal = serde_json::from_str(&content)
-                .with_context(|| format!("Failed to parse services dismissal from {:?}", path))?;
+            let state: Dismissal = serde_json::from_str(&content)
+                .with_context(|| format!("Failed to parse {} dismissal from {:?}", kind, path))?;
             Ok(state)
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(ServicesDismissal::default()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Dismissal::default()),
         Err(e) => {
-            Err(e).with_context(|| format!("Failed to read services dismissal from {:?}", path))
+            Err(e).with_context(|| format!("Failed to read {} dismissal from {:?}", kind, path))
         }
     }
 }
 
-pub fn write_services_dismissal_to(path: &Path, signature: &str) -> Result<ServicesDismissal> {
+pub fn write_dismissal_to(path: &Path, signature: &str) -> Result<Dismissal> {
     with_state_lock(path, || {
-        let state = ServicesDismissal {
+        let state = Dismissal {
             signature: Some(signature.to_string()),
         };
         write_json_atomic(path, &state)?;
@@ -255,13 +232,13 @@ pub fn write_services_dismissal_to(path: &Path, signature: &str) -> Result<Servi
     })
 }
 
-pub fn read_services_dismissal() -> Result<()> {
-    let path = services_dismissal_path()?;
-    let state = read_services_dismissal_from(&path)?;
+pub fn read_dismissal(kind: &str) -> Result<()> {
+    let path = dismissal_path(kind)?;
+    let state = read_dismissal_from(&path, kind)?;
     emit_json(&state)
 }
 
-pub fn mark_services_dismissed(signature: &str) -> Result<()> {
+pub fn mark_dismissed(kind: &str, signature: &str) -> Result<()> {
     if signature.is_empty() {
         anyhow::bail!("Signature must not be empty");
     }
@@ -271,104 +248,8 @@ pub fn mark_services_dismissed(signature: &str) -> Result<()> {
     if signature.chars().any(|c| c.is_control()) {
         anyhow::bail!("Signature contains control characters");
     }
-    let path = services_dismissal_path()?;
-    let state = write_services_dismissal_to(&path, signature)?;
-    emit_json(&state)
-}
-
-pub fn read_reboot_dismissal_from(path: &Path) -> Result<RebootDismissal> {
-    match std::fs::read_to_string(path) {
-        Ok(content) => {
-            if content.trim().is_empty() {
-                return Ok(RebootDismissal::default());
-            }
-            let state: RebootDismissal = serde_json::from_str(&content)
-                .with_context(|| format!("Failed to parse reboot dismissal from {:?}", path))?;
-            Ok(state)
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(RebootDismissal::default()),
-        Err(e) => {
-            Err(e).with_context(|| format!("Failed to read reboot dismissal from {:?}", path))
-        }
-    }
-}
-
-pub fn write_reboot_dismissal_to(path: &Path, signature: &str) -> Result<RebootDismissal> {
-    with_state_lock(path, || {
-        let state = RebootDismissal {
-            signature: Some(signature.to_string()),
-        };
-        write_json_atomic(path, &state)?;
-        Ok(state)
-    })
-}
-
-pub fn read_reboot_dismissal() -> Result<()> {
-    let path = reboot_dismissal_path()?;
-    let state = read_reboot_dismissal_from(&path)?;
-    emit_json(&state)
-}
-
-pub fn mark_reboot_dismissed(signature: &str) -> Result<()> {
-    if signature.is_empty() {
-        anyhow::bail!("Signature must not be empty");
-    }
-    if signature.len() > 4096 {
-        anyhow::bail!("Signature length {} exceeds 4096", signature.len());
-    }
-    if signature.chars().any(|c| c.is_control()) {
-        anyhow::bail!("Signature contains control characters");
-    }
-    let path = reboot_dismissal_path()?;
-    let state = write_reboot_dismissal_to(&path, signature)?;
-    emit_json(&state)
-}
-
-pub fn read_pacnew_dismissal_from(path: &Path) -> Result<PacnewDismissal> {
-    match std::fs::read_to_string(path) {
-        Ok(content) => {
-            if content.trim().is_empty() {
-                return Ok(PacnewDismissal::default());
-            }
-            let state: PacnewDismissal = serde_json::from_str(&content)
-                .with_context(|| format!("Failed to parse pacnew dismissal from {:?}", path))?;
-            Ok(state)
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(PacnewDismissal::default()),
-        Err(e) => {
-            Err(e).with_context(|| format!("Failed to read pacnew dismissal from {:?}", path))
-        }
-    }
-}
-
-pub fn write_pacnew_dismissal_to(path: &Path, signature: &str) -> Result<PacnewDismissal> {
-    with_state_lock(path, || {
-        let state = PacnewDismissal {
-            signature: Some(signature.to_string()),
-        };
-        write_json_atomic(path, &state)?;
-        Ok(state)
-    })
-}
-
-pub fn read_pacnew_dismissal() -> Result<()> {
-    let path = pacnew_dismissal_path()?;
-    let state = read_pacnew_dismissal_from(&path)?;
-    emit_json(&state)
-}
-
-pub fn mark_pacnew_dismissed(signature: &str) -> Result<()> {
-    if signature.is_empty() {
-        anyhow::bail!("Signature must not be empty");
-    }
-    if signature.len() > 4096 {
-        anyhow::bail!("Signature length {} exceeds 4096", signature.len());
-    }
-    if signature.chars().any(|c| c.is_control()) {
-        anyhow::bail!("Signature contains control characters");
-    }
-    let path = pacnew_dismissal_path()?;
-    let state = write_pacnew_dismissal_to(&path, signature)?;
+    let path = dismissal_path(kind)?;
+    let state = write_dismissal_to(&path, signature)?;
     emit_json(&state)
 }
 
