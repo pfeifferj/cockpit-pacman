@@ -14,7 +14,6 @@ import { ExclamationCircleIcon } from "@patternfly/react-icons";
 interface ErrorBoundaryProps {
   children: ReactNode;
   fallbackTitle?: string;
-  onReset?: () => void;
 }
 
 interface ErrorBoundaryState {
@@ -54,7 +53,6 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       showDetails: false,
       resetKey: prevState.resetKey + 1,
     }));
-    this.props.onReset?.();
   };
 
   render(): ReactNode {

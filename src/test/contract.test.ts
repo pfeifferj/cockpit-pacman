@@ -44,8 +44,6 @@ import type {
   StreamEventMirrorTest,
   MirrorTestResult,
   OrphanPackage,
-  SecurityInfoResponse,
-  SecurityInfoAdvisory,
   NewsItem,
   NewsResponse,
   ScheduledRunEntry,
@@ -72,11 +70,9 @@ import {
   saveMirrorlist,
   refreshMirrors,
   restoreMirrorBackup,
-  getSecurityInfo,
   fetchNews,
   getScheduledRuns,
   getSyncPackageInfo,
-  listRepoMirrors,
   getServicesStatus,
   listArchiveVersions,
 } from "../api";
@@ -102,11 +98,9 @@ import orphansFixture from "../../test/fixtures/orphans.json";
 import saveMirrorlistFixture from "../../test/fixtures/save-mirrorlist.json";
 import refreshMirrorsFixture from "../../test/fixtures/refresh-mirrors.json";
 import restoreMirrorBackupFixture from "../../test/fixtures/restore-mirror-backup.json";
-import securityInfoFixture from "../../test/fixtures/security-info.json";
 import newsFixture from "../../test/fixtures/news.json";
 import scheduledRunsFixture from "../../test/fixtures/scheduled-runs.json";
 import syncPackageDetailFixture from "../../test/fixtures/sync-package-detail.json";
-import repoMirrorsFixture from "../../test/fixtures/repo-mirrors.json";
 import servicesStatusFixture from "../../test/fixtures/services-status.json";
 
 function spawnReturns(data: unknown): void {
@@ -118,7 +112,6 @@ function spawnReturns(data: unknown): void {
 beforeEach(() => {
   vi.clearAllMocks();
 });
-
 
 describe("listInstalled contract", () => {
   it("parses package-list fixture into PackageListResponse shape", async () => {
@@ -164,7 +157,6 @@ describe("listInstalled contract", () => {
   });
 });
 
-
 describe("checkUpdates contract", () => {
   it("parses updates fixture into UpdatesResponse shape", async () => {
     spawnReturns(updatesFixture);
@@ -190,7 +182,6 @@ describe("checkUpdates contract", () => {
     expect(update.repository).not.toBeNull();
   });
 });
-
 
 describe("getPackageInfo contract", () => {
   it("parses package-detail fixture into PackageDetails shape", async () => {
@@ -276,7 +267,6 @@ describe("getPackageInfo contract", () => {
   });
 });
 
-
 describe("searchPackages contract", () => {
   it("parses search-results fixture into SearchResponse shape", async () => {
     spawnReturns(searchResultsFixture);
@@ -309,7 +299,6 @@ describe("searchPackages contract", () => {
     expect(result.total_installed + result.total_not_installed).toBe(result.total);
   });
 });
-
 
 describe("preflightUpgrade contract", () => {
   it("minimal fixture (empty arrays absent) parses correctly", async () => {
@@ -388,7 +377,6 @@ describe("preflightUpgrade contract", () => {
   });
 });
 
-
 describe("listMirrors contract", () => {
   it("parses mirror-list fixture into MirrorListResponse shape", async () => {
     spawnReturns(mirrorListFixture);
@@ -431,39 +419,6 @@ describe("listMirrors contract", () => {
   });
 });
 
-
-describe("listRepoMirrors contract", () => {
-  it("parses repo-mirrors fixture into RepoMirrorsResponse shape", async () => {
-    spawnReturns(repoMirrorsFixture);
-    const result = await listRepoMirrors();
-
-    expect(Array.isArray(result.repos)).toBe(true);
-    expect(result.repos.length).toBe(3);
-  });
-
-  it("each repo has name and directives array", async () => {
-    spawnReturns(repoMirrorsFixture);
-    const result = await listRepoMirrors();
-
-    for (const repo of result.repos) {
-      expect(typeof repo.name).toBe("string");
-      expect(Array.isArray(repo.directives)).toBe(true);
-      for (const d of repo.directives) {
-        expect(["Server", "Include"]).toContain(d.directive_type);
-        expect(typeof d.value).toBe("string");
-      }
-    }
-  });
-
-  it("handles empty repos list", async () => {
-    spawnReturns({ repos: [] });
-    const result = await listRepoMirrors();
-
-    expect(result.repos).toEqual([]);
-  });
-});
-
-
 describe("fetchMirrorStatus contract", () => {
   it("parses mirror-status fixture into MirrorStatusResponse shape", async () => {
     spawnReturns(mirrorStatusFixture);
@@ -499,7 +454,6 @@ describe("fetchMirrorStatus contract", () => {
     expect(typeof populated.ipv6).toBe("boolean");
   });
 });
-
 
 describe("checkSecurity contract", () => {
   it("parses security-advisories fixture into SecurityResponse shape", async () => {
@@ -545,7 +499,6 @@ describe("checkSecurity contract", () => {
     expect(fixedAdvisory.fixed_version).toBe("8.5.0-1");
   });
 });
-
 
 describe("getGroupedHistory contract", () => {
   it("parses log-history fixture into GroupedLogResponse shape", async () => {
@@ -603,7 +556,6 @@ describe("getGroupedHistory contract", () => {
   });
 });
 
-
 describe("getRebootStatus contract", () => {
   it("parses reboot-status fixture into RebootStatus shape", async () => {
     spawnReturns(rebootStatusFixture);
@@ -642,7 +594,6 @@ describe("getRebootStatus contract", () => {
   });
 });
 
-
 describe("getPacnewStatus contract", () => {
   it("parses pacnew-status fixture into PacnewStatus shape", async () => {
     spawnReturns(pacnewStatusFixture);
@@ -671,7 +622,6 @@ describe("getPacnewStatus contract", () => {
   });
 });
 
-
 describe("getCacheInfo contract", () => {
   it("parses cache-info fixture into CacheInfo shape", async () => {
     spawnReturns(cacheInfoFixture);
@@ -694,7 +644,6 @@ describe("getCacheInfo contract", () => {
     expect(typeof pkg.size).toBe("number");
   });
 });
-
 
 describe("getKeyringStatus contract", () => {
   it("parses keyring-status fixture into KeyringStatusResponse shape", async () => {
@@ -722,7 +671,6 @@ describe("getKeyringStatus contract", () => {
     expect(typeof secondKey.expires).toBe("string"); // present in second key
   });
 });
-
 
 describe("getDependencyTree contract", () => {
   it("parses dependency-tree fixture into DependencyTreeResponse shape", async () => {
@@ -765,7 +713,6 @@ describe("getDependencyTree contract", () => {
     expect(typeof edge.edge_type).toBe("string");
   });
 });
-
 
 describe("stream-events fixture shape", () => {
   // These tests verify the fixture file — the actual streaming path is tested in api.test.ts.
@@ -863,7 +810,6 @@ describe("stream-events fixture shape", () => {
   });
 });
 
-
 describe("listOrphans contract", () => {
   it("parses orphans fixture into OrphanResponse shape", async () => {
     spawnReturns(orphansFixture);
@@ -897,7 +843,6 @@ describe("listOrphans contract", () => {
   });
 });
 
-
 describe("saveMirrorlist contract", () => {
   it("parses save-mirrorlist fixture into SaveMirrorlistResponse shape", async () => {
     spawnReturns(saveMirrorlistFixture);
@@ -922,7 +867,6 @@ describe("saveMirrorlist contract", () => {
     expect(typeof result.message).toBe("string");
   });
 });
-
 
 describe("refreshMirrors contract", () => {
   it("parses refresh-mirrors fixture into RefreshMirrorsResponse shape", async () => {
@@ -954,7 +898,6 @@ describe("refreshMirrors contract", () => {
   });
 });
 
-
 describe("restoreMirrorBackup contract", () => {
   it("parses restore-mirror-backup fixture into RestoreMirrorBackupResponse shape", async () => {
     spawnReturns(restoreMirrorBackupFixture);
@@ -971,56 +914,6 @@ describe("restoreMirrorBackup contract", () => {
     expect(result.backup_path).toBeNull();
   });
 });
-
-
-describe("getSecurityInfo contract", () => {
-  it("parses security-info fixture into SecurityInfoResponse shape", async () => {
-    spawnReturns(securityInfoFixture);
-    const result = await getSecurityInfo("openssl");
-
-    expect(typeof result.name).toBe("string");
-    expect(Array.isArray(result.advisories)).toBe(true);
-    expect(Array.isArray(result.groups)).toBe(true);
-    expect(Array.isArray(result.issues)).toBe(true);
-  });
-
-  it("advisory entries have correct field types", async () => {
-    spawnReturns(securityInfoFixture);
-    const result = await getSecurityInfo("openssl");
-
-    const advisory: SecurityInfoAdvisory = result.advisories[0];
-    expect(typeof advisory.name).toBe("string");
-    expect(typeof advisory.date).toBe("string");
-    expect(typeof advisory.severity).toBe("string");
-    expect(typeof advisory.advisory_type).toBe("string");
-  });
-
-  it("issues have all required fields", async () => {
-    spawnReturns(securityInfoFixture);
-    const result = await getSecurityInfo("openssl");
-
-    const issue = result.issues[0];
-    expect(typeof issue.name).toBe("string");
-    expect(typeof issue.severity).toBe("string");
-    expect(typeof issue.issue_type).toBe("string");
-    expect(typeof issue.status).toBe("string");
-  });
-
-  it("empty arrays are valid (package with no advisories)", async () => {
-    spawnReturns({
-      name: "safe-pkg",
-      advisories: [],
-      groups: [],
-      issues: [],
-    } as SecurityInfoResponse);
-    const result = await getSecurityInfo("safe-pkg");
-
-    expect(result.advisories).toHaveLength(0);
-    expect(result.groups).toHaveLength(0);
-    expect(result.issues).toHaveLength(0);
-  });
-});
-
 
 describe("fetchNews contract", () => {
   it("parses news fixture into NewsResponse shape", async () => {
@@ -1049,7 +942,6 @@ describe("fetchNews contract", () => {
     expect(result.items).toHaveLength(0);
   });
 });
-
 
 describe("getScheduledRuns contract", () => {
   it("parses scheduled-runs fixture into ScheduledRunsResponse shape", async () => {
@@ -1090,7 +982,6 @@ describe("getScheduledRuns contract", () => {
     expect(result.total).toBe(result.runs.length);
   });
 });
-
 
 describe("getSyncPackageInfo contract", () => {
   it("parses sync-package-detail fixture into SyncPackageDetails shape", async () => {
@@ -1134,7 +1025,6 @@ describe("getSyncPackageInfo contract", () => {
   });
 });
 
-
 describe("fixture files are valid JSON objects", () => {
   it("package-list.json is an object with packages array", () => {
     expect(packageListFixture).toBeDefined();
@@ -1162,7 +1052,6 @@ describe("fixture files are valid JSON objects", () => {
     expect(lacksFixed).toBe(true);
   });
 });
-
 
 describe("getServicesStatus contract", () => {
   it("parses empty services-status fixture into ServicesStatus shape", async () => {
@@ -1199,7 +1088,6 @@ describe("getServicesStatus contract", () => {
     expect(noPackages!.name).toBe("sshd.service");
   });
 });
-
 
 describe("listArchiveVersions contract", () => {
   const archiveResponse: DowngradeResponse = {

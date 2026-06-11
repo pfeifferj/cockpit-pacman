@@ -10,7 +10,6 @@ import {
 } from "./test/mocks";
 import {
   formatSize,
-  formatDate,
   listInstalled,
   checkUpdates,
   getPackageInfo,
@@ -51,18 +50,6 @@ describe("formatSize", () => {
     expect(formatSize(-1536)).toBe("-1.5 KiB");
     expect(formatSize(-1198151)).toBe("-1.1 MiB");
     expect(formatSize(-1024 * 1024 * 1024 * 2.5)).toBe("-2.50 GiB");
-  });
-});
-
-describe("formatDate", () => {
-  it("returns Unknown for null", () => {
-    expect(formatDate(null)).toBe("Unknown");
-  });
-
-  it("formats unix timestamp", () => {
-    const timestamp = 1704067200; // 2024-01-01 00:00:00 UTC
-    const result = formatDate(timestamp);
-    expect(result).toContain("2024");
   });
 });
 

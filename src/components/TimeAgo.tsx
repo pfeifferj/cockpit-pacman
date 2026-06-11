@@ -6,23 +6,21 @@ interface TimeAgoProps {
   timestamp: string | number | null | undefined;
   dateOnly?: boolean;
   fallback?: string;
-  live?: boolean;
 }
 
 export const TimeAgo: React.FC<TimeAgoProps> = ({
   timestamp,
   dateOnly = false,
   fallback = "Unknown",
-  live = true,
 }) => {
   const [, setTick] = useState(0);
 
   const date = useMemo(() => parseTimestamp(timestamp ?? null), [timestamp]);
 
   useEffect(() => {
-    if (!live || !date) return;
+    if (!date) return;
     return subscribeToTick(() => setTick(t => t + 1));
-  }, [live, date]);
+  }, [date]);
 
   if (!date) {
     return <span>{fallback}</span>;

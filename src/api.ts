@@ -386,39 +386,8 @@ export interface SecurityResponse {
   stale?: boolean;
 }
 
-export interface SecurityInfoAdvisory {
-  name: string;
-  date: string;
-  severity: string;
-  advisory_type: string;
-}
-
-export interface SecurityInfoGroup {
-  name: string;
-  status: string;
-  severity: string;
-}
-
-export interface SecurityInfoIssue {
-  name: string;
-  severity: string;
-  issue_type: string;
-  status: string;
-}
-
-export interface SecurityInfoResponse {
-  name: string;
-  advisories: SecurityInfoAdvisory[];
-  groups: SecurityInfoGroup[];
-  issues: SecurityInfoIssue[];
-}
-
 export async function checkSecurity(): Promise<SecurityResponse> {
   return runBackend<SecurityResponse>("check-security", [], { superuser: "none" });
-}
-
-export async function getSecurityInfo(name: string): Promise<SecurityInfoResponse> {
-  return runBackend<SecurityInfoResponse>("security-info", [sanitizeSearchInput(name)], { superuser: "none" });
 }
 
 export async function getPackageInfo(name: string): Promise<PackageDetails> {
@@ -685,11 +654,6 @@ export function formatNumber(n: number): string {
   return n.toLocaleString();
 }
 
-export function formatDate(timestamp: number | null): string {
-  if (timestamp === null || timestamp === undefined) return "Unknown";
-  return new Date(timestamp * 1000).toLocaleString();
-}
-
 // Keyring types
 export interface KeyringKey {
   fingerprint: string;
@@ -821,15 +785,6 @@ export interface LogEntry {
   new_version: string | null;
 }
 
-export interface LogResponse {
-  entries: LogEntry[];
-  total: number;
-  total_upgraded: number;
-  total_installed: number;
-  total_removed: number;
-  total_other: number;
-}
-
 export type HistoryFilterType = "all" | "upgraded" | "installed" | "removed";
 
 export interface HistoryParams {
@@ -837,11 +792,6 @@ export interface HistoryParams {
   limit?: number;
   filter?: HistoryFilterType;
   search?: string;
-}
-
-export async function getHistory(params: HistoryParams = {}): Promise<LogResponse> {
-  const { offset = 0, limit = 100, filter = "all", search = "" } = params;
-  return runBackend<LogResponse>("history", [String(offset), String(limit), filter, search]);
 }
 
 export interface LogGroup {
@@ -1236,14 +1186,6 @@ export interface RepoConfig {
   directives: RepoDirective[];
 }
 
-export interface RepoMirrorsResponse {
-  repos: RepoConfig[];
-}
-
-export async function listRepoMirrors(): Promise<RepoMirrorsResponse> {
-  return runBackend<RepoMirrorsResponse>("list-repo-mirrors");
-}
-
 export interface DependencyNode {
   id: string;
   name: string;
@@ -1372,8 +1314,6 @@ export interface SignoffGroupWithLocal {
   arch: string;
   repo: string;
   packager: string;
-  comments: string | null;
-  last_update: string;
   known_bad: boolean;
   approved: boolean;
   required: number;
