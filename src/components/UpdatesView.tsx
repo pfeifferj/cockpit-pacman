@@ -257,7 +257,7 @@ interface UpdatesViewProps {
   signoffCredentials?: KeyringCredentials | null;
 }
 
-const LockErrorBody: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
+const LockErrorBody: React.FC<{ onRetry: () => void; onAutoRetry: () => void }> = ({ onRetry, onAutoRetry }) => {
   const [checking, setChecking] = useState(true);
   const [removing, setRemoving] = useState(false);
   const [lockInfo, setLockInfo] = useState<{ stale: boolean; process?: string } | null>(null);
@@ -269,7 +269,7 @@ const LockErrorBody: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
       .then((status) => {
         if (cancelled) return;
         if (!status.locked) {
-          onRetry();
+          onAutoRetry();
           return;
         }
         setLockInfo({ stale: status.stale, process: status.blocking_process });
@@ -283,7 +283,7 @@ const LockErrorBody: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
         setChecking(false);
       });
     return () => { cancelled = true; };
-  }, [onRetry]);
+  }, [onAutoRetry]);
 
   const handleRemoveLock = async () => {
     setRemoving(true);
@@ -342,6 +342,21 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
   const [warnings, setWarnings] = useState<string[]>([]);
   const cancelRef = useRef<(() => void) | null>(null);
+  const errorOriginRef = useRef<"check" | "preflight" | "upgrade">("check");
+  const autoResumedRef = useRef(false);
+  const [lockRetryExhausted, setLockRetryExhausted] = useState(false);
+  const [errorEpoch, setErrorEpoch] = useState(0);
+
+  // Consecutive errors can commit in one render batch without ever showing
+  // the intermediate state, so the epoch forces LockErrorBody to remount
+  // (and re-check the lock) for each new error.
+  const failWith = useCallback((origin: "check" | "preflight" | "upgrade", message: string, code?: ErrorCode) => {
+    errorOriginRef.current = origin;
+    setError(message);
+    setErrorCode(code);
+    setErrorEpoch((e) => e + 1);
+    setState("error");
+  }, []);
   const logContainerRef = useAutoScrollLog(log);
   const { selectedPackage, detailsLoading: packageLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
   const [searchFilter, setSearchFilter] = useState("");
@@ -578,6 +593,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     setError(null);
     setErrorCode(undefined);
     setWarnings([]);
+    setLockRetryExhausted(false);
     publishPageStatus({
       type: null,
       title: "Checking for package updates\u2026",
@@ -585,6 +601,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     });
     try {
       const response = await checkUpdates();
+      autoResumedRef.current = false;
       setUpdates(response.updates);
       setWarnings(response.warnings);
       setState(response.updates.length > 0 ? "available" : "uptodate");
@@ -604,15 +621,13 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         });
       }
     } catch (ex) {
-      setState("error");
-      setError(ex instanceof Error ? ex.message : String(ex));
-      setErrorCode(ex instanceof BackendError ? ex.code : undefined);
+      failWith("check", ex instanceof Error ? ex.message : String(ex), ex instanceof BackendError ? ex.code : undefined);
       publishPageStatus({
         type: "error",
         title: "Failed to check for package updates",
       });
     }
-  }, [loadSecurityData]);
+  }, [loadSecurityData, failWith]);
 
   useEffect(() => {
     const { cancel } = syncDatabase({
@@ -621,14 +636,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
       }),
       onComplete: () => loadUpdates(),
-      onError: (err, code) => {
-        setState("error");
-        setError(err);
-        setErrorCode(code);
-      },
+      onError: (err, code) => failWith("check", err, code),
     });
     return () => cancel();
-  }, [loadUpdates]);
+  }, [loadUpdates, failWith]);
 
   const loadRebootStatus = useCallback(async () => {
     try {
@@ -772,17 +783,15 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     setState("checking");
     setLog("");
     setSelectedPackages(new Set());
+    setLockRetryExhausted(false);
+    autoResumedRef.current = false;
     const { cancel } = syncDatabase({
       onData: (data) => setLog((prev) => {
         const newLog = prev + data;
         return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
       }),
       onComplete: () => loadUpdates(),
-      onError: (err, code) => {
-        setState("error");
-        setError(err);
-        setErrorCode(code);
-      },
+      onError: (err, code) => failWith("check", err, code),
     });
     cancelRef.current = cancel;
   };
@@ -792,16 +801,17 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     setPreflightLoading(true);
     setError(null);
     setErrorCode(undefined);
+    setLockRetryExhausted(false);
     try {
       const preflight = await preflightUpgrade(ignoredPackages);
       setPreflightData(preflight);
       setPreflightLoading(false);
 
       if (!preflight.success) {
-        setError(preflight.error || "Preflight check failed");
-        setState("error");
+        failWith("preflight", preflight.error || "Preflight check failed");
         return;
       }
+      autoResumedRef.current = false;
 
       // Check if there are any issues needing confirmation
       const hasIssues =
@@ -826,9 +836,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       startUpgrade();
     } catch (ex) {
       setPreflightLoading(false);
-      setError(ex instanceof Error ? ex.message : String(ex));
-      setErrorCode(ex instanceof BackendError ? ex.code : undefined);
-      setState("error");
+      failWith("preflight", ex instanceof Error ? ex.message : String(ex), ex instanceof BackendError ? ex.code : undefined);
     }
   };
 
@@ -836,6 +844,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     setConfirmModalOpen(false);
     setState("applying");
     setLog("");
+    setLockRetryExhausted(false);
     setUpgradeProgress({
       phase: "preparing",
       current: 0,
@@ -882,6 +891,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
       }),
       onComplete: () => {
+        autoResumedRef.current = false;
         setState("success");
         setUpdates([]);
         cancelRef.current = null;
@@ -903,14 +913,47 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         });
       },
       onError: (err, code) => {
-        setState("error");
-        setError(err);
-        setErrorCode(code);
+        failWith("upgrade", err, code);
         cancelRef.current = null;
       },
     }, ignoredPackages);
     cancelRef.current = cancel;
   };
+
+  const resumeRef = useRef({ apply: handleApplyUpdates, upgrade: startUpgrade });
+  useEffect(() => {
+    resumeRef.current = { apply: handleApplyUpdates, upgrade: startUpgrade };
+  });
+
+  // Re-runs the operation that hit the lock (check errors fall back to a
+  // re-check), so removing a stale lock resumes an interrupted apply
+  // instead of bouncing back to the list.
+  const resumeAfterLock = useCallback(() => {
+    if (errorOriginRef.current === "preflight") {
+      resumeRef.current.apply();
+    } else if (errorOriginRef.current === "upgrade") {
+      resumeRef.current.upgrade();
+    } else {
+      loadUpdates();
+    }
+  }, [loadUpdates]);
+
+  const manualResumeAfterLock = useCallback(() => {
+    autoResumedRef.current = false;
+    resumeAfterLock();
+  }, [resumeAfterLock]);
+
+  // The lock-error heuristic also matches transaction failures that are not
+  // lock related, so the no-lock-found auto retry gets one attempt before
+  // falling back to the plain error display.
+  const autoResumeAfterLock = useCallback(() => {
+    if (autoResumedRef.current) {
+      setLockRetryExhausted(true);
+      return;
+    }
+    autoResumedRef.current = true;
+    resumeAfterLock();
+  }, [resumeAfterLock]);
 
   const handleCancelClick = () => {
     setCancelModalOpen(true);
@@ -1183,6 +1226,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
   if (state === "error") {
     const isLockError = error ? /unable to lock database|failed to initialize transaction/i.test(error) : false;
+    const showLockRecovery = isLockError && !lockRetryExhausted;
     // Only a genuine connectivity failure shows the offline state here. A bare
     // operation timeout (the sync/upgrade exceeded its budget) is not an
     // unreachable-host condition, so it keeps its specific message.
@@ -1203,17 +1247,17 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
             <EmptyState
               headingLevel="h2"
               icon={ExclamationCircleIcon}
-              titleText={isLockError ? "Database is locked" : "Error checking for updates"}
-              status={isLockError ? "warning" : "danger"}
+              titleText={showLockRecovery ? "Database is locked" : "Error checking for updates"}
+              status={showLockRecovery ? "warning" : "danger"}
             >
               <EmptyStateBody>
-                {isLockError
-                  ? <LockErrorBody onRetry={loadUpdates} />
+                {showLockRecovery
+                  ? <LockErrorBody key={errorEpoch} onRetry={manualResumeAfterLock} onAutoRetry={autoResumeAfterLock} />
                   : error}
               </EmptyStateBody>
               <EmptyStateFooter>
                 <EmptyStateActions>
-                  <Button variant="primary" onClick={loadUpdates}>Retry</Button>
+                  <Button variant="primary" onClick={showLockRecovery ? manualResumeAfterLock : loadUpdates}>Retry</Button>
                   <Button variant="link" onClick={() => setState("uptodate")}>Dismiss</Button>
                 </EmptyStateActions>
               </EmptyStateFooter>
@@ -1608,7 +1652,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
               <ToolbarItem>
                 <Button
                   variant="primary"
-                  onClick={handleApplyUpdates}
+                  onClick={() => {
+                    autoResumedRef.current = false;
+                    handleApplyUpdates();
+                  }}
                   isLoading={preflightLoading}
                   isDisabled={preflightLoading || selectedPackages.size === 0}
                 >

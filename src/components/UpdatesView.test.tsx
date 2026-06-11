@@ -656,6 +656,140 @@ describe("UpdatesView", () => {
       });
     });
 
+    it("resumes preflight after removing a stale lock", async () => {
+      mockPreflightUpgrade.mockRejectedValueOnce(new Error("Unable to lock database"));
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
+
+      const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
+      await act(async () => {
+        fireEvent.click(applyButton);
+      });
+
+      const removeButton = await screen.findByRole("button", { name: /Remove stale lock/ });
+      await act(async () => {
+        fireEvent.click(removeButton);
+      });
+
+      await waitFor(() => {
+        expect(mockPreflightUpgrade).toHaveBeenCalledTimes(2);
+      });
+      await waitFor(() => {
+        expect(screen.getByText("Applying Updates")).toBeInTheDocument();
+      });
+      expect(mockCheckUpdates).toHaveBeenCalledTimes(1);
+    });
+
+    it("restarts the upgrade after removing a stale lock", async () => {
+      mockRunUpgrade.mockImplementationOnce((callbacks) => {
+        setTimeout(() => callbacks.onError("Failed to initialize transaction: unable to lock database"), 0);
+        return { cancel: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
+
+      const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
+      await act(async () => {
+        fireEvent.click(applyButton);
+      });
+
+      const removeButton = await screen.findByRole("button", { name: /Remove stale lock/ });
+      await act(async () => {
+        fireEvent.click(removeButton);
+      });
+
+      await waitFor(() => {
+        expect(mockRunUpgrade).toHaveBeenCalledTimes(2);
+      });
+      expect(mockPreflightUpgrade).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("Applying Updates")).toBeInTheDocument();
+    });
+
+    it("stops auto-resuming when the failure is not a lock", async () => {
+      mockCheckLock.mockResolvedValue({
+        locked: false,
+        stale: false,
+        lock_path: "/var/lib/pacman/db.lck",
+      });
+      mockRunUpgrade.mockImplementation((callbacks) => {
+        setTimeout(() => callbacks.onError("Failed to initialize transaction: invalid or corrupted database"), 0);
+        return { cancel: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
+
+      const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
+      await act(async () => {
+        fireEvent.click(applyButton);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/invalid or corrupted database/)).toBeInTheDocument();
+      }, { timeout: 3000 });
+      expect(mockRunUpgrade).toHaveBeenCalledTimes(2);
+      expect(screen.getByText("Error checking for updates")).toBeInTheDocument();
+      expect(screen.queryByText("Database is locked")).not.toBeInTheDocument();
+    });
+
+    it("resumes via the footer retry button during a lock error", async () => {
+      mockPreflightUpgrade.mockRejectedValueOnce(new Error("Unable to lock database"));
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
+
+      const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
+      await act(async () => {
+        fireEvent.click(applyButton);
+      });
+
+      await screen.findByRole("button", { name: /Remove stale lock/ });
+      const retryButton = screen.getByRole("button", { name: "Retry" });
+      await act(async () => {
+        fireEvent.click(retryButton);
+      });
+
+      await waitFor(() => {
+        expect(mockPreflightUpgrade).toHaveBeenCalledTimes(2);
+      });
+      expect(mockCheckUpdates).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows the failure and does not resume when lock removal is refused", async () => {
+      mockPreflightUpgrade.mockRejectedValue(new Error("Unable to lock database"));
+      mockRemoveStaleLock.mockResolvedValue({ removed: false, error: "Database in use by pacman (pid 42)" });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
+
+      const applyButton = screen.getByRole("button", { name: /Apply 1 Update/i });
+      await act(async () => {
+        fireEvent.click(applyButton);
+      });
+
+      const removeButton = await screen.findByRole("button", { name: /Remove stale lock/ });
+      await act(async () => {
+        fireEvent.click(removeButton);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/Database in use by pacman \(pid 42\)/)).toBeInTheDocument();
+      });
+      expect(mockPreflightUpgrade).toHaveBeenCalledTimes(1);
+    });
+
     it("shows retry button on error", async () => {
       mockCheckUpdates.mockRejectedValue(new Error("Network error"));
       render(<UpdatesView />);
