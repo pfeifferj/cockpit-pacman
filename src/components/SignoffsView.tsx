@@ -27,6 +27,7 @@ import {
   Tooltip,
   Icon,
 } from "@patternfly/react-core";
+import { CompactPagination } from "./CompactPagination";
 import {
   Table,
   Thead,
@@ -425,14 +426,12 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
             </ToolbarItem>
           )}
           <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
-            <Pagination
+            <CompactPagination
               itemCount={filteredGroups.length}
               perPage={perPage}
               page={page}
               onSetPage={onSetPage}
               onPerPageSelect={onPerPageSelect}
-              perPageOptions={PER_PAGE_OPTIONS}
-              isCompact
             />
           </ToolbarItem>
         </ToolbarContent>

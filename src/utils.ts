@@ -9,6 +9,10 @@ export function appendCapped(prev: string, data: string, cap = MAX_LOG_SIZE_BYTE
   return next.length > cap ? next.slice(-cap) : next;
 }
 
+export function isDbLockError(message: string): boolean {
+  return message.toLowerCase().includes("unable to lock database");
+}
+
 export function sanitizeSearchInput(input: string): string {
   return input.trim().normalize("NFC").slice(0, MAX_SEARCH_LENGTH);
 }

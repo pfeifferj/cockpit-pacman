@@ -5,7 +5,6 @@ import { useSortableTable } from "../hooks/useSortableTable";
 import {
   Card,
   CardBody,
-  Alert,
   SearchInput,
   Toolbar,
   ToolbarContent,
@@ -13,26 +12,26 @@ import {
   Label,
   EmptyState,
   EmptyStateBody,
-
   MenuToggle,
   MenuToggleElement,
   Select,
   SelectOption,
   SelectList,
-  Pagination,
   ToggleGroup,
   ToggleGroupItem,
   Badge,
   Button,
   Spinner,
 } from "@patternfly/react-core";
+import { CompactPagination } from "./CompactPagination";
+import { ErrorAlert } from "./ErrorAlert";
 import { SearchIcon } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import { SearchResult, searchPackages, InstalledFilterType } from "../api";
 import { sanitizeSearchInput } from "../utils";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { TableLoadingOverlay } from "./TableLoadingOverlay";
-import { PER_PAGE_OPTIONS, SEARCH_DEBOUNCE_MS } from "../constants";
+import { SEARCH_DEBOUNCE_MS } from "../constants";
 
 const MIN_SEARCH_LENGTH = 1;
 
@@ -264,20 +263,14 @@ export const SearchView: React.FC = () => {
     fetchDetails(pkgName, installed ? { strategy: "local" } : { strategy: "sync", repo });
   };
 
-  const errorAlert = error ? (() => {
-    const isLockError = error.toLowerCase().includes("unable to lock database");
-    return (
-      <Alert
-        variant={isLockError ? "warning" : "danger"}
-        title={isLockError ? "Database is locked" : "Search failed"}
-        className="pf-v6-u-mb-md"
-      >
-        {isLockError
-          ? "Another package manager operation is in progress. Please wait for it to complete before searching."
-          : error}
-      </Alert>
-    );
-  })() : null;
+  const errorAlert = error ? (
+    <ErrorAlert
+      error={error}
+      title="Search failed"
+      lockMessage="Another package manager operation is in progress. Please wait for it to complete before searching."
+      className="pf-v6-u-mb-md"
+    />
+  ) : null;
 
   return (
     <>
@@ -380,14 +373,12 @@ export const SearchView: React.FC = () => {
                 </ToolbarItem>
                 {repoFilter === "all" && (
                   <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
-                    <Pagination
+                    <CompactPagination
                       itemCount={total}
                       perPage={perPage}
                       page={page}
                       onSetPage={handleSetPage}
                       onPerPageSelect={handlePerPageSelect}
-                      perPageOptions={PER_PAGE_OPTIONS}
-                      isCompact
                     />
                   </ToolbarItem>
                 )}
@@ -439,14 +430,12 @@ export const SearchView: React.FC = () => {
               <ToolbarContent>
                 {repoFilter === "all" && (
                   <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
-                    <Pagination
+                    <CompactPagination
                       itemCount={total}
                       perPage={perPage}
                       page={page}
                       onSetPage={handleSetPage}
                       onPerPageSelect={handlePerPageSelect}
-                      perPageOptions={PER_PAGE_OPTIONS}
-                      isCompact
                     />
                   </ToolbarItem>
                 )}

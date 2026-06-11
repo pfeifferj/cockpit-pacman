@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useBackdropClose } from "../hooks/useBackdropClose";
-import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
-import { LOG_CONTAINER_HEIGHT } from "../constants";
 import {
   Modal,
   ModalVariant,
@@ -14,12 +12,10 @@ import {
   EmptyState,
   EmptyStateBody,
   Label,
-  CodeBlock,
-  CodeBlockCode,
-  ExpandableSection,
   Content,
   ContentVariants,
 } from "@patternfly/react-core";
+import { ExpandableLogViewer } from "./LogViewer";
 import { CheckCircleIcon } from "@patternfly/react-icons";
 import { installPackage } from "../api";
 import { appendCapped, sanitizeErrorMessage } from "../utils";
@@ -47,7 +43,6 @@ export const InstallModal: React.FC<InstallModalProps> = ({
   const [log, setLog] = useState("");
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const cancelRef = useRef<(() => void) | null>(null);
-  const logContainerRef = useAutoScrollLog(log);
 
   const resetState = useCallback(() => {
     setState("confirm");
@@ -135,17 +130,12 @@ export const InstallModal: React.FC<InstallModalProps> = ({
             <div className="pf-v6-u-mb-md">
               <Spinner size="md" /> Installing {packageName}...
             </div>
-            <ExpandableSection
-              toggleText={isDetailsExpanded ? "Hide details" : "Show details"}
-              onToggle={(_event, expanded) => setIsDetailsExpanded(expanded)}
+            <ExpandableLogViewer
+              log={log}
+              placeholder="Starting..."
               isExpanded={isDetailsExpanded}
-            >
-              <div ref={logContainerRef} style={{ maxHeight: LOG_CONTAINER_HEIGHT, overflow: "auto" }}>
-                <CodeBlock>
-                  <CodeBlockCode>{log || "Starting..."}</CodeBlockCode>
-                </CodeBlock>
-              </div>
-            </ExpandableSection>
+              onToggle={setIsDetailsExpanded}
+            />
           </>
         );
 

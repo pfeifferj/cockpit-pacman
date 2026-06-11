@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useBackdropClose } from "../hooks/useBackdropClose";
-import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
 import { useDebouncedValue } from "../hooks/useDebounce";
-import { LOG_CONTAINER_HEIGHT, SEARCH_DEBOUNCE_MS } from "../constants";
+import { SEARCH_DEBOUNCE_MS } from "../constants";
 import {
   Modal,
   ModalVariant,
@@ -16,15 +15,13 @@ import {
   EmptyState,
   EmptyStateBody,
   Label,
-  CodeBlock,
-  CodeBlockCode,
-  ExpandableSection,
   Content,
   ContentVariants,
   ToggleGroup,
   ToggleGroupItem,
   SearchInput,
 } from "@patternfly/react-core";
+import { ExpandableLogViewer } from "./LogViewer";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import { useSortableTable } from "../hooks/useSortableTable";
 import { ArrowDownIcon, ArrowUpIcon, DownloadIcon, CheckCircleIcon } from "@patternfly/react-icons";
@@ -75,7 +72,6 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
   const [serverResults, setServerResults] = useState<{ query: string; packages: CachedVersion[]; failed: boolean } | null>(null);
   const cancelRef = useRef<(() => void) | null>(null);
   const loadIdRef = useRef(0);
-  const logContainerRef = useAutoScrollLog(log);
 
   const loadVersions = useCallback(async (src: DowngradeSource) => {
     if (!packageName) return;
@@ -419,17 +415,12 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
             <div className="pf-v6-u-mb-md">
               <Spinner size="md" /> {selectedVersion?.is_older ? "Downgrading" : "Upgrading"} {packageName} to {selectedVersion?.version}...
             </div>
-            <ExpandableSection
-              toggleText={isDetailsExpanded ? "Hide details" : "Show details"}
-              onToggle={(_event, expanded) => setIsDetailsExpanded(expanded)}
+            <ExpandableLogViewer
+              log={log}
+              placeholder="Starting..."
               isExpanded={isDetailsExpanded}
-            >
-              <div ref={logContainerRef} style={{ maxHeight: LOG_CONTAINER_HEIGHT, overflow: "auto" }}>
-                <CodeBlock>
-                  <CodeBlockCode>{log || "Starting..."}</CodeBlockCode>
-                </CodeBlock>
-              </div>
-            </ExpandableSection>
+              onToggle={setIsDetailsExpanded}
+            />
           </>
         );
 

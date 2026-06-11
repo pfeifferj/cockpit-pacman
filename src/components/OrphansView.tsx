@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
 import { useBackdropClose } from "../hooks/useBackdropClose";
 import { useSortableTable } from "../hooks/useSortableTable";
 import {
   Button,
   Spinner,
-  Alert,
   Modal,
   ModalVariant,
   ModalHeader,
@@ -17,9 +15,6 @@ import {
   EmptyStateBody,
   EmptyStateActions,
   EmptyStateFooter,
-  CodeBlock,
-  CodeBlockCode,
-  ExpandableSection,
   Flex,
   FlexItem,
   Label,
@@ -27,8 +22,10 @@ import {
   Popover,
   Icon,
 } from "@patternfly/react-core";
+import { ExpandableLogViewer, LogViewer } from "./LogViewer";
 import { TrashIcon, CheckCircleIcon, OutlinedQuestionCircleIcon } from "@patternfly/react-icons";
 import { StatBox } from "./StatBox";
+import { ErrorAlert } from "./ErrorAlert";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
   OrphanPackage,
@@ -38,7 +35,6 @@ import {
   formatSize,
 } from "../api";
 import { TimeAgo } from "./TimeAgo";
-import { LOG_CONTAINER_HEIGHT } from "../constants";
 import { appendCapped } from "../utils";
 
 type ViewState = "loading" | "ready" | "removing" | "success";
@@ -59,7 +55,6 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
   const [log, setLog] = useState("");
   const [logExpanded, setLogExpanded] = useState(false);
   const cancelRef = useRef<(() => void) | null>(null);
-  const logContainerRef = useAutoScrollLog(log);
 
   const { activeSortIndex, activeSortDirection, getSortParams } = useSortableTable({
     sortableColumns: [0, 2, 3],
@@ -167,19 +162,7 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
   }
 
   if (error) {
-    const isLockError = error.toLowerCase().includes("unable to lock database");
-    return (
-      <>
-        <Alert
-          variant={isLockError ? "warning" : "danger"}
-          title={isLockError ? "Database is locked" : "Error loading orphans"}
-        >
-          {isLockError
-            ? "Another package manager operation is in progress. Please wait for it to complete."
-            : error}
-        </Alert>
-      </>
-    );
+    return <ErrorAlert error={error} title="Error loading orphans" />;
   }
 
   if (viewState === "removing") {
@@ -200,17 +183,12 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
           <Spinner size="md" /> Removing packages...
         </div>
 
-        <ExpandableSection
-          toggleText={logExpanded ? "Hide details" : "Show details"}
-          onToggle={(_event, expanded) => setLogExpanded(expanded)}
+        <ExpandableLogViewer
+          log={log}
+          placeholder="Starting..."
           isExpanded={logExpanded}
-        >
-          <div ref={logContainerRef} style={{ maxHeight: LOG_CONTAINER_HEIGHT, overflow: "auto" }}>
-            <CodeBlock>
-              <CodeBlockCode>{log || "Starting..."}</CodeBlockCode>
-            </CodeBlock>
-          </div>
-        </ExpandableSection>
+          onToggle={setLogExpanded}
+        />
       </>
     );
   }
@@ -230,13 +208,7 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
             </EmptyStateActions>
           </EmptyStateFooter>
         </EmptyState>
-        {log && (
-          <div className="pf-v6-u-mt-md" style={{ maxHeight: LOG_CONTAINER_HEIGHT, overflow: "auto" }}>
-            <CodeBlock>
-              <CodeBlockCode>{log}</CodeBlockCode>
-            </CodeBlock>
-          </div>
-        )}
+        {log && <LogViewer log={log} className="pf-v6-u-mt-md" />}
       </>
     );
   }

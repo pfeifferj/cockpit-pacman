@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { LOG_CONTAINER_HEIGHT, PER_PAGE_OPTIONS } from "../constants";
-import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
 import { useBackdropClose } from "../hooks/useBackdropClose";
 import { usePackageDetails } from "../hooks/usePackageDetails";
 import { usePagination } from "../hooks/usePagination";
@@ -16,11 +14,8 @@ import {
   EmptyStateActions,
   EmptyStateFooter,
   Spinner,
-  CodeBlock,
-  CodeBlockCode,
   Flex,
   FlexItem,
-  ExpandableSection,
   Modal,
   ModalVariant,
   ModalHeader,
@@ -33,12 +28,13 @@ import {
   Toolbar,
   ToolbarContent,
   ToolbarItem,
-  Pagination,
   Popover,
   Icon,
   Label,
   LabelGroup,
 } from "@patternfly/react-core";
+import { ExpandableLogViewer, LogViewer } from "./LogViewer";
+import { CompactPagination } from "./CompactPagination";
 import { TrashIcon, CheckCircleIcon, FolderIcon, ExclamationCircleIcon, OutlinedQuestionCircleIcon } from "@patternfly/react-icons";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { StatBox } from "./StatBox";
@@ -77,7 +73,6 @@ export const CacheView: React.FC = () => {
   const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
   const { page, perPage, onSetPage, onPerPageSelect, resetPage } = usePagination();
   const cancelRef = useRef<(() => void) | null>(null);
-  const logContainerRef = useAutoScrollLog(log);
   const isMountedRef = useRef(true);
 
   const { activeSortIndex, activeSortDirection, getSortParams } = useSortableTable({
@@ -311,17 +306,12 @@ export const CacheView: React.FC = () => {
             <Spinner size="md" /> Cleaning cache (keeping {keepVersions} version{keepVersions !== 1 ? "s" : ""})...
           </div>
 
-          <ExpandableSection
-            toggleText={isDetailsExpanded ? "Hide details" : "Show details"}
-            onToggle={(_event, expanded) => setIsDetailsExpanded(expanded)}
+          <ExpandableLogViewer
+            log={log}
+            placeholder="Starting..."
             isExpanded={isDetailsExpanded}
-          >
-            <div ref={logContainerRef} style={{ maxHeight: LOG_CONTAINER_HEIGHT, overflow: "auto" }}>
-              <CodeBlock>
-                <CodeBlockCode>{log || "Starting..."}</CodeBlockCode>
-              </CodeBlock>
-            </div>
-          </ExpandableSection>
+            onToggle={setIsDetailsExpanded}
+          />
         </CardBody>
       </Card>
     );
@@ -343,13 +333,7 @@ export const CacheView: React.FC = () => {
               </EmptyStateActions>
             </EmptyStateFooter>
           </EmptyState>
-          {log && (
-            <div className="pf-v6-u-mt-md" style={{ maxHeight: LOG_CONTAINER_HEIGHT, overflow: "auto" }}>
-              <CodeBlock>
-                <CodeBlockCode>{log}</CodeBlockCode>
-              </CodeBlock>
-            </div>
-          )}
+          {log && <LogViewer log={log} className="pf-v6-u-mt-md" />}
         </CardBody>
       </Card>
     );
@@ -446,14 +430,12 @@ export const CacheView: React.FC = () => {
               </Button>
             </ToolbarItem>
             <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
-              <Pagination
+              <CompactPagination
                 itemCount={filteredGroups.length}
                 perPage={perPage}
                 page={page}
                 onSetPage={onSetPage}
                 onPerPageSelect={onPerPageSelect}
-                perPageOptions={PER_PAGE_OPTIONS}
-                isCompact
               />
             </ToolbarItem>
           </ToolbarContent>
@@ -511,14 +493,12 @@ export const CacheView: React.FC = () => {
         <Toolbar>
           <ToolbarContent>
             <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
-              <Pagination
+              <CompactPagination
                 itemCount={filteredGroups.length}
                 perPage={perPage}
                 page={page}
                 onSetPage={onSetPage}
                 onPerPageSelect={onPerPageSelect}
-                perPageOptions={PER_PAGE_OPTIONS}
-                isCompact
               />
             </ToolbarItem>
           </ToolbarContent>

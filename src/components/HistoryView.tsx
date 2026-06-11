@@ -27,6 +27,7 @@ import {
   ToolbarContent,
   ToolbarItem,
 } from "@patternfly/react-core";
+import { CompactPagination } from "./CompactPagination";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { StatBox } from "./StatBox";
 import { HistoryIcon, ArrowUpIcon, ArrowDownIcon, PlusIcon, MinusIcon, ExclamationCircleIcon } from "@patternfly/react-icons";
@@ -364,14 +365,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
               </Button>
             </ToolbarItem>
             <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
-              <Pagination
+              <CompactPagination
                 itemCount={groupedData?.total_groups || 0}
                 perPage={perPage}
                 page={page}
                 onSetPage={onSetPage}
                 onPerPageSelect={onPerPageSelect}
                 perPageOptions={PER_PAGE_OPTIONS}
-                isCompact
               />
             </ToolbarItem>
           </ToolbarContent>

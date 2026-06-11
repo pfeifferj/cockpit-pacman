@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { LOG_CONTAINER_HEIGHT, PER_PAGE_OPTIONS } from "../constants";
-import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
 import { usePagination } from "../hooks/usePagination";
 import { useSortableTable } from "../hooks/useSortableTable";
 import {
@@ -14,8 +12,6 @@ import {
   EmptyStateActions,
   EmptyStateFooter,
   Spinner,
-  CodeBlock,
-  CodeBlockCode,
   Flex,
   FlexItem,
   SearchInput,
@@ -23,15 +19,15 @@ import {
   ToolbarContent,
   ToolbarItem,
   Label,
-  ExpandableSection,
   MenuToggle,
   MenuToggleElement,
   Select,
   SelectOption,
   SelectList,
-  Pagination,
   Tooltip,
 } from "@patternfly/react-core";
+import { ExpandableLogViewer } from "./LogViewer";
+import { CompactPagination } from "./CompactPagination";
 import { SyncAltIcon, KeyIcon } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
@@ -61,7 +57,6 @@ export const KeyringView: React.FC = () => {
   const [trustSelectOpen, setTrustSelectOpen] = useState(false);
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const cancelRef = useRef<(() => void) | null>(null);
-  const logContainerRef = useAutoScrollLog(log);
 
   const { page, perPage, onSetPage, onPerPageSelect } = usePagination();
   const { activeSortIndex, activeSortDirection, getSortParams } = useSortableTable({
@@ -312,17 +307,12 @@ export const KeyringView: React.FC = () => {
             <Spinner size="md" /> {subtitle}
           </div>
 
-          <ExpandableSection
-            toggleText={isDetailsExpanded ? "Hide details" : "Show details"}
-            onToggle={(_event, expanded) => setIsDetailsExpanded(expanded)}
+          <ExpandableLogViewer
+            log={log}
+            placeholder="Starting..."
             isExpanded={isDetailsExpanded}
-          >
-            <div ref={logContainerRef} style={{ maxHeight: LOG_CONTAINER_HEIGHT, overflow: "auto" }}>
-              <CodeBlock>
-                <CodeBlockCode>{log || "Starting..."}</CodeBlockCode>
-              </CodeBlock>
-            </div>
-          </ExpandableSection>
+            onToggle={setIsDetailsExpanded}
+          />
         </CardBody>
       </Card>
     );
@@ -456,14 +446,12 @@ export const KeyringView: React.FC = () => {
           <Toolbar>
             <ToolbarContent>
               <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
-                <Pagination
+                <CompactPagination
                   itemCount={sortedKeys.length}
                   page={page}
                   perPage={perPage}
                   onSetPage={onSetPage}
                   onPerPageSelect={onPerPageSelect}
-                  perPageOptions={PER_PAGE_OPTIONS}
-                  isCompact
                 />
               </ToolbarItem>
             </ToolbarContent>

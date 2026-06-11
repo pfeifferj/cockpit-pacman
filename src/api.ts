@@ -1239,41 +1239,31 @@ export async function markNewsRead(link: string): Promise<void> {
   await runBackend<NewsReadState>("news-mark-read", [link], { superuser: "none" });
 }
 
-export interface ServicesDismissal {
+export interface DismissalState {
   signature: string | null;
 }
 
-export async function getServicesDismissal(): Promise<ServicesDismissal> {
-  return runBackend<ServicesDismissal>("services-dismissal-state", [], { superuser: "none" });
+function makeDismissalApi(prefix: string) {
+  return {
+    get: (): Promise<DismissalState> =>
+      runBackend<DismissalState>(`${prefix}-dismissal-state`, [], { superuser: "none" }),
+    mark: async (signature: string): Promise<void> => {
+      await runBackend<DismissalState>(`${prefix}-mark-dismissed`, [signature], { superuser: "none" });
+    },
+  };
 }
 
-export async function markServicesDismissed(signature: string): Promise<void> {
-  await runBackend<ServicesDismissal>("services-mark-dismissed", [signature], { superuser: "none" });
-}
+const servicesDismissal = makeDismissalApi("services");
+export const getServicesDismissal = servicesDismissal.get;
+export const markServicesDismissed = servicesDismissal.mark;
 
-export interface RebootDismissal {
-  signature: string | null;
-}
+const rebootDismissal = makeDismissalApi("reboot");
+export const getRebootDismissal = rebootDismissal.get;
+export const markRebootDismissed = rebootDismissal.mark;
 
-export async function getRebootDismissal(): Promise<RebootDismissal> {
-  return runBackend<RebootDismissal>("reboot-dismissal-state", [], { superuser: "none" });
-}
-
-export async function markRebootDismissed(signature: string): Promise<void> {
-  await runBackend<RebootDismissal>("reboot-mark-dismissed", [signature], { superuser: "none" });
-}
-
-export interface PacnewDismissal {
-  signature: string | null;
-}
-
-export async function getPacnewDismissal(): Promise<PacnewDismissal> {
-  return runBackend<PacnewDismissal>("pacnew-dismissal-state", [], { superuser: "none" });
-}
-
-export async function markPacnewDismissed(signature: string): Promise<void> {
-  await runBackend<PacnewDismissal>("pacnew-mark-dismissed", [signature], { superuser: "none" });
-}
+const pacnewDismissal = makeDismissalApi("pacnew");
+export const getPacnewDismissal = pacnewDismissal.get;
+export const markPacnewDismissed = pacnewDismissal.mark;
 
 export type DependencyDirection = "forward" | "reverse" | "both";
 

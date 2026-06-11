@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { ARCH_STATUS_URL, LOG_CONTAINER_HEIGHT, NEWS_LOOKBACK_DAYS, REBOOT_PACKAGES } from "../constants";
-import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
+import { ARCH_STATUS_URL, NEWS_LOOKBACK_DAYS, REBOOT_PACKAGES } from "../constants";
 import { useBackdropClose } from "../hooks/useBackdropClose";
 import { usePackageDetails } from "../hooks/usePackageDetails";
 import { useSortableTable } from "../hooks/useSortableTable";
+import { useDismissalSignature } from "../hooks/useDismissalSignature";
 import {
 	Card,
 	CardBody,
@@ -18,8 +18,6 @@ import {
 	Spinner,
 	Progress,
 	ProgressMeasureLocation,
-	CodeBlock,
-	CodeBlockCode,
 	Flex,
 	FlexItem,
 	SearchInput,
@@ -39,7 +37,6 @@ import {
 	ListItem,
 	Content,
 	ContentVariants,
-	ExpandableSection,
 	Checkbox,
 	Modal,
 	ModalVariant,
@@ -50,6 +47,7 @@ import {
 	Tooltip,
 	Icon,
 } from '@patternfly/react-core';
+import { ExpandableLogViewer, LogViewer } from './LogViewer';
 import {
   CheckCircleIcon,
   ExclamationCircleIcon,
@@ -357,7 +355,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     setErrorEpoch((e) => e + 1);
     setState("error");
   }, []);
-  const logContainerRef = useAutoScrollLog(log);
   const { selectedPackage, detailsLoading: packageLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
   const [searchFilter, setSearchFilter] = useState("");
   const [repoFilter, setRepoFilter] = useState("all");
@@ -389,10 +386,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [rebootOnComplete, setRebootOnComplete] = useState(false);
   const [servicesStatus, setServicesStatus] = useState<ServicesStatus | null>(null);
   const [restartServicesOnComplete, setRestartServicesOnComplete] = useState(false);
-  const [dismissedServicesSignature, setDismissedServicesSignature] = useState<string | null | undefined>(undefined);
-  const [dismissedRebootSignature, setDismissedRebootSignature] = useState<string | null | undefined>(undefined);
+  const [dismissedServicesSignature, dismissServices] = useDismissalSignature(getServicesDismissal, markServicesDismissed, "services");
+  const [dismissedRebootSignature, dismissReboot] = useDismissalSignature(getRebootDismissal, markRebootDismissed, "reboot");
   const [pacnewStatus, setPacnewStatus] = useState<PacnewStatus | null>(null);
-  const [dismissedPacnewSignature, setDismissedPacnewSignature] = useState<string | null | undefined>(undefined);
+  const [dismissedPacnewSignature, dismissPacnew] = useDismissalSignature(getPacnewDismissal, markPacnewDismissed, "pacnew");
   const [orphanCount, setOrphanCount] = useState<number | null>(null);
   const [cacheSize, setCacheSize] = useState<number | null>(null);
   const [keyringStatus, setKeyringStatus] = useState<KeyringStatusResponse | null>(null);
@@ -664,24 +661,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     } catch {
       setPacnewStatus(null);
     }
-  }, []);
-
-  useEffect(() => {
-    getServicesDismissal()
-      .then((d) => setDismissedServicesSignature(d.signature))
-      .catch(() => setDismissedServicesSignature(null));
-  }, []);
-
-  useEffect(() => {
-    getRebootDismissal()
-      .then((d) => setDismissedRebootSignature(d.signature))
-      .catch(() => setDismissedRebootSignature(null));
-  }, []);
-
-  useEffect(() => {
-    getPacnewDismissal()
-      .then((d) => setDismissedPacnewSignature(d.signature))
-      .catch(() => setDismissedPacnewSignature(null));
   }, []);
 
   useEffect(() => {
@@ -1055,12 +1034,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       className="pf-v6-u-mb-md"
       actionClose={
         <AlertActionCloseButton
-          onClose={() => {
-            setDismissedRebootSignature(rebootSignature);
-            markRebootDismissed(rebootSignature).catch((err) => {
-              console.error("Failed to persist reboot dismissal:", err);
-            });
-          }}
+          onClose={() => dismissReboot(rebootSignature)}
         />
       }
       actionLinks={
@@ -1098,12 +1072,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       className="pf-v6-u-mb-md"
       actionClose={
         <AlertActionCloseButton
-          onClose={() => {
-            setDismissedPacnewSignature(pacnewSignature);
-            markPacnewDismissed(pacnewSignature).catch((err) => {
-              console.error("Failed to persist pacnew dismissal:", err);
-            });
-          }}
+          onClose={() => dismissPacnew(pacnewSignature)}
         />
       }
     >
@@ -1141,12 +1110,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       className="pf-v6-u-mb-md"
       actionClose={
         <AlertActionCloseButton
-          onClose={() => {
-            setDismissedServicesSignature(servicesSignature);
-            markServicesDismissed(servicesSignature).catch((err) => {
-              console.error("Failed to persist services dismissal:", err);
-            });
-          }}
+          onClose={() => dismissServices(servicesSignature)}
         />
       }
       actionLinks={
@@ -1325,18 +1289,13 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
             />
           )}
 
-          <ExpandableSection
-            toggleText={isDetailsExpanded ? "Hide details" : "Show details"}
-            onToggle={(_event, expanded) => setIsDetailsExpanded(expanded)}
+          <ExpandableLogViewer
+            log={log}
+            placeholder="Starting upgrade..."
             isExpanded={isDetailsExpanded}
+            onToggle={setIsDetailsExpanded}
             className="pf-v6-u-mt-md"
-          >
-            <div ref={logContainerRef} style={{ maxHeight: LOG_CONTAINER_HEIGHT, overflow: "auto" }}>
-              <CodeBlock>
-                <CodeBlockCode>{log || "Starting upgrade..."}</CodeBlockCode>
-              </CodeBlock>
-            </div>
-          </ExpandableSection>
+          />
         </CardBody>
 
         <Modal
@@ -1397,13 +1356,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
               </EmptyStateActions>
             </EmptyStateFooter>
           </EmptyState>
-          {log && (
-            <div className="pf-v6-u-mt-md" style={{ maxHeight: LOG_CONTAINER_HEIGHT, overflow: "auto" }}>
-              <CodeBlock>
-                <CodeBlockCode>{log}</CodeBlockCode>
-              </CodeBlock>
-            </div>
-          )}
+          {log && <LogViewer log={log} className="pf-v6-u-mt-md" />}
         </CardBody>
       </Card>
     );

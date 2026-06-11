@@ -9,7 +9,6 @@ import {
   Spinner,
   EmptyState,
   EmptyStateBody,
-  Alert,
   SearchInput,
   Toolbar,
   ToolbarContent,
@@ -18,7 +17,6 @@ import {
   ToggleGroupItem,
   Badge,
   Label,
-  Pagination,
   MenuToggle,
   Select,
   SelectOption,
@@ -26,6 +24,8 @@ import {
   Button,
   Tooltip,
 } from "@patternfly/react-core";
+import { CompactPagination } from "./CompactPagination";
+import { ErrorAlert } from "./ErrorAlert";
 import { TopologyIcon, OutlinedQuestionCircleIcon } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import { DependencyView } from "./DependencyView";
@@ -40,7 +40,7 @@ import {
 } from "../api";
 import { sanitizeSearchInput } from "../utils";
 import { PackageDetailsModal } from "./PackageDetailsModal";
-import { PER_PAGE_OPTIONS, SEARCH_DEBOUNCE_MS } from "../constants";
+import { SEARCH_DEBOUNCE_MS } from "../constants";
 import { useNavigation } from "../contexts/NavigationContext";
 
 interface PackageListProps {
@@ -183,18 +183,14 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, initialF
   };
 
   if (error && packages.length === 0 && filter !== "orphan") {
-    const isLockError = error?.toLowerCase().includes("unable to lock database");
     return (
       <Card>
         <CardBody>
-          <Alert
-            variant={isLockError ? "warning" : "danger"}
-            title={isLockError ? "Database is locked" : "Error loading packages"}
-          >
-            {isLockError
-              ? "Another package manager operation is in progress. This could be a system upgrade, package installation, or database sync. Please wait for it to complete."
-              : error}
-          </Alert>
+          <ErrorAlert
+            error={error}
+            title="Error loading packages"
+            lockMessage="Another package manager operation is in progress. This could be a system upgrade, package installation, or database sync. Please wait for it to complete."
+          />
         </CardBody>
       </Card>
     );
@@ -340,14 +336,12 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, initialF
                   </Select>
                 </ToolbarItem>
                 <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
-                  <Pagination
+                  <CompactPagination
                     itemCount={total}
                     perPage={perPage}
                     page={page}
                     onSetPage={onSetPage}
                     onPerPageSelect={onPerPageSelect}
-                    perPageOptions={PER_PAGE_OPTIONS}
-                    isCompact
                   />
                 </ToolbarItem>
               </>
@@ -371,14 +365,12 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, initialF
           <Toolbar>
             <ToolbarContent>
               <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
-                <Pagination
+                <CompactPagination
                   itemCount={total}
                   perPage={perPage}
                   page={page}
                   onSetPage={onSetPage}
                   onPerPageSelect={onPerPageSelect}
-                  perPageOptions={PER_PAGE_OPTIONS}
-                  isCompact
                 />
               </ToolbarItem>
             </ToolbarContent>
