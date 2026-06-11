@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { ARCH_STATUS_URL, LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES, NEWS_LOOKBACK_DAYS, REBOOT_PACKAGES } from "../constants";
+import { ARCH_STATUS_URL, LOG_CONTAINER_HEIGHT, NEWS_LOOKBACK_DAYS, REBOOT_PACKAGES } from "../constants";
 import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
 import { useBackdropClose } from "../hooks/useBackdropClose";
 import { usePackageDetails } from "../hooks/usePackageDetails";
@@ -106,7 +106,7 @@ import {
 import type { KeyringCredentials, ErrorCode } from "../api";
 import { NetworkErrorState } from "./NetworkErrorState";
 
-import { sanitizeUrl } from "../utils";
+import { appendCapped, sanitizeUrl } from "../utils";
 import { TimeAgo } from "./TimeAgo";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { StatBox } from "./StatBox";
@@ -631,10 +631,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
   useEffect(() => {
     const { cancel } = syncDatabase({
-      onData: (data) => setLog((prev) => {
-        const newLog = prev + data;
-        return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
-      }),
+      onData: (data) => setLog((prev) => appendCapped(prev, data)),
       onComplete: () => loadUpdates(),
       onError: (err, code) => failWith("check", err, code),
     });
@@ -786,10 +783,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     setLockRetryExhausted(false);
     autoResumedRef.current = false;
     const { cancel } = syncDatabase({
-      onData: (data) => setLog((prev) => {
-        const newLog = prev + data;
-        return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
-      }),
+      onData: (data) => setLog((prev) => appendCapped(prev, data)),
       onComplete: () => loadUpdates(),
       onError: (err, code) => failWith("check", err, code),
     });
@@ -886,10 +880,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
     const { cancel } = runUpgrade({
       onEvent: handleEvent,
-      onData: (data) => setLog((prev) => {
-        const newLog = prev + data;
-        return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
-      }),
+      onData: (data) => setLog((prev) => appendCapped(prev, data)),
       onComplete: () => {
         autoResumedRef.current = false;
         setState("success");

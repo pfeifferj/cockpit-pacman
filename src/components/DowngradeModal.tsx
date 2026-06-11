@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useBackdropClose } from "../hooks/useBackdropClose";
+import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
 import { useDebouncedValue } from "../hooks/useDebounce";
 import { LOG_CONTAINER_HEIGHT, SEARCH_DEBOUNCE_MS } from "../constants";
 import {
@@ -24,7 +25,8 @@ import {
   ToggleGroupItem,
   SearchInput,
 } from "@patternfly/react-core";
-import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
+import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
+import { useSortableTable } from "../hooks/useSortableTable";
 import { ArrowDownIcon, ArrowUpIcon, DownloadIcon, CheckCircleIcon } from "@patternfly/react-icons";
 import {
   CachedVersion,
@@ -38,7 +40,7 @@ import {
 import type { ErrorCode } from "../api";
 import { isNetworkError } from "../offline";
 import { NetworkErrorState } from "./NetworkErrorState";
-import { sanitizeErrorMessage } from "../utils";
+import { appendCapped, sanitizeErrorMessage } from "../utils";
 
 type ModalState = "loading" | "select" | "confirm" | "downgrading" | "success" | "error";
 type DowngradeSource = "cache" | "archive";
@@ -65,13 +67,15 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
   const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
   const [log, setLog] = useState("");
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
-  const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
-  const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("desc");
+  const { activeSortIndex, activeSortDirection, setActiveSortIndex, getSortParams } = useSortableTable({
+    sortableColumns: [0, 2], // version, size
+    defaultDirection: "desc",
+  });
   const [versionFilter, setVersionFilter] = useState("");
   const [serverResults, setServerResults] = useState<{ query: string; packages: CachedVersion[]; failed: boolean } | null>(null);
   const cancelRef = useRef<(() => void) | null>(null);
-  const logContainerRef = useRef<HTMLDivElement | null>(null);
   const loadIdRef = useRef(0);
+  const logContainerRef = useAutoScrollLog(log);
 
   const loadVersions = useCallback(async (src: DowngradeSource) => {
     if (!packageName) return;
@@ -123,12 +127,6 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
     };
   }, []);
 
-  useEffect(() => {
-    if (logContainerRef.current) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-    }
-  }, [log]);
-
   const handleSelectVersion = (version: CachedVersion) => {
     setSelectedVersion(version);
     setState("confirm");
@@ -141,7 +139,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
     setIsDetailsExpanded(true);
 
     const callbacks = {
-      onData: (data: string) => setLog((prev) => prev + data),
+      onData: (data: string) => setLog((prev) => appendCapped(prev, data)),
       onComplete: () => {
         setState("success");
         cancelRef.current = null;
@@ -174,22 +172,6 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
       cancelRef.current = null;
     }
     onClose();
-  };
-
-  const getSortParams = (columnIndex: number): ThProps["sort"] | undefined => {
-    if (columnIndex !== 0 && columnIndex !== 2) return undefined;
-    return {
-      sortBy: {
-        index: activeSortIndex ?? undefined,
-        direction: activeSortDirection,
-        defaultDirection: "desc",
-      },
-      onSort: (_event, index, direction) => {
-        setActiveSortIndex(index);
-        setActiveSortDirection(direction);
-      },
-      columnIndex,
-    };
   };
 
   const sortedVersions = React.useMemo(() => {

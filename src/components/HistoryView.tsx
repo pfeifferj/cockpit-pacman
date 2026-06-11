@@ -75,7 +75,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
   const [state, setState] = useState<ViewState>("loading");
   const [groupedData, setGroupedData] = useState<GroupedLogResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const { page, perPage, offset, setPage, setPerPage } = usePagination({ defaultPerPage: 20 });
+  const { page, perPage, offset, setPage, onSetPage, onPerPageSelect } = usePagination({ defaultPerPage: 20 });
   const [filter, setFilter] = useState<HistoryFilterType>("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [searchInput, setSearchInput] = useState("");
@@ -154,15 +154,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
     setFilter(value);
     setPage(1);
     setFilterOpen(false);
-  };
-
-  const handleSetPage = (_event: React.MouseEvent | React.KeyboardEvent | MouseEvent, newPage: number) => {
-    setPage(newPage);
-  };
-
-  const handlePerPageSelect = (_event: React.MouseEvent | React.KeyboardEvent | MouseEvent, newPerPage: number) => {
-    setPerPage(newPerPage);
-    setPage(1);
   };
 
   const allExpanded = groupedData?.groups.length
@@ -377,8 +368,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
                 itemCount={groupedData?.total_groups || 0}
                 perPage={perPage}
                 page={page}
-                onSetPage={handleSetPage}
-                onPerPageSelect={handlePerPageSelect}
+                onSetPage={onSetPage}
+                onPerPageSelect={onPerPageSelect}
                 perPageOptions={PER_PAGE_OPTIONS}
                 isCompact
               />
@@ -477,8 +468,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
               itemCount={groupedData?.total_groups || 0}
               perPage={perPage}
               page={page}
-              onSetPage={handleSetPage}
-              onPerPageSelect={handlePerPageSelect}
+              onSetPage={onSetPage}
+              onPerPageSelect={onPerPageSelect}
               perPageOptions={PER_PAGE_OPTIONS}
               variant="bottom"
             />

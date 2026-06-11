@@ -1,5 +1,13 @@
+import { MAX_LOG_SIZE_BYTES } from "./constants";
+
 export const MAX_SEARCH_LENGTH = 256;
 const MAX_ERROR_LENGTH = 500;
+
+/** Append streamed output to a log, keeping only the trailing cap bytes. */
+export function appendCapped(prev: string, data: string, cap = MAX_LOG_SIZE_BYTES): string {
+  const next = prev + data;
+  return next.length > cap ? next.slice(-cap) : next;
+}
 
 export function sanitizeSearchInput(input: string): string {
   return input.trim().normalize("NFC").slice(0, MAX_SEARCH_LENGTH);

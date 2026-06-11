@@ -55,9 +55,15 @@ export const SearchView: React.FC = () => {
   const currentQueryRef = useRef(currentQuery);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const { activeSortIndex, activeSortDirection, setActiveSortIndex, setActiveSortDirection } = useSortableTable({
+  const { activeSortIndex, activeSortDirection, setActiveSortIndex, getSortParams } = useSortableTable({
     sortableColumns: [0, 3, 4], // name, repository, status
     defaultDirection: "asc",
+    onSort: (index: number, direction: "asc" | "desc") => {
+      setPage(1);
+      if (currentQuery) {
+        fetchResults(currentQuery, 1, perPage, installedFilter, false, index, direction);
+      }
+    },
   });
 
   useEffect(() => {
@@ -75,28 +81,6 @@ export const SearchView: React.FC = () => {
     perPageRef.current = perPage;
     installedFilterRef.current = installedFilter;
   });
-
-  const onSortHandler = (_event: React.MouseEvent, index: number, direction: "asc" | "desc") => {
-    setActiveSortIndex(index);
-    setActiveSortDirection(direction);
-    setPage(1);
-    if (currentQuery) {
-      fetchResults(currentQuery, 1, perPage, installedFilter, false, index, direction);
-    }
-  };
-
-  const getSortParams = (columnIndex: number) => {
-    if (![0, 3, 4].includes(columnIndex)) return undefined;
-    return {
-      sortBy: {
-        index: activeSortIndex ?? undefined,
-        direction: activeSortDirection,
-        defaultDirection: "asc" as const,
-      },
-      onSort: onSortHandler,
-      columnIndex,
-    };
-  };
 
   // Debounced auto-search when input changes
   useEffect(() => {

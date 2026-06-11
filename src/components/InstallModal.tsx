@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useBackdropClose } from "../hooks/useBackdropClose";
+import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
 import { LOG_CONTAINER_HEIGHT } from "../constants";
 import {
   Modal,
@@ -21,7 +22,7 @@ import {
 } from "@patternfly/react-core";
 import { CheckCircleIcon } from "@patternfly/react-icons";
 import { installPackage } from "../api";
-import { sanitizeErrorMessage } from "../utils";
+import { appendCapped, sanitizeErrorMessage } from "../utils";
 
 type ModalState = "confirm" | "installing" | "success" | "error";
 
@@ -46,7 +47,7 @@ export const InstallModal: React.FC<InstallModalProps> = ({
   const [log, setLog] = useState("");
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const cancelRef = useRef<(() => void) | null>(null);
-  const logContainerRef = useRef<HTMLDivElement | null>(null);
+  const logContainerRef = useAutoScrollLog(log);
 
   const resetState = useCallback(() => {
     setState("confirm");
@@ -68,12 +69,6 @@ export const InstallModal: React.FC<InstallModalProps> = ({
     };
   }, []);
 
-  useEffect(() => {
-    if (logContainerRef.current) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-    }
-  }, [log]);
-
   const handleConfirmInstall = () => {
     setState("installing");
     setLog("");
@@ -81,7 +76,7 @@ export const InstallModal: React.FC<InstallModalProps> = ({
 
     const { cancel } = installPackage(
       {
-        onData: (data) => setLog((prev) => prev + data),
+        onData: (data) => setLog((prev) => appendCapped(prev, data)),
         onComplete: () => {
           setState("success");
           cancelRef.current = null;

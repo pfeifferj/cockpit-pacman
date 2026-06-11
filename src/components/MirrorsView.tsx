@@ -54,7 +54,8 @@ import {
   OutlinedQuestionCircleIcon,
   SyncAltIcon,
 } from "@patternfly/react-icons";
-import { Table, Thead, Tr, Th, Tbody, Td, ThProps } from "@patternfly/react-table";
+import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
+import { useSortableTable } from "../hooks/useSortableTable";
 import { StatBox } from "./StatBox";
 import {
   MirrorEntry,
@@ -201,8 +202,10 @@ export const MirrorsView: React.FC = () => {
   const [searchFilter, setSearchFilter] = useState("");
   const [countryFilter, setCountryFilter] = useState<string>("all");
   const [countryFilterOpen, setCountryFilterOpen] = useState(false);
-  const [activeSortIndex, setActiveSortIndex] = useState<number | null>(null);
-  const [activeSortDirection, setActiveSortDirection] = useState<"asc" | "desc">("asc");
+  const { activeSortIndex, activeSortDirection, getSortParams } = useSortableTable({
+    sortableColumns: [0, 1, 2, 3, 4],
+    defaultDirection: "asc",
+  });
   const [refreshModalOpen, setRefreshModalOpen] = useState(false);
   const [refreshLoading, setRefreshLoading] = useState(false);
   const [refreshPreview, setRefreshPreview] = useState<RefreshMirrorsResponse | null>(null);
@@ -593,21 +596,6 @@ export const MirrorsView: React.FC = () => {
       return activeSortDirection === "asc" ? comparison : -comparison;
     });
   }, [filteredMirrors, activeSortIndex, activeSortDirection]);
-
-  const getSortParams = (columnIndex: number): ThProps["sort"] | undefined => {
-    return {
-      sortBy: {
-        index: activeSortIndex ?? undefined,
-        direction: activeSortDirection,
-        defaultDirection: "asc",
-      },
-      onSort: (_event, index, direction) => {
-        setActiveSortIndex(index);
-        setActiveSortDirection(direction);
-      },
-      columnIndex,
-    };
-  };
 
   if (state === "loading") {
     return (

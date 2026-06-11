@@ -38,7 +38,8 @@ import {
   formatSize,
 } from "../api";
 import { TimeAgo } from "./TimeAgo";
-import { LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES } from "../constants";
+import { LOG_CONTAINER_HEIGHT } from "../constants";
+import { appendCapped } from "../utils";
 
 type ViewState = "loading" | "ready" | "removing" | "success";
 
@@ -98,10 +99,7 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
     setLogExpanded(true);
 
     const { cancel } = removeOrphans({
-      onData: (data) => setLog((prev) => {
-        const newLog = prev + data;
-        return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
-      }),
+      onData: (data) => setLog((prev) => appendCapped(prev, data)),
       onComplete: () => {
         setViewState("success");
         setOrphanData(null);

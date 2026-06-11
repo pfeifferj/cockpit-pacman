@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { MAX_LOG_SIZE_BYTES, LOG_CONTAINER_HEIGHT, PER_PAGE_OPTIONS } from "../constants";
+import { LOG_CONTAINER_HEIGHT, PER_PAGE_OPTIONS } from "../constants";
 import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
 import { usePagination } from "../hooks/usePagination";
 import { useSortableTable } from "../hooks/useSortableTable";
@@ -46,7 +46,7 @@ import type { ErrorCode } from "../api";
 import { isNetworkError } from "../offline";
 import { NetworkErrorState } from "./NetworkErrorState";
 import { TimeAgo } from "./TimeAgo";
-import { sanitizeErrorMessage } from "../utils";
+import { appendCapped, sanitizeErrorMessage } from "../utils";
 
 type ViewState = "loading" | "ready" | "refreshing" | "initializing" | "error";
 
@@ -115,10 +115,7 @@ export const KeyringView: React.FC = () => {
     setLog("");
     setIsDetailsExpanded(true);
     const { cancel } = refreshKeyring({
-      onData: (data) => setLog((prev) => {
-        const newLog = prev + data;
-        return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
-      }),
+      onData: (data) => setLog((prev) => appendCapped(prev, data)),
       onComplete: () => {
         cancelRef.current = null;
         loadKeyringStatus();
@@ -138,10 +135,7 @@ export const KeyringView: React.FC = () => {
     setLog("");
     setIsDetailsExpanded(true);
     const { cancel } = initKeyring({
-      onData: (data) => setLog((prev) => {
-        const newLog = prev + data;
-        return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
-      }),
+      onData: (data) => setLog((prev) => appendCapped(prev, data)),
       onComplete: () => {
         cancelRef.current = null;
         loadKeyringStatus();

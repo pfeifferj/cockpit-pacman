@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { LOG_CONTAINER_HEIGHT, MAX_LOG_SIZE_BYTES, PER_PAGE_OPTIONS } from "../constants";
+import { LOG_CONTAINER_HEIGHT, PER_PAGE_OPTIONS } from "../constants";
 import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
 import { useBackdropClose } from "../hooks/useBackdropClose";
 import { usePackageDetails } from "../hooks/usePackageDetails";
@@ -51,7 +51,7 @@ import {
   formatSize,
   formatNumber,
 } from "../api";
-import { sanitizeErrorMessage } from "../utils";
+import { appendCapped, sanitizeErrorMessage } from "../utils";
 
 interface GroupedCachePackage {
   name: string;
@@ -141,10 +141,7 @@ export const CacheView: React.FC = () => {
     const packages = Array.from(selectedPackages);
     const { cancel } = cleanCache(
       {
-        onData: (data) => setLog((prev) => {
-          const newLog = prev + data;
-          return newLog.length > MAX_LOG_SIZE_BYTES ? newLog.slice(-MAX_LOG_SIZE_BYTES) : newLog;
-        }),
+        onData: (data) => setLog((prev) => appendCapped(prev, data)),
         onComplete: () => {
           setState("success");
           cancelRef.current = null;
