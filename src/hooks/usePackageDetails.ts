@@ -54,7 +54,7 @@ export function usePackageDetails(
         } catch {
           if (isStale()) return;
           try {
-            const syncDetails = await getSyncPackageInfo(name);
+            const syncDetails = await getSyncPackageInfo(name, options?.repo);
             if (isStale()) return;
             setSelectedPackage(syncDetails);
           } catch {

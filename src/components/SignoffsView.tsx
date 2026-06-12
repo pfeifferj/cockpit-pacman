@@ -488,7 +488,14 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
                     onClick={(e) => e.stopPropagation()}
                   />
                   <Td dataLabel="Package">
-                    <Button variant="link" isInline onClick={() => fetchDetails(group.pkgbase)}>
+                    <Button
+                      variant="link"
+                      isInline
+                      onClick={() => fetchDetails(group.pkgbase, {
+                        strategy: isInstalled(group) ? "local-then-sync" : "sync",
+                        repo: group.repo,
+                      })}
+                    >
                       <strong>{group.pkgbase}</strong>
                     </Button>
                     {group.pkgnames.length > 1 && (

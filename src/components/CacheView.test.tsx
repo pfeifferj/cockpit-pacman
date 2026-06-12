@@ -421,7 +421,7 @@ describe("CacheView", () => {
     });
 
     await waitFor(() => {
-      expect(mockGetSyncPackageInfo).toHaveBeenCalledWith("linux");
+      expect(mockGetSyncPackageInfo).toHaveBeenCalledWith("linux", undefined);
     });
   });
 

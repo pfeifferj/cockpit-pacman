@@ -110,7 +110,21 @@ describe("usePackageDetails", () => {
     });
 
     expect(mockGetPackageInfo).toHaveBeenCalledWith("linux");
-    expect(mockGetSyncPackageInfo).toHaveBeenCalledWith("linux");
+    expect(mockGetSyncPackageInfo).toHaveBeenCalledWith("linux", undefined);
+    expect(result.current.selectedPackage).toEqual(syncDetails);
+  });
+
+  it("passes repo to local-then-sync fallback", async () => {
+    mockGetPackageInfo.mockRejectedValue(new Error("not found"));
+    mockGetSyncPackageInfo.mockResolvedValue(syncDetails);
+
+    const { result } = renderHook(() => usePackageDetails());
+
+    await act(async () => {
+      await result.current.fetchDetails("linux", { strategy: "local-then-sync", repo: "core-testing" });
+    });
+
+    expect(mockGetSyncPackageInfo).toHaveBeenCalledWith("linux", "core-testing");
     expect(result.current.selectedPackage).toEqual(syncDetails);
   });
 
