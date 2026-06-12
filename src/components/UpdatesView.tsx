@@ -104,7 +104,7 @@ import {
 import type { KeyringCredentials, ErrorCode } from "../api";
 import { NetworkErrorState } from "./NetworkErrorState";
 
-import { appendCapped, sanitizeUrl } from "../utils";
+import { appendCapped, isDbLockError, sanitizeUrl } from "../utils";
 import { TimeAgo } from "./TimeAgo";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { StatBox } from "./StatBox";
@@ -1182,8 +1182,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   }
 
   if (state === "error") {
-    const isLockError = errorCode === "database_locked"
-      || (error ? /unable to lock database|failed to initialize transaction/i.test(error) : false);
+    // The tx-init pattern deliberately over-matches beyond isDbLockError;
+    // the bounded auto-retry in autoResumeAfterLock absorbs false positives.
+    const isLockError = isDbLockError(error ?? "", errorCode)
+      || (error ? /failed to initialize transaction/i.test(error) : false);
     const showLockRecovery = isLockError && !lockRetryExhausted;
     // Only a genuine connectivity failure shows the offline state here. A bare
     // operation timeout (the sync/upgrade exceeded its budget) is not an

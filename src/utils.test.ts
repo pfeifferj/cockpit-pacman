@@ -1,10 +1,58 @@
 import { describe, it, expect } from "vitest";
 import {
+  appendCapped,
+  isDbLockError,
   sanitizeSearchInput,
   sanitizeErrorMessage,
   sanitizeUrl,
   MAX_SEARCH_LENGTH,
 } from "./utils";
+
+describe("appendCapped", () => {
+  it("appends below the cap", () => {
+    expect(appendCapped("abc", "def", 10)).toBe("abcdef");
+  });
+
+  it("keeps the trailing bytes when over the cap", () => {
+    expect(appendCapped("abcde", "fgh", 4)).toBe("efgh");
+  });
+
+  it("returns the input unchanged at exactly the cap", () => {
+    expect(appendCapped("ab", "cd", 4)).toBe("abcd");
+  });
+
+  it("handles appending to an empty log", () => {
+    expect(appendCapped("", "data", 10)).toBe("data");
+  });
+
+  it("truncates a single chunk longer than the cap", () => {
+    expect(appendCapped("", "abcdef", 3)).toBe("def");
+  });
+
+  it("returns an empty string for a zero cap", () => {
+    expect(appendCapped("abc", "def", 0)).toBe("");
+  });
+});
+
+describe("isDbLockError", () => {
+  it("trusts the structured code regardless of message", () => {
+    expect(isDbLockError("anything", "database_locked")).toBe(true);
+  });
+
+  it("matches the alpm lock message case-insensitively", () => {
+    expect(isDbLockError("Unable to lock database")).toBe(true);
+    expect(isDbLockError("error: DATABASE IS LOCKED")).toBe(true);
+  });
+
+  it("rejects unrelated errors and codes", () => {
+    expect(isDbLockError("failed retrieving file", "network_error")).toBe(false);
+    expect(isDbLockError("")).toBe(false);
+  });
+
+  it("falls back to the message when the code is not database_locked", () => {
+    expect(isDbLockError("unable to lock database", "network_error")).toBe(true);
+  });
+});
 
 describe("sanitizeSearchInput", () => {
   it("trims whitespace", () => {

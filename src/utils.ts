@@ -6,7 +6,7 @@ const MAX_ERROR_LENGTH = 500;
 /** Append streamed output to a log, keeping only the trailing cap bytes. */
 export function appendCapped(prev: string, data: string, cap = MAX_LOG_SIZE_BYTES): string {
   const next = prev + data;
-  return next.length > cap ? next.slice(-cap) : next;
+  return next.length > cap ? next.slice(next.length - cap) : next;
 }
 
 // The substring fallback covers errors that arrive as raw stream output

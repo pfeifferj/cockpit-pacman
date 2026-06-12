@@ -1,5 +1,5 @@
 import { BACKEND_TIMEOUT_MS } from "./constants";
-import { sanitizeSearchInput } from "./utils";
+import { isDbLockError, sanitizeSearchInput } from "./utils";
 
 const BACKEND_PATH = "/usr/libexec/cockpit-pacman/cockpit-pacman-backend";
 
@@ -229,7 +229,7 @@ function parseErrorCode(message: string): ErrorCode {
   if (lower.includes("timed out") || lower.includes("timeout")) {
     return "timeout";
   }
-  if (lower.includes("unable to lock database") || lower.includes("database is locked")) {
+  if (isDbLockError(message)) {
     return "database_locked";
   }
   if (
