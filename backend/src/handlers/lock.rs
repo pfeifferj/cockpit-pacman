@@ -35,6 +35,9 @@ fn db_path() -> PathBuf {
 // under the db dir would misreport concurrent read-only queries (and this
 // plugin's own backend invocations) as the lock holder.
 fn find_lock_holder(lock: &Path) -> Option<String> {
+    // /proc fd links are fully resolved, so a symlinked DBPath would never
+    // match the configured lock path and a live holder would go undetected.
+    let lock = lock.canonicalize().unwrap_or_else(|_| lock.to_path_buf());
     for entry in fs::read_dir("/proc").ok()?.flatten() {
         let pid = entry.file_name().to_str()?.to_string();
         if !pid.chars().all(|c| c.is_ascii_digit()) {

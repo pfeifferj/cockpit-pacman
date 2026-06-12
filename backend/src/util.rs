@@ -104,7 +104,11 @@ pub fn emit_json<T: Serialize>(response: &T) -> Result<()> {
 }
 
 /// Path of a state or cache file under ~/.config/cockpit-pacman.
+/// `file` must be a bare file name; path components are rejected.
 pub fn config_path(file: &str) -> Result<std::path::PathBuf> {
+    if file.is_empty() || file.contains('/') || file.contains("..") {
+        anyhow::bail!("Invalid config file name: {}", file);
+    }
     let home = std::env::var("HOME").context("HOME environment variable is not set")?;
     Ok(std::path::PathBuf::from(home)
         .join(".config/cockpit-pacman")
@@ -384,4 +388,23 @@ macro_rules! check_cancel_early {
             return Ok(());
         }
     }};
+}
+
+#[cfg(test)]
+mod tests {
+    use super::config_path;
+
+    #[test]
+    fn config_path_rejects_path_components() {
+        assert!(config_path("../etc/passwd").is_err());
+        assert!(config_path("a/b.json").is_err());
+        assert!(config_path("..").is_err());
+        assert!(config_path("").is_err());
+    }
+
+    #[test]
+    fn config_path_accepts_bare_file_names() {
+        let path = config_path("news-cache.json").unwrap();
+        assert!(path.ends_with(".config/cockpit-pacman/news-cache.json"));
+    }
 }

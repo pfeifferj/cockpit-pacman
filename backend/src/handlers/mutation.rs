@@ -197,11 +197,12 @@ fn setup_question_cb(handle: &mut Alpm, answer_remove_pkgs: bool) {
 }
 
 fn prepare_failure(err_msg: &str) -> anyhow::Error {
+    let message = format!("Failed to prepare transaction: {}", err_msg);
     emit_event(&StreamEvent::Complete {
         success: false,
-        message: Some(format!("Failed to prepare transaction: {}", err_msg)),
+        message: Some(message.clone()),
     });
-    anyhow::anyhow!("Failed to prepare transaction: {}", err_msg)
+    anyhow::anyhow!(message)
 }
 
 fn commit_and_complete(
