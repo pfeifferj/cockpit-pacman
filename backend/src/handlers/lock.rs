@@ -30,14 +30,11 @@ fn db_path() -> PathBuf {
     )
 }
 
-// alpm holds an open fd to db.lck for the lifetime of the lock, so only a
-// process with the lock file itself open is the owner. Matching anything
-// under the db dir would misreport concurrent read-only queries (and this
-// plugin's own backend invocations) as the lock holder.
+// alpm holds an open fd to db.lck while locked, so the owner is whichever
+// process has that exact file open; matching anything under the db dir would
+// misreport read-only queries (and our own backend) as the holder. `lock` must
+// be canonical since /proc fd links resolve fully.
 fn find_lock_holder(lock: &Path) -> Option<String> {
-    // /proc fd links are fully resolved, so a symlinked DBPath would never
-    // match the configured lock path and a live holder would go undetected.
-    let lock = lock.canonicalize().unwrap_or_else(|_| lock.to_path_buf());
     for entry in fs::read_dir("/proc").ok()?.flatten() {
         let pid = entry.file_name().to_str()?.to_string();
         if !pid.chars().all(|c| c.is_ascii_digit()) {
@@ -67,12 +64,15 @@ pub fn check_lock() -> Result<()> {
     let db = db_path();
     let lock = db.join("db.lck");
     let locked = lock.exists();
-    let blocking = if locked {
-        find_lock_holder(&lock)
+
+    // A failed resolve can't match the holder's /proc fd, so don't report stale.
+    let canonical = if locked {
+        lock.canonicalize().ok()
     } else {
         None
     };
-    let stale = locked && blocking.is_none();
+    let blocking = canonical.as_deref().and_then(find_lock_holder);
+    let stale = canonical.is_some() && blocking.is_none();
 
     emit_json(&LockStatus {
         locked,
@@ -93,14 +93,26 @@ pub fn remove_stale_lock() -> Result<()> {
         });
     }
 
-    if let Some(proc) = find_lock_holder(&lock) {
+    // Match and remove the same canonical path; a failed resolve refuses
+    // removal rather than deleting a lock we can't verify.
+    let canonical = match lock.canonicalize() {
+        Ok(path) => path,
+        Err(e) => {
+            return emit_json(&LockRemoveResult {
+                removed: false,
+                error: Some(format!("Could not resolve lock file: {}", e)),
+            });
+        }
+    };
+
+    if let Some(proc) = find_lock_holder(&canonical) {
         return emit_json(&LockRemoveResult {
             removed: false,
             error: Some(format!("Database in use by {}", proc)),
         });
     }
 
-    fs::remove_file(&lock).context("Failed to remove lock file")?;
+    fs::remove_file(&canonical).context("Failed to remove lock file")?;
 
     emit_json(&LockRemoveResult {
         removed: true,

@@ -7,8 +7,7 @@ pub struct TransactionGuard<'a> {
 
 impl<'a> TransactionGuard<'a> {
     pub fn new(handle: &'a mut Alpm, flags: TransFlag) -> Result<Self> {
-        // Flattened so the lock detail survives in the envelope message,
-        // which only renders the outermost error.
+        // Flattened so the lock detail survives in the outermost envelope message.
         handle
             .trans_init(flags)
             .map_err(|e| anyhow::anyhow!("Failed to initialize transaction: {}", e))?;

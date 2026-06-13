@@ -895,11 +895,9 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     resumeRef.current = { apply: handleApplyUpdates, refresh: handleRefresh };
   });
 
-  // Re-runs the operation that hit the lock instead of bouncing back to the
-  // list. Interrupted upgrades resume through a fresh preflight because
-  // whoever held the lock may have changed package state. The origin is bound
-  // at error time, so a recovery flow that outlives its error episode still
-  // resumes the operation it belonged to rather than whichever failed last.
+  // Resume the operation that hit the lock. Upgrades go back through preflight
+  // since the lock holder may have changed package state. Origin is passed in
+  // (not read from state) so a stale recovery flow resumes its own episode.
   const resumeAfterLock = useCallback((origin: ErrorOrigin) => {
     if (origin === "preflight" || origin === "upgrade") {
       resumeRef.current.apply();
