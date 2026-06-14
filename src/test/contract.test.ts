@@ -75,6 +75,7 @@ import {
   restoreMirrorBackup,
   fetchNews,
   getScheduledRuns,
+  setScheduleConfig,
   getSyncPackageInfo,
   getServicesStatus,
   listArchiveVersions,
@@ -1131,5 +1132,83 @@ describe("listArchiveVersions contract", () => {
     });
     const result = await listArchiveVersions("bash");
     expect(result.packages[0].installed_version).toBeNull();
+  });
+});
+
+// Pins the positional argv each command sends, so a reorder on the frontend
+// fails here and a reorder on the backend fails the parser tests in main.rs.
+describe("CLI argv contract", () => {
+  function lastArgv(): string[] {
+    const calls = mockSpawn.mock.calls;
+    const call = calls[calls.length - 1];
+    return (call[0] as string[]).slice(1);
+  }
+
+  it("list-installed argv order", async () => {
+    spawnReturns({});
+    await listInstalled({
+      offset: 5,
+      limit: 20,
+      search: "foo",
+      filter: "explicit",
+      repo: "core",
+      sortBy: "name",
+      sortDir: "asc",
+    });
+    expect(lastArgv()).toEqual([
+      "list-installed",
+      "5",
+      "20",
+      "foo",
+      "explicit",
+      "core",
+      "name",
+      "asc",
+    ]);
+  });
+
+  it("search argv order", async () => {
+    spawnReturns({});
+    await searchPackages({
+      query: "firefox",
+      offset: 5,
+      limit: 30,
+      installed: "installed",
+      sortBy: "name",
+      sortDir: "asc",
+    });
+    expect(lastArgv()).toEqual([
+      "search",
+      "firefox",
+      "5",
+      "30",
+      "installed",
+      "name",
+      "asc",
+    ]);
+  });
+
+  it("history-grouped argv order", async () => {
+    spawnReturns({});
+    await getGroupedHistory({ offset: 2, limit: 10, filter: "upgraded", search: "linux" });
+    expect(lastArgv()).toEqual(["history-grouped", "2", "10", "upgraded", "linux"]);
+  });
+
+  it("refresh-mirrors argv order", async () => {
+    spawnReturns({});
+    await refreshMirrors({ count: 50, country: "de", protocol: "http", sortBy: "delay" });
+    expect(lastArgv()).toEqual(["refresh-mirrors", "50", "de", "http", "delay"]);
+  });
+
+  it("set-schedule argv order", async () => {
+    spawnReturns({});
+    await setScheduleConfig({ enabled: true, mode: "upgrade", schedule: "weekly", max_packages: 50 });
+    expect(lastArgv()).toEqual(["set-schedule", "true", "upgrade", "weekly", "50"]);
+  });
+
+  it("list-scheduled-runs argv order", async () => {
+    spawnReturns({});
+    await getScheduledRuns({ offset: 5, limit: 20 });
+    expect(lastArgv()).toEqual(["list-scheduled-runs", "5", "20"]);
   });
 });

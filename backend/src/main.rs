@@ -23,137 +23,307 @@ use cockpit_pacman_backend::validation::{
     validate_signoff_arg,
 };
 
+/// Every dispatched subcommand name. Single source of truth for the help text
+/// (USAGE is checked against it in tests) and the unknown-command suggestion.
+/// Keep in sync with the dispatch match in `main`.
+const COMMANDS: &[&str] = &[
+    "list-installed",
+    "check-updates",
+    "preflight-upgrade",
+    "sync-database",
+    "upgrade",
+    "local-package-info",
+    "sync-package-info",
+    "search",
+    "keyring-status",
+    "refresh-keyring",
+    "init-keyring",
+    "list-orphans",
+    "remove-orphans",
+    "install-package",
+    "remove-package",
+    "list-ignored",
+    "add-ignored",
+    "remove-ignored",
+    "cache-info",
+    "clean-cache",
+    "history",
+    "history-grouped",
+    "list-downgrades",
+    "downgrade",
+    "list-archive-versions",
+    "downgrade-archive",
+    "get-schedule",
+    "set-schedule",
+    "list-scheduled-runs",
+    "scheduled-run",
+    "reboot-status",
+    "services-status",
+    "pacnew-status",
+    "list-mirrors",
+    "fetch-mirror-status",
+    "refresh-mirrors",
+    "test-mirrors",
+    "save-mirrorlist",
+    "list-mirror-backups",
+    "restore-mirror-backup",
+    "delete-mirror-backup",
+    "dependency-tree",
+    "fetch-news",
+    "news-read-state",
+    "news-mark-read",
+    "signoff-list",
+    "signoff-sign",
+    "signoff-revoke",
+    "check-security",
+    "security-info",
+    "check-lock",
+    "remove-stale-lock",
+    "list-repos",
+    "save-repos",
+    "list-repo-backups",
+    "restore-repo-backup",
+    "delete-repo-backup",
+    "reboot-dismissal-state",
+    "reboot-mark-dismissed",
+    "services-dismissal-state",
+    "services-mark-dismissed",
+    "pacnew-dismissal-state",
+    "pacnew-mark-dismissed",
+    "scheduled-dismissal-state",
+    "scheduled-mark-dismissed",
+];
+
+const USAGE: &str = r#"Usage: cockpit-pacman-backend <command> [args]
+
+Commands:
+  list-installed [offset] [limit] [search] [filter] [repo] [sort_by] [sort_dir]
+                         List installed packages (paginated)
+                         filter: all|explicit|dependency
+                         repo: all|core|extra|multilib|user|...
+                         sort_by: name|size|reason
+                         sort_dir: asc|desc
+  check-updates          Check for available updates
+  preflight-upgrade [ignore]
+                         Check what the upgrade will do (requires root)
+                         ignore: comma-separated list of packages to skip
+                         Returns conflicts, replacements, keys to import
+  sync-database [force] [timeout]
+                         Sync package databases (requires root)
+                         force: true|false (default: true)
+                         timeout: seconds (default: 300)
+  upgrade [ignore] [timeout]
+                         Perform system upgrade (requires root)
+                         ignore: comma-separated list of packages to skip
+                         timeout: seconds (default: 300)
+  local-package-info NAME
+                         Get detailed info for an installed package
+  sync-package-info NAME [REPO]
+                         Get detailed info for a package from sync databases
+  search QUERY [offset] [limit] [installed] [sort_by] [sort_dir]
+                         Search packages by name/description (paginated)
+                         installed: all|installed|not-installed
+                         sort_by: name|repository|status
+                         sort_dir: asc|desc
+  keyring-status         Get pacman keyring status and list keys
+  refresh-keyring        Refresh keys from keyserver (requires root)
+  init-keyring           Initialize and populate keyring (requires root)
+  list-orphans           List orphan packages (dependencies no longer required)
+  remove-orphans [timeout]
+                         Remove all orphan packages (requires root)
+                         timeout: seconds (default: 300)
+  install-package NAME [timeout]
+                         Install a package from repositories (requires root)
+                         timeout: seconds (default: 300)
+  remove-package NAME [timeout]
+                         Remove an installed package (requires root)
+                         timeout: seconds (default: 300)
+  list-ignored           List packages ignored during upgrades
+  add-ignored NAME       Add a package to the ignored list (requires root)
+  remove-ignored NAME    Remove a package from the ignored list (requires root)
+  cache-info             Show package cache information and size
+  clean-cache [KEEP] [PKGS]  Clean package cache (requires root)
+                         KEEP: number of versions to keep (default: 3)
+                         PKGS: comma-separated package names to clean
+  history [offset] [limit] [filter] [search]
+                         View package history from pacman.log
+                         filter: all|upgraded|installed|removed
+                         search: filter by package name (substring)
+  history-grouped [offset] [limit] [filter] [search]
+                         View package history grouped by upgrade runs
+                         Groups entries within 60s of each other
+                         filter: all|upgraded|installed|removed
+                         search: filter by package name (substring)
+  list-downgrades [NAME] List cached package versions available for downgrade
+                         NAME: optional package name to filter
+  downgrade NAME VERSION [timeout]
+                         Downgrade a package to a cached version (requires root)
+                         timeout: seconds (default: 300)
+  list-archive-versions NAME [QUERY]
+                         List versions available in the Arch Linux Archive
+                         filtered to the system architecture and 'any'
+                         QUERY: optional version substring, applied before the cap
+  downgrade-archive NAME FILENAME [timeout]
+                         Downgrade to an archive version via pacman -U URL
+                         (requires root; downloads and verifies the package)
+                         timeout: seconds (default: 300)
+  get-schedule           Get scheduled upgrade configuration
+  set-schedule [enabled] [mode] [schedule] [max_packages]
+                         Configure scheduled upgrades (requires root)
+                         enabled: true|false
+                         mode: check|upgrade
+                         schedule: systemd OnCalendar spec (e.g., weekly, daily)
+                         max_packages: safety limit (0 = unlimited)
+  list-scheduled-runs [offset] [limit]
+                         List scheduled run history
+  scheduled-run          Execute scheduled operation (called by systemd)
+  reboot-status          Check if system reboot is recommended
+  services-status        List running services whose binaries were replaced
+  pacnew-status          List .pacnew/.pacsave config files needing manual merge
+  list-mirrors           List mirrors from /etc/pacman.d/mirrorlist
+  fetch-mirror-status    Fetch mirror status from archlinux.org API
+  refresh-mirrors [count] [country] [protocol] [sort_by]
+                         Generate a ranked mirrorlist from archlinux.org API
+                         count: number of mirrors (default: 20, max: 100)
+                         country: country code or name filter
+                         protocol: https|http|all (default: https)
+                         sort_by: score|delay|age (default: score)
+  test-mirrors [urls] [timeout]
+                         Test mirror speed and latency
+                         urls: comma-separated list of mirror URLs
+                         timeout: seconds (default: 60)
+  save-mirrorlist <json> Save mirrorlist (requires root)
+                         json: JSON array of mirror entries
+  list-mirror-backups    List available mirrorlist backups
+  restore-mirror-backup <timestamp>
+                         Restore a mirrorlist backup (requires root)
+  delete-mirror-backup <timestamp>
+                         Delete a mirrorlist backup (requires root)
+  dependency-tree NAME [depth] [direction]
+                         Get dependency tree for a package
+                         depth: 1-10 (default: 3)
+                         direction: forward|reverse|both (default: forward)
+  fetch-news [days]      Fetch recent Arch Linux news items
+                         days: lookback period (default: 30)
+  news-read-state        Get read state of news items
+  news-mark-read LINK    Mark a news item as read
+  signoff-list           List packages awaiting signoff
+  signoff-sign PKGBASE REPO ARCH
+                         Sign off a package
+  signoff-revoke PKGBASE REPO ARCH
+                         Revoke a signoff
+                         credentials: base64-encoded JSON {username, password} on stdin
+  check-security         Check installed packages against Arch Security Tracker
+  security-info NAME     Get security advisory history for a package
+  check-lock             Check if the pacman database lock exists and if it's stale
+  remove-stale-lock      Remove a stale database lock (requires root)
+  list-repos             List configured repositories from pacman.conf
+  save-repos <json>      Save repositories to pacman.conf (requires root)
+  list-repo-backups      List available pacman.conf backups
+  restore-repo-backup <timestamp>
+                         Restore a pacman.conf backup (requires root)
+  delete-repo-backup <timestamp>
+                         Delete a pacman.conf backup (requires root)
+  reboot-dismissal-state         Get the dismissed-alert signature for reboot
+  reboot-mark-dismissed SIG      Dismiss the reboot alert
+  services-dismissal-state       Get the dismissed-alert signature for services
+  services-mark-dismissed SIG    Dismiss the services-restart alert
+  pacnew-dismissal-state         Get the dismissed-alert signature for pacnew
+  pacnew-mark-dismissed SIG      Dismiss the pacnew alert
+  scheduled-dismissal-state      Get the dismissed-alert signature for scheduled runs
+  scheduled-mark-dismissed SIG   Dismiss the scheduled-run alert
+"#;
+
 fn print_usage() {
-    eprintln!("Usage: cockpit-pacman-backend <command> [args]");
-    eprintln!();
-    eprintln!("Commands:");
-    eprintln!("  list-installed [offset] [limit] [search] [filter] [repo] [sort_by] [sort_dir]");
-    eprintln!("                         List installed packages (paginated)");
-    eprintln!("                         filter: all|explicit|dependency");
-    eprintln!("                         repo: all|core|extra|multilib|user|...");
-    eprintln!("                         sort_by: name|size|reason");
-    eprintln!("                         sort_dir: asc|desc");
-    eprintln!("  check-updates          Check for available updates");
-    eprintln!("  preflight-upgrade [ignore]");
-    eprintln!("                         Check what the upgrade will do (requires root)");
-    eprintln!("                         ignore: comma-separated list of packages to skip");
-    eprintln!("                         Returns conflicts, replacements, keys to import");
-    eprintln!("  sync-database [force] [timeout]");
-    eprintln!("                         Sync package databases (requires root)");
-    eprintln!("                         force: true|false (default: true)");
-    eprintln!("                         timeout: seconds (default: 300)");
-    eprintln!("  upgrade [ignore] [timeout]");
-    eprintln!("                         Perform system upgrade (requires root)");
-    eprintln!("                         ignore: comma-separated list of packages to skip");
-    eprintln!("                         timeout: seconds (default: 300)");
-    eprintln!("  local-package-info NAME");
-    eprintln!("                         Get detailed info for an installed package");
-    eprintln!("  sync-package-info NAME [REPO]");
-    eprintln!("                         Get detailed info for a package from sync databases");
-    eprintln!("  search QUERY [offset] [limit] [installed] [sort_by] [sort_dir]");
-    eprintln!("                         Search packages by name/description (paginated)");
-    eprintln!("                         installed: all|installed|not-installed");
-    eprintln!("                         sort_by: name|repository|status");
-    eprintln!("                         sort_dir: asc|desc");
-    eprintln!("  keyring-status         Get pacman keyring status and list keys");
-    eprintln!("  refresh-keyring        Refresh keys from keyserver (requires root)");
-    eprintln!("  init-keyring           Initialize and populate keyring (requires root)");
-    eprintln!("  list-orphans           List orphan packages (dependencies no longer required)");
-    eprintln!("  remove-orphans [timeout]");
-    eprintln!("                         Remove all orphan packages (requires root)");
-    eprintln!("                         timeout: seconds (default: 300)");
-    eprintln!("  install-package NAME [timeout]");
-    eprintln!("                         Install a package from repositories (requires root)");
-    eprintln!("                         timeout: seconds (default: 300)");
-    eprintln!("  remove-package NAME [timeout]");
-    eprintln!("                         Remove an installed package (requires root)");
-    eprintln!("                         timeout: seconds (default: 300)");
-    eprintln!("  list-ignored           List packages ignored during upgrades");
-    eprintln!("  add-ignored NAME       Add a package to the ignored list (requires root)");
-    eprintln!("  remove-ignored NAME    Remove a package from the ignored list (requires root)");
-    eprintln!("  cache-info             Show package cache information and size");
-    eprintln!("  clean-cache [KEEP] [PKGS]  Clean package cache (requires root)");
-    eprintln!("                         KEEP: number of versions to keep (default: 3)");
-    eprintln!("                         PKGS: comma-separated package names to clean");
-    eprintln!("  history [offset] [limit] [filter] [search]");
-    eprintln!("                         View package history from pacman.log");
-    eprintln!("                         filter: all|upgraded|installed|removed");
-    eprintln!("                         search: filter by package name (substring)");
-    eprintln!("  history-grouped [offset] [limit] [filter] [search]");
-    eprintln!("                         View package history grouped by upgrade runs");
-    eprintln!("                         Groups entries within 60s of each other");
-    eprintln!("                         filter: all|upgraded|installed|removed");
-    eprintln!("                         search: filter by package name (substring)");
-    eprintln!("  list-downgrades [NAME] List cached package versions available for downgrade");
-    eprintln!("                         NAME: optional package name to filter");
-    eprintln!("  downgrade NAME VERSION [timeout]");
-    eprintln!("                         Downgrade a package to a cached version (requires root)");
-    eprintln!("                         timeout: seconds (default: 300)");
-    eprintln!("  list-archive-versions NAME [QUERY]");
-    eprintln!("                         List versions available in the Arch Linux Archive");
-    eprintln!("                         filtered to the system architecture and 'any'");
-    eprintln!("                         QUERY: optional version substring, applied before the cap");
-    eprintln!("  downgrade-archive NAME FILENAME [timeout]");
-    eprintln!("                         Downgrade to an archive version via pacman -U URL");
-    eprintln!("                         (requires root; downloads and verifies the package)");
-    eprintln!("                         timeout: seconds (default: 300)");
-    eprintln!("  get-schedule           Get scheduled upgrade configuration");
-    eprintln!("  set-schedule [enabled] [mode] [schedule] [max_packages]");
-    eprintln!("                         Configure scheduled upgrades (requires root)");
-    eprintln!("                         enabled: true|false");
-    eprintln!("                         mode: check|upgrade");
-    eprintln!("                         schedule: systemd OnCalendar spec (e.g., weekly, daily)");
-    eprintln!("                         max_packages: safety limit (0 = unlimited)");
-    eprintln!("  list-scheduled-runs [offset] [limit]");
-    eprintln!("                         List scheduled run history");
-    eprintln!("  scheduled-run          Execute scheduled operation (called by systemd)");
-    eprintln!("  reboot-status          Check if system reboot is recommended");
-    eprintln!("  services-status        List running services whose binaries were replaced");
-    eprintln!("  pacnew-status          List .pacnew/.pacsave config files needing manual merge");
-    eprintln!("  list-mirrors           List mirrors from /etc/pacman.d/mirrorlist");
-    eprintln!("  fetch-mirror-status    Fetch mirror status from archlinux.org API");
-    eprintln!("  refresh-mirrors [count] [country] [protocol] [sort_by]");
-    eprintln!("                         Generate a ranked mirrorlist from archlinux.org API");
-    eprintln!("                         count: number of mirrors (default: 20, max: 100)");
-    eprintln!("                         country: country code or name filter");
-    eprintln!("                         protocol: https|http|all (default: https)");
-    eprintln!("                         sort_by: score|delay|age (default: score)");
-    eprintln!("  test-mirrors [urls] [timeout]");
-    eprintln!("                         Test mirror speed and latency");
-    eprintln!("                         urls: comma-separated list of mirror URLs");
-    eprintln!("                         timeout: seconds (default: 60)");
-    eprintln!("  save-mirrorlist <json> Save mirrorlist (requires root)");
-    eprintln!("                         json: JSON array of mirror entries");
-    eprintln!("  list-mirror-backups    List available mirrorlist backups");
-    eprintln!("  restore-mirror-backup <timestamp>");
-    eprintln!("                         Restore a mirrorlist backup (requires root)");
-    eprintln!("  delete-mirror-backup <timestamp>");
-    eprintln!("                         Delete a mirrorlist backup (requires root)");
-    eprintln!("  dependency-tree NAME [depth] [direction]");
-    eprintln!("                         Get dependency tree for a package");
-    eprintln!("                         depth: 1-10 (default: 3)");
-    eprintln!("                         direction: forward|reverse|both (default: forward)");
-    eprintln!("  fetch-news [days]      Fetch recent Arch Linux news items");
-    eprintln!("                         days: lookback period (default: 30)");
-    eprintln!("  signoff-list           List packages awaiting signoff");
-    eprintln!("  signoff-sign PKGBASE REPO ARCH");
-    eprintln!("                         Sign off a package");
-    eprintln!("  signoff-revoke PKGBASE REPO ARCH");
-    eprintln!("                         Revoke a signoff");
-    eprintln!(
-        "                         credentials: base64-encoded JSON {{username, password}} on stdin"
-    );
-    eprintln!("  check-security         Check installed packages against Arch Security Tracker");
-    eprintln!("  security-info NAME     Get security advisory history for a package");
-    eprintln!(
-        "  check-lock             Check if the pacman database lock exists and if it's stale"
-    );
-    eprintln!("  remove-stale-lock      Remove a stale database lock (requires root)");
-    eprintln!("  list-repo-backups      List available pacman.conf backups");
-    eprintln!("  restore-repo-backup <timestamp>");
-    eprintln!("                         Restore a pacman.conf backup (requires root)");
-    eprintln!("  delete-repo-backup <timestamp>");
-    eprintln!("                         Delete a pacman.conf backup (requires root)");
+    eprint!("{USAGE}");
+}
+
+// Positional-argv parsers, split out from the dispatch so the contract (which
+// position maps to which parameter) is unit-testable without invoking handlers.
+// Frontend send order is pinned by contract tests in src/test/contract.test.ts.
+
+fn arg_opt(args: &[String], i: usize) -> Option<String> {
+    args.get(i)
+        .map(|s| s.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
+fn arg_opt_not_all(args: &[String], i: usize) -> Option<String> {
+    args.get(i)
+        .map(|s| s.as_str())
+        .filter(|s| !s.is_empty() && *s != "all")
+        .map(|s| s.to_string())
+}
+
+fn arg_usize(args: &[String], i: usize, default: usize) -> usize {
+    args.get(i).and_then(|s| s.parse().ok()).unwrap_or(default)
+}
+
+type ListInstalledArgs = (
+    usize,
+    usize,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+fn parse_list_installed(args: &[String]) -> ListInstalledArgs {
+    (
+        arg_usize(args, 2, 0),
+        arg_usize(args, 3, 50),
+        arg_opt(args, 4),
+        arg_opt_not_all(args, 5),
+        arg_opt_not_all(args, 6),
+        arg_opt(args, 7),
+        arg_opt(args, 8),
+    )
+}
+
+type SearchTailArgs = (usize, usize, Option<bool>, Option<String>, Option<String>);
+fn parse_search_tail(args: &[String]) -> SearchTailArgs {
+    let installed = args.get(5).and_then(|s| match s.as_str() {
+        "installed" => Some(true),
+        "not-installed" => Some(false),
+        _ => None,
+    });
+    (
+        arg_usize(args, 3, 0),
+        arg_usize(args, 4, 100),
+        installed,
+        arg_opt(args, 6),
+        arg_opt(args, 7),
+    )
+}
+
+type HistoryArgs = (usize, usize, Option<String>, Option<String>);
+fn parse_history(args: &[String], default_limit: usize) -> HistoryArgs {
+    (
+        arg_usize(args, 2, 0),
+        arg_usize(args, 3, default_limit),
+        arg_opt_not_all(args, 4),
+        arg_opt(args, 5),
+    )
+}
+
+type RefreshMirrorsArgs = (usize, Option<String>, String, String);
+fn parse_refresh_mirrors(args: &[String]) -> RefreshMirrorsArgs {
+    let count = arg_usize(args, 2, 20).min(100);
+    let protocol = arg_opt(args, 4).unwrap_or_else(|| "https".to_string());
+    let sort_by = arg_opt(args, 5).unwrap_or_else(|| "score".to_string());
+    (count, arg_opt(args, 3), protocol, sort_by)
+}
+
+type SetScheduleArgs = (Option<bool>, Option<String>, Option<String>, Option<usize>);
+fn parse_set_schedule(args: &[String]) -> SetScheduleArgs {
+    let enabled = args.get(2).and_then(|s| match s.as_str() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    });
+    let max_packages = args.get(5).and_then(|s| s.parse().ok());
+    (enabled, arg_opt(args, 3), arg_opt(args, 4), max_packages)
 }
 
 fn main() {
@@ -166,28 +336,17 @@ fn main() {
 
     let result = match args[1].as_str() {
         "list-installed" => {
-            let offset = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
-            let limit = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(50);
-            let search = args.get(4).map(|s| s.as_str()).filter(|s| !s.is_empty());
-            let filter = args
-                .get(5)
-                .map(|s| s.as_str())
-                .filter(|s| !s.is_empty() && *s != "all");
-            let repo_filter = args
-                .get(6)
-                .map(|s| s.as_str())
-                .filter(|s| !s.is_empty() && *s != "all");
-            let sort_by = args.get(7).map(|s| s.as_str()).filter(|s| !s.is_empty());
-            let sort_dir = args.get(8).map(|s| s.as_str()).filter(|s| !s.is_empty());
+            let (offset, limit, search, filter, repo_filter, sort_by, sort_dir) =
+                parse_list_installed(&args);
             validate_pagination(offset, limit).and_then(|_| {
                 list_installed(
                     offset,
                     limit,
-                    search,
-                    filter,
-                    repo_filter,
-                    sort_by,
-                    sort_dir,
+                    search.as_deref(),
+                    filter.as_deref(),
+                    repo_filter.as_deref(),
+                    sort_by.as_deref(),
+                    sort_dir.as_deref(),
                 )
             })
         }
@@ -236,18 +395,19 @@ fn main() {
                 eprintln!("Error: search requires a query");
                 std::process::exit(1);
             }
-            let offset = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
-            let limit = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(100);
-            let installed_filter = args.get(5).and_then(|s| match s.as_str() {
-                "installed" => Some(true),
-                "not-installed" => Some(false),
-                _ => None,
-            });
-            let sort_by = args.get(6).map(|s| s.as_str()).filter(|s| !s.is_empty());
-            let sort_dir = args.get(7).map(|s| s.as_str()).filter(|s| !s.is_empty());
+            let (offset, limit, installed_filter, sort_by, sort_dir) = parse_search_tail(&args);
             validate_search_query(&args[2])
                 .and_then(|_| validate_pagination(offset, limit))
-                .and_then(|_| search(&args[2], offset, limit, installed_filter, sort_by, sort_dir))
+                .and_then(|_| {
+                    search(
+                        &args[2],
+                        offset,
+                        limit,
+                        installed_filter,
+                        sort_by.as_deref(),
+                        sort_dir.as_deref(),
+                    )
+                })
         }
         "sync-package-info" => {
             if args.len() < 3 {
@@ -318,33 +478,21 @@ fn main() {
                 .and_then(|_| clean_cache(keep_versions, &filter_pkgs))
         }
         "history" => {
-            let offset = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
-            let limit = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(100);
-            let filter = args
-                .get(4)
-                .map(|s| s.as_str())
-                .filter(|s| !s.is_empty() && *s != "all");
-            let search = args.get(5).map(|s| s.as_str()).filter(|s| !s.is_empty());
+            let (offset, limit, filter, search) = parse_history(&args, 100);
             validate_pagination(offset, limit).and_then(|_| {
-                if let Some(q) = search {
+                if let Some(q) = search.as_deref() {
                     validate_search_query(q)?;
                 }
-                get_history(offset, limit, filter, search)
+                get_history(offset, limit, filter.as_deref(), search.as_deref())
             })
         }
         "history-grouped" => {
-            let offset = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
-            let limit = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(20);
-            let filter = args
-                .get(4)
-                .map(|s| s.as_str())
-                .filter(|s| !s.is_empty() && *s != "all");
-            let search = args.get(5).map(|s| s.as_str()).filter(|s| !s.is_empty());
+            let (offset, limit, filter, search) = parse_history(&args, 20);
             validate_pagination(offset, limit).and_then(|_| {
-                if let Some(q) = search {
+                if let Some(q) = search.as_deref() {
                     validate_search_query(q)?;
                 }
-                get_grouped_history(offset, limit, filter, search)
+                get_grouped_history(offset, limit, filter.as_deref(), search.as_deref())
             })
         }
         "list-downgrades" => {
@@ -391,16 +539,8 @@ fn main() {
         }
         "get-schedule" => get_schedule_config(),
         "set-schedule" => {
-            let enabled = args.get(2).and_then(|s| match s.as_str() {
-                "true" => Some(true),
-                "false" => Some(false),
-                "" => None,
-                _ => None,
-            });
-            let mode = args.get(3).map(|s| s.as_str()).filter(|s| !s.is_empty());
-            let schedule = args.get(4).map(|s| s.as_str()).filter(|s| !s.is_empty());
-            let max_packages = args.get(5).and_then(|s| s.parse().ok());
-            set_schedule_config(enabled, mode, schedule, max_packages)
+            let (enabled, mode, schedule, max_packages) = parse_set_schedule(&args);
+            set_schedule_config(enabled, mode.as_deref(), schedule.as_deref(), max_packages)
         }
         "list-scheduled-runs" => {
             let offset = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -414,22 +554,10 @@ fn main() {
         "list-mirrors" => list_mirrors(),
         "fetch-mirror-status" => fetch_mirror_status(),
         "refresh-mirrors" => {
-            let count = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(20usize);
-            let country = args.get(3).map(|s| s.as_str()).filter(|s| !s.is_empty());
-            let protocol = args
-                .get(4)
-                .map(|s| s.as_str())
-                .filter(|s| !s.is_empty())
-                .unwrap_or("https");
-            let sort_by = args
-                .get(5)
-                .map(|s| s.as_str())
-                .filter(|s| !s.is_empty())
-                .unwrap_or("score");
-            let count = count.min(100);
-            validate_refresh_protocol(protocol)
-                .and_then(|_| validate_refresh_sort(sort_by))
-                .and_then(|_| refresh_mirrors(count, country, protocol, sort_by))
+            let (count, country, protocol, sort_by) = parse_refresh_mirrors(&args);
+            validate_refresh_protocol(&protocol)
+                .and_then(|_| validate_refresh_sort(&sort_by))
+                .and_then(|_| refresh_mirrors(count, country.as_deref(), &protocol, &sort_by))
         }
         "test-mirrors" => {
             let urls: Vec<String> = args
@@ -620,7 +748,11 @@ fn main() {
             Ok(())
         }
         cmd => {
-            eprintln!("Error: unknown command '{}'", cmd);
+            eprintln!(
+                "Error: unknown command '{}' ({} commands available)",
+                cmd,
+                COMMANDS.len()
+            );
             print_usage();
             std::process::exit(1);
         }
@@ -642,5 +774,194 @@ fn main() {
         }
         eprintln!("Error: {:#}", e);
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn svec(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn list_installed_positions() {
+        let args = svec(&[
+            "bin",
+            "list-installed",
+            "5",
+            "20",
+            "foo",
+            "explicit",
+            "core",
+            "name",
+            "asc",
+        ]);
+        assert_eq!(
+            parse_list_installed(&args),
+            (
+                5,
+                20,
+                Some("foo".to_string()),
+                Some("explicit".to_string()),
+                Some("core".to_string()),
+                Some("name".to_string()),
+                Some("asc".to_string()),
+            )
+        );
+    }
+
+    #[test]
+    fn list_installed_defaults_and_all() {
+        assert_eq!(
+            parse_list_installed(&svec(&["bin", "list-installed"])),
+            (0, 50, None, None, None, None, None)
+        );
+        // empty search and "all" filter/repo collapse to None
+        assert_eq!(
+            parse_list_installed(&svec(&[
+                "bin",
+                "list-installed",
+                "0",
+                "50",
+                "",
+                "all",
+                "all"
+            ])),
+            (0, 50, None, None, None, None, None)
+        );
+    }
+
+    #[test]
+    fn search_tail_positions() {
+        let args = svec(&[
+            "bin",
+            "search",
+            "query",
+            "5",
+            "30",
+            "installed",
+            "name",
+            "asc",
+        ]);
+        assert_eq!(
+            parse_search_tail(&args),
+            (
+                5,
+                30,
+                Some(true),
+                Some("name".to_string()),
+                Some("asc".to_string())
+            )
+        );
+        assert_eq!(
+            parse_search_tail(&svec(&["bin", "search", "q", "0", "10", "not-installed"])),
+            (0, 10, Some(false), None, None)
+        );
+        assert_eq!(
+            parse_search_tail(&svec(&["bin", "search", "q"])),
+            (0, 100, None, None, None)
+        );
+    }
+
+    #[test]
+    fn history_positions_and_default_limit() {
+        assert_eq!(
+            parse_history(
+                &svec(&["bin", "history", "2", "10", "upgraded", "linux"]),
+                100
+            ),
+            (
+                2,
+                10,
+                Some("upgraded".to_string()),
+                Some("linux".to_string())
+            )
+        );
+        assert_eq!(
+            parse_history(&svec(&["bin", "history"]), 100),
+            (0, 100, None, None)
+        );
+        assert_eq!(
+            parse_history(&svec(&["bin", "history-grouped"]), 20),
+            (0, 20, None, None)
+        );
+    }
+
+    #[test]
+    fn refresh_mirrors_clamp_and_defaults() {
+        assert_eq!(
+            parse_refresh_mirrors(&svec(&[
+                "bin",
+                "refresh-mirrors",
+                "50",
+                "de",
+                "http",
+                "delay"
+            ])),
+            (
+                50,
+                Some("de".to_string()),
+                "http".to_string(),
+                "delay".to_string()
+            )
+        );
+        assert_eq!(
+            parse_refresh_mirrors(&svec(&["bin", "refresh-mirrors"])),
+            (20, None, "https".to_string(), "score".to_string())
+        );
+        // count clamps to 100
+        assert_eq!(
+            parse_refresh_mirrors(&svec(&["bin", "refresh-mirrors", "999"])).0,
+            100
+        );
+    }
+
+    #[test]
+    fn set_schedule_positions() {
+        assert_eq!(
+            parse_set_schedule(&svec(&[
+                "bin",
+                "set-schedule",
+                "true",
+                "upgrade",
+                "weekly",
+                "50"
+            ])),
+            (
+                Some(true),
+                Some("upgrade".to_string()),
+                Some("weekly".to_string()),
+                Some(50)
+            )
+        );
+        assert_eq!(
+            parse_set_schedule(&svec(&["bin", "set-schedule", "false"])),
+            (Some(false), None, None, None)
+        );
+        assert_eq!(
+            parse_set_schedule(&svec(&["bin", "set-schedule"])),
+            (None, None, None, None)
+        );
+    }
+
+    #[test]
+    fn usage_documents_every_command() {
+        for c in COMMANDS {
+            let line = format!("  {c} ");
+            assert!(
+                USAGE.contains(&line),
+                "command `{c}` is not documented in USAGE"
+            );
+        }
+    }
+
+    #[test]
+    fn commands_have_no_duplicates() {
+        let mut seen = std::collections::HashSet::new();
+        for c in COMMANDS {
+            assert!(seen.insert(*c), "duplicate command in COMMANDS: {c}");
+        }
     }
 }
