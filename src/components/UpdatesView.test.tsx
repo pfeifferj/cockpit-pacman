@@ -154,6 +154,75 @@ describe("UpdatesView", () => {
     });
   });
 
+  describe("Pagination", () => {
+    const makeUpdates = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        name: `pgpkg${String(i).padStart(4, "0")}`,
+        current_version: "1.0.0-1",
+        new_version: "1.0.1-1",
+        download_size: 1000,
+        current_size: 2000,
+        new_size: 2000,
+        repository: "core",
+        ignored: false,
+      }));
+
+    it("renders only the first page (50) and pages to the rest", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: makeUpdates(60), warnings: [] });
+      render(<UpdatesView />);
+      await waitFor(() => expect(screen.getByText("pgpkg0000")).toBeInTheDocument());
+
+      expect(screen.queryByText("pgpkg0055")).not.toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText("Go to next page"));
+      });
+
+      await waitFor(() => expect(screen.getByText("pgpkg0055")).toBeInTheDocument());
+      expect(screen.queryByText("pgpkg0000")).not.toBeInTheDocument();
+    });
+
+    it("select-all selects the full set, not just the visible page", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: makeUpdates(60), warnings: [] });
+      render(<UpdatesView />);
+      // Selection auto-initializes to all 60 even though only 50 rows render.
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /Apply 60 Updates/ })).toBeInTheDocument()
+      );
+
+      const selectAll = screen.getByLabelText("Select all updates");
+      await act(async () => { fireEvent.click(selectAll); });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /Apply 0 Updates/ })).toBeInTheDocument()
+      );
+
+      await act(async () => { fireEvent.click(selectAll); });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /Apply 60 Updates/ })).toBeInTheDocument()
+      );
+    });
+
+    it("resets to page 1 when the filter changes", async () => {
+      mockCheckUpdates.mockResolvedValue({ updates: makeUpdates(60), warnings: [] });
+      render(<UpdatesView />);
+      await waitFor(() => expect(screen.getByText("pgpkg0000")).toBeInTheDocument());
+
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText("Go to next page"));
+      });
+      await waitFor(() => expect(screen.getByText("pgpkg0055")).toBeInTheDocument());
+
+      const search = screen.getByLabelText("Filter updates");
+      await act(async () => {
+        fireEvent.change(search, { target: { value: "pgpkg000" } });
+      });
+
+      // Back on page 1 of the filtered set (pgpkg0000..0009).
+      await waitFor(() => expect(screen.getByText("pgpkg0000")).toBeInTheDocument());
+      expect(screen.queryByText("pgpkg0055")).not.toBeInTheDocument();
+    });
+  });
+
   describe("Overview Health page_status", () => {
     const notifyCalls = () =>
       mockTransportControl.mock.calls.filter(([command]) => command === "notify");
@@ -260,6 +329,7 @@ describe("UpdatesView", () => {
             download_size: 50000000,
             current_size: 45000000,
             new_size: 48000000,
+            ignored: false,
             repository: "core",
           },
         ],
@@ -293,6 +363,7 @@ describe("UpdatesView", () => {
             download_size: 50000000,
             current_size: 45000000,
             new_size: 48000000,
+            ignored: false,
             repository: "core",
           },
         ],
@@ -1016,6 +1087,7 @@ describe("UpdatesView", () => {
           download_size: 150000000,
           current_size: 142000000,
           new_size: 145000000,
+          ignored: false,
           repository: "core",
         },
         {
@@ -1025,6 +1097,7 @@ describe("UpdatesView", () => {
           download_size: 50000000,
           current_size: 45000000,
           new_size: 48000000,
+          ignored: false,
           repository: "core",
         },
         {
@@ -1034,6 +1107,7 @@ describe("UpdatesView", () => {
           download_size: 30000000,
           current_size: 28000000,
           new_size: 32000000,
+          ignored: false,
           repository: "core",
         },
       ],
@@ -1270,6 +1344,7 @@ describe("UpdatesView", () => {
           download_size: 1000,
           current_size: 2000,
           new_size: 2500,
+          ignored: false,
           repository: "extra",
         },
         {
@@ -1279,6 +1354,7 @@ describe("UpdatesView", () => {
           download_size: 5000,
           current_size: 3000,
           new_size: 3500,
+          ignored: false,
           repository: "core",
         },
       ],
@@ -1902,6 +1978,7 @@ describe("UpdatesView", () => {
         download_size: 5000000,
         current_size: 10000000,
         new_size: 12000000,
+        ignored: false,
         repository: "extra",
       }],
       warnings: [],

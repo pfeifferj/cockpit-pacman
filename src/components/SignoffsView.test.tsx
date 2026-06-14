@@ -34,6 +34,7 @@ const signoffList: api.SignoffListResponse = {
       arch: "x86_64",
       repo: "extra-testing",
       packager: "tester",
+      last_update: "2024-01-01T00:00:00Z",
       known_bad: false,
       approved: false,
       required: 2,

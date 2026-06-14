@@ -93,7 +93,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
       const response = await getScheduleConfig();
       setConfig(response);
       setEnabled(response.enabled);
-      setMode(response.mode);
+      setMode(response.mode as ScheduleMode);
       setMaxPackages(response.max_packages);
 
       const isPreset = SCHEDULE_PRESETS.some(

@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `pacman.conf` backup history with restore and delete in the Repositories tab
+- Pagination in the Updates and Mirrors lists
+
+### Fixed
+- Cancelling a sync or upgrade no longer risks interrupting a transaction mid-commit
+
 ## [0.3.6] - 2026-05-11
 
 ### Added

@@ -27,6 +27,7 @@ import {
   ModalFooter,
   Popover,
   Icon,
+  ExpandableSection,
 } from "@patternfly/react-core";
 import {
   GlobeIcon,
@@ -50,10 +51,15 @@ import {
 import { StatBox } from "./StatBox";
 import {
   RepoEntry,
+  RepoBackup,
   ListReposResponse,
   listRepos,
   saveRepos,
+  listRepoBackups,
+  restoreRepoBackup,
+  deleteRepoBackup,
   formatNumber,
+  formatSize,
 } from "../api";
 import { sanitizeErrorMessage } from "../utils";
 
@@ -84,6 +90,12 @@ export const RepositoriesView: React.FC = () => {
   const [newDirectiveValues, setNewDirectiveValues] = useState<
     Record<string, string>
   >({});
+  const [backups, setBackups] = useState<RepoBackup[]>([]);
+  const [backupsExpanded, setBackupsExpanded] = useState(false);
+  const [backupsLoading, setBackupsLoading] = useState(false);
+  const [backupBusy, setBackupBusy] = useState<number | null>(null);
+  const [backupError, setBackupError] = useState<string | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<number | null>(null);
 
   const loadRepos = useCallback(async () => {
     setState("loading");
@@ -125,6 +137,55 @@ export const RepositoriesView: React.FC = () => {
     } catch (ex) {
       setState("error");
       setError(ex instanceof Error ? ex.message : String(ex));
+    }
+  };
+
+  const loadBackups = useCallback(async () => {
+    setBackupsLoading(true);
+    setBackupError(null);
+    try {
+      const response = await listRepoBackups();
+      setBackups(response.backups);
+    } catch (ex) {
+      setBackupError(ex instanceof Error ? ex.message : String(ex));
+      setBackups([]);
+    } finally {
+      setBackupsLoading(false);
+    }
+  }, []);
+
+  const handleBackupsToggle = (_event: React.MouseEvent, expanded: boolean) => {
+    setBackupsExpanded(expanded);
+    if (expanded && backups.length === 0) {
+      loadBackups();
+    }
+  };
+
+  const handleRestoreBackup = async (timestamp: number) => {
+    setRestoreTarget(null);
+    setBackupBusy(timestamp);
+    setBackupError(null);
+    try {
+      await restoreRepoBackup(timestamp);
+      await loadRepos();
+      await loadBackups();
+    } catch (ex) {
+      setBackupError(ex instanceof Error ? ex.message : String(ex));
+    } finally {
+      setBackupBusy(null);
+    }
+  };
+
+  const handleDeleteBackup = async (timestamp: number) => {
+    setBackupBusy(timestamp);
+    setBackupError(null);
+    try {
+      await deleteRepoBackup(timestamp);
+      await loadBackups();
+    } catch (ex) {
+      setBackupError(ex instanceof Error ? ex.message : String(ex));
+    } finally {
+      setBackupBusy(null);
     }
   };
 
@@ -622,6 +683,70 @@ export const RepositoriesView: React.FC = () => {
           </Tbody>
         </Table>
 
+        <div className="pf-v6-u-mt-md">
+          <ExpandableSection
+            toggleText={backupsExpanded ? "Hide backup history" : "Backup history"}
+            onToggle={handleBackupsToggle}
+            isExpanded={backupsExpanded}
+          >
+            {backupsLoading ? (
+              <Flex alignItems={{ default: "alignItemsCenter" }} spaceItems={{ default: "spaceItemsSm" }}>
+                <FlexItem><Spinner size="md" /></FlexItem>
+                <FlexItem>Loading backups...</FlexItem>
+              </Flex>
+            ) : backupError ? (
+              <Label color="red">{sanitizeErrorMessage(backupError)}</Label>
+            ) : backups.length === 0 ? (
+              <div className="pf-v6-u-color-200">
+                No backups yet. A backup is created automatically each time you save.
+              </div>
+            ) : (
+              <Table aria-label="pacman.conf backups" variant="compact">
+                <Thead>
+                  <Tr>
+                    <Th>Created</Th>
+                    <Th width={20}>Repositories</Th>
+                    <Th width={15}>Size</Th>
+                    <Th width={20} screenReaderText="Actions" />
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {backups.map((b) => (
+                    <Tr key={b.timestamp}>
+                      <Td dataLabel="Created">{b.date}</Td>
+                      <Td dataLabel="Repositories">{b.enabled_count} / {b.repo_count} enabled</Td>
+                      <Td dataLabel="Size">{formatSize(b.size)}</Td>
+                      <Td dataLabel="Actions">
+                        <Flex spaceItems={{ default: "spaceItemsSm" }}>
+                          <FlexItem>
+                            <Button
+                              variant="secondary"
+                              isDisabled={backupBusy !== null}
+                              onClick={() => setRestoreTarget(b.timestamp)}
+                            >
+                              Restore
+                            </Button>
+                          </FlexItem>
+                          <FlexItem>
+                            <Button
+                              variant="plain"
+                              aria-label={`Delete backup from ${b.date}`}
+                              isDisabled={backupBusy !== null}
+                              onClick={() => handleDeleteBackup(b.timestamp)}
+                            >
+                              <TrashIcon />
+                            </Button>
+                          </FlexItem>
+                        </Flex>
+                      </Td>
+                    </Tr>
+                  ))}
+                </Tbody>
+              </Table>
+            )}
+          </ExpandableSection>
+        </div>
+
       </CardBody>
     </Card>
     <Modal
@@ -647,6 +772,29 @@ export const RepositoriesView: React.FC = () => {
           Discard and switch filter
         </Button>
         <Button variant="link" onClick={() => setPendingSearchFilter(null)}>
+          Cancel
+        </Button>
+      </ModalFooter>
+    </Modal>
+    <Modal
+      variant={ModalVariant.small}
+      isOpen={restoreTarget !== null}
+      onClose={() => setRestoreTarget(null)}
+      aria-labelledby="repo-restore-guard-title"
+    >
+      <ModalHeader title="Restore pacman.conf backup" labelId="repo-restore-guard-title" />
+      <ModalBody>
+        This overwrites the current /etc/pacman.conf with the selected backup. The
+        current configuration is backed up first, so this can be undone.
+      </ModalBody>
+      <ModalFooter>
+        <Button
+          variant="primary"
+          onClick={() => restoreTarget !== null && handleRestoreBackup(restoreTarget)}
+        >
+          Restore
+        </Button>
+        <Button variant="link" onClick={() => setRestoreTarget(null)}>
           Cancel
         </Button>
       </ModalFooter>

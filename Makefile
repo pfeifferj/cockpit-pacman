@@ -5,7 +5,7 @@ TARFILE = cockpit-pacman-$(VERSION).tar.xz
 
 BACKEND_BIN = backend/target/release/cockpit-pacman-backend
 
-.PHONY: all build build-backend build-frontend clean install devel-install lint lint-frontend lint-backend test test-frontend test-backend test-e2e test-e2e-ui check dist
+.PHONY: all build build-backend build-frontend generate-types clean install devel-install lint lint-frontend lint-backend test test-frontend test-backend test-e2e test-e2e-ui check dist
 
 all: build install
 	@if [ -n "$$SUDO_USER" ] && [ -d node_modules ]; then chown -R $$SUDO_USER node_modules; fi
@@ -15,7 +15,12 @@ build: build-backend build-frontend
 build-backend:
 	cd backend && cargo build --release
 
-build-frontend:
+# Regenerate the TypeScript wire types from the Rust serde structs (ts-rs).
+# The export logic lives in #[cfg(test)] code, so this runs via cargo test.
+generate-types:
+	cd backend && cargo test --quiet export_bindings
+
+build-frontend: generate-types
 	npm ci
 	npm run build
 	cp src/manifest.json dist/

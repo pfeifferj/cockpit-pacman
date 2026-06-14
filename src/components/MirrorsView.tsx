@@ -56,7 +56,9 @@ import {
 } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import { useSortableTable } from "../hooks/useSortableTable";
+import { usePagination } from "../hooks/usePagination";
 import { StatBox } from "./StatBox";
+import { CompactPagination } from "./CompactPagination";
 import {
   MirrorEntry,
   MirrorListResponse,
@@ -597,6 +599,20 @@ export const MirrorsView: React.FC = () => {
     });
   }, [filteredMirrors, activeSortIndex, activeSortDirection]);
 
+  const { page, perPage, offset, onSetPage, onPerPageSelect, setPage } = usePagination();
+
+  // Only the rendered rows are paginated; row actions resolve their index via
+  // mirrorIndexMap against the full list. Reset to page 1 when the
+  // filtered/sorted set changes so a filter can't strand an empty page.
+  useEffect(() => {
+    setPage(1);
+  }, [searchFilter, countryFilter, activeSortIndex, activeSortDirection, setPage]);
+
+  const pagedMirrors = useMemo(
+    () => sortedMirrors.slice(offset, offset + perPage),
+    [sortedMirrors, offset, perPage]
+  );
+
   if (state === "loading") {
     return (
       <Card>
@@ -823,7 +839,7 @@ export const MirrorsView: React.FC = () => {
             </Tr>
           </Thead>
           <Tbody>
-            {sortedMirrors.map((mirror) => {
+            {pagedMirrors.map((mirror) => {
               const actualIndex = mirrorIndexMap.get(mirror.url) ?? -1;
               return (
                   <Tr key={`mirror-${mirror.url}`}>
@@ -914,6 +930,15 @@ export const MirrorsView: React.FC = () => {
             })}
           </Tbody>
         </Table>
+        {sortedMirrors.length > perPage && (
+          <CompactPagination
+            itemCount={sortedMirrors.length}
+            page={page}
+            perPage={perPage}
+            onSetPage={onSetPage}
+            onPerPageSelect={onPerPageSelect}
+          />
+        )}
 
         <ExpandableSection
           toggleText={backupsExpanded ? "Hide backup history" : "Backup history"}

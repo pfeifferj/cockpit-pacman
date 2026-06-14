@@ -3,6 +3,7 @@ import { ARCH_STATUS_URL, NEWS_LOOKBACK_DAYS, REBOOT_PACKAGES } from "../constan
 import { useBackdropClose } from "../hooks/useBackdropClose";
 import { usePackageDetails } from "../hooks/usePackageDetails";
 import { useSortableTable } from "../hooks/useSortableTable";
+import { usePagination } from "../hooks/usePagination";
 import { useDismissalSignature } from "../hooks/useDismissalSignature";
 import {
 	Card,
@@ -103,6 +104,7 @@ import {
 } from "../api";
 import type { KeyringCredentials, ErrorCode } from "../api";
 import { NetworkErrorState } from "./NetworkErrorState";
+import { CompactPagination } from "./CompactPagination";
 
 import { appendCapped, isDbLockError, sanitizeUrl } from "../utils";
 import { TimeAgo } from "./TimeAgo";
@@ -472,6 +474,20 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       return activeSortDirection === "asc" ? comparison : -comparison;
     });
   }, [filteredUpdates, activeSortKey, activeSortDirection]);
+
+  const { page, perPage, offset, onSetPage, onPerPageSelect, setPage } = usePagination();
+
+  // The full sorted set drives selection, sizing, and sort; only the rendered
+  // rows are paginated. Reset to page 1 when the filtered/sorted set changes so
+  // a filter never strands the user on a now-empty page.
+  useEffect(() => {
+    setPage(1);
+  }, [searchFilter, repoFilter, activeSortKey, activeSortDirection, setPage]);
+
+  const pagedUpdates = useMemo(
+    () => sortedUpdates.slice(offset, offset + perPage),
+    [sortedUpdates, offset, perPage]
+  );
 
   // Calculate ignored packages (unselected ones)
   const ignoredPackages = useMemo(() => {
@@ -1185,9 +1201,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     const isLockError = isDbLockError(error ?? "", errorCode)
       || (error ? /failed to initialize transaction/i.test(error) : false);
     const showLockRecovery = isLockError && !lockRetryExhausted;
-    // Only a genuine connectivity failure shows the offline state here. A bare
-    // operation timeout (the sync/upgrade exceeded its budget) is not an
-    // unreachable-host condition, so it keeps its specific message.
+    // Only a genuine connectivity failure shows the offline state here. This
+    // heuristic is intentionally stricter than parseErrorCode: a bare operation
+    // timeout, or the unqualified word "network", is not an unreachable-host
+    // condition, so it keeps its specific message rather than the offline page.
     const networkError = !isLockError && (
       errorCode === "network_error" ||
       (error ? /failed to retrieve|unable to connect|could not resolve|dns|connection refused/i.test(error) : false)
@@ -1639,7 +1656,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
             </Tr>
           </Thead>
           <Tbody>
-            {sortedUpdates.map((update) => {
+            {pagedUpdates.map((update) => {
               const netSize = update.new_size - update.current_size;
               const isSelected = selectedPackages.has(update.name);
               const isIgnored = update.ignored;
@@ -1781,6 +1798,15 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
             })}
           </Tbody>
         </Table>
+        {sortedUpdates.length > perPage && (
+          <CompactPagination
+            itemCount={sortedUpdates.length}
+            page={page}
+            perPage={perPage}
+            onSetPage={onSetPage}
+            onPerPageSelect={onPerPageSelect}
+          />
+        )}
         </CardBody>
       </Card>
 

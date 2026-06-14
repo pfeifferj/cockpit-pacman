@@ -13,11 +13,14 @@ use crate::alpm::{
 };
 use crate::config::{AppConfig, ScheduleConfigResponse, ScheduleMode, ScheduleSetResponse};
 use crate::models::{ScheduledRunEntry, ScheduledRunsResponse};
-use crate::util::{CheckResult, TimeoutGuard, check_cancel, emit_json, setup_signal_handler};
+use crate::util::{
+    CheckResult, TimeoutGuard, check_cancel, emit_json, setup_signal_handler, with_file_lock,
+};
 use crate::validation::{validate_max_packages, validate_schedule};
 
 const LOG_DIR: &str = "/var/log/cockpit-pacman";
 const LOG_PATH: &str = "/var/log/cockpit-pacman/scheduled.jsonl";
+const LOG_LOCK_PATH: &str = "/var/log/cockpit-pacman/.scheduled.jsonl.lock";
 const MAX_LOG_SIZE_BYTES: u64 = 1024 * 1024; // 1MB max log size
 const MAX_LOG_ENTRIES: usize = 1000;
 const SCHEDULED_TIMEOUT_SECS: u64 = 1800; // 30 minutes
@@ -44,33 +47,41 @@ fn log_run(entry: &LogEntry) -> Result<()> {
     fs::set_permissions(LOG_DIR, fs::Permissions::from_mode(0o750))
         .context("Failed to set log directory permissions")?;
 
-    // Check if log rotation is needed
-    if let Ok(metadata) = fs::metadata(LOG_PATH)
-        && metadata.len() > MAX_LOG_SIZE_BYTES
-    {
-        rotate_log()?;
-    }
+    // Hold the lock across the rotate-check and the append: otherwise a
+    // concurrent writer can interleave a half-written line, or lose an append
+    // into a file being rotated out from under it.
+    with_file_lock(Path::new(LOG_LOCK_PATH), || {
+        rotate_if_needed()?;
 
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o640)
-        .open(LOG_PATH)
-        .context("Failed to open log file")?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .mode(0o640)
+            .open(LOG_PATH)
+            .context("Failed to open log file")?;
 
-    let json = serde_json::to_string(entry)?;
-    writeln!(file, "{}", json)?;
-    Ok(())
+        let json = serde_json::to_string(entry)?;
+        writeln!(file, "{}", json)?;
+        Ok(())
+    })
 }
 
-fn rotate_log() -> Result<()> {
-    // Read existing entries, keep only the last MAX_LOG_ENTRIES / 2
-    let mut entries = Vec::new();
+/// Trim the log when it exceeds either the size or the entry-count cap, keeping
+/// the most recent half. Rewrites via a temp file + rename so an unlocked
+/// reader (get_scheduled_runs) never observes a partially-rewritten file.
+/// Callers must hold the log lock.
+fn rotate_if_needed() -> Result<()> {
+    let path = Path::new(LOG_PATH);
 
-    if Path::new(LOG_PATH).exists() {
-        let file = fs::File::open(LOG_PATH).context("Failed to open log for rotation")?;
+    let size = match fs::metadata(path) {
+        Ok(m) => m.len(),
+        Err(_) => return Ok(()),
+    };
+
+    let mut entries: Vec<LogEntry> = Vec::new();
+    {
+        let file = fs::File::open(path).context("Failed to open log for rotation")?;
         let reader = BufReader::new(file);
-
         for line in reader.lines().map_while(Result::ok) {
             if let Ok(entry) = serde_json::from_str::<LogEntry>(&line) {
                 entries.push(entry);
@@ -78,24 +89,34 @@ fn rotate_log() -> Result<()> {
         }
     }
 
-    // Keep only the last half of entries
+    if size <= MAX_LOG_SIZE_BYTES && entries.len() <= MAX_LOG_ENTRIES {
+        return Ok(());
+    }
+
     let keep_count = MAX_LOG_ENTRIES / 2;
     if entries.len() > keep_count {
         entries = entries.split_off(entries.len() - keep_count);
     }
 
-    // Write back truncated log
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o640)
-        .open(LOG_PATH)
-        .context("Failed to open log for writing")?;
+    let parent = path.parent().unwrap_or(Path::new(LOG_DIR));
+    let tmp = parent.join(format!(".scheduled.jsonl.tmp.{}", std::process::id()));
+    {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o640)
+            .open(&tmp)
+            .context("Failed to open temp log for writing")?;
+        for entry in &entries {
+            writeln!(file, "{}", serde_json::to_string(entry)?)?;
+        }
+        file.sync_all()?;
+    }
 
-    for entry in entries {
-        let json = serde_json::to_string(&entry)?;
-        writeln!(file, "{}", json)?;
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e).context("Failed to replace rotated log");
     }
 
     Ok(())
@@ -123,22 +144,22 @@ pub fn set_schedule_config(
         validate_max_packages(mp)?;
     }
 
-    let mut config = AppConfig::load()?;
+    let config = AppConfig::update(|config| {
+        if let Some(e) = enabled {
+            config.schedule.enabled = e;
+        }
+        if let Some(m) = mode {
+            config.schedule.mode = m.parse()?;
+        }
+        if let Some(s) = schedule {
+            config.schedule.schedule = s.to_string();
+        }
+        if let Some(mp) = max_packages {
+            config.schedule.max_packages = mp;
+        }
+        Ok(config.clone())
+    })?;
 
-    if let Some(e) = enabled {
-        config.schedule.enabled = e;
-    }
-    if let Some(m) = mode {
-        config.schedule.mode = m.parse()?;
-    }
-    if let Some(s) = schedule {
-        config.schedule.schedule = s.to_string();
-    }
-    if let Some(mp) = max_packages {
-        config.schedule.max_packages = mp;
-    }
-
-    config.save()?;
     config.apply_schedule_to_systemd()?;
 
     let response = ScheduleSetResponse {

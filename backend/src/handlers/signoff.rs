@@ -3,7 +3,7 @@ use archweb_client::models::SignoffSpec;
 use archweb_client::{DEFAULT_BASE_URL, SignoffSession};
 
 use crate::models::{
-    SignoffActionResponse, SignoffGroupWithLocal, SignoffListResponse, VersionMatch,
+    Signoff, SignoffActionResponse, SignoffGroupWithLocal, SignoffListResponse, VersionMatch,
 };
 use crate::util::emit_json;
 
@@ -24,6 +24,22 @@ pub fn resolve_credentials(encoded: &str) -> Result<(String, String)> {
         anyhow::bail!("username and password are required");
     }
     Ok((creds.username, creds.password))
+}
+
+/// Read the base64-encoded credential blob from stdin. Credentials are passed
+/// this way, not on argv, because /proc/<pid>/cmdline is world-readable and
+/// would leak the archweb password to any local user.
+pub fn read_credentials_from_stdin() -> Result<String> {
+    use std::io::Read;
+    let mut buf = String::new();
+    std::io::stdin()
+        .read_to_string(&mut buf)
+        .context("failed to read credentials from stdin")?;
+    let creds = buf.trim().to_string();
+    if creds.is_empty() {
+        anyhow::bail!("no credentials provided on stdin");
+    }
+    Ok(creds)
 }
 
 fn get_local_version(handle: &alpm::Alpm, pkgbase: &str, pkgnames: &[String]) -> Option<String> {
@@ -85,7 +101,15 @@ pub fn signoff_list(creds_b64: &str) -> Result<()> {
                 approved: g.approved,
                 required: g.required,
                 enabled: g.enabled,
-                signoffs: g.signoffs,
+                signoffs: g
+                    .signoffs
+                    .into_iter()
+                    .map(|s| Signoff {
+                        user: s.user,
+                        created: s.created,
+                        revoked: s.revoked,
+                    })
+                    .collect(),
                 local_version,
                 version_match,
             }
@@ -100,16 +124,17 @@ pub fn signoff_list(creds_b64: &str) -> Result<()> {
 }
 
 fn run_signoff_action(
+    creds_b64: &str,
     args: &[String],
     action: &str,
     f: impl FnOnce(&SignoffSession, &SignoffSpec) -> Result<()>,
 ) -> Result<()> {
-    if args.len() < 4 {
-        anyhow::bail!("{} requires creds pkgbase repo arch", action);
+    if args.len() < 3 {
+        anyhow::bail!("{} requires pkgbase repo arch", action);
     }
-    let pkgbase = &args[1];
+    let pkgbase = &args[0];
 
-    let (username, password) = resolve_credentials(&args[0])?;
+    let (username, password) = resolve_credentials(creds_b64)?;
     let session = SignoffSession::login(
         &username,
         &password,
@@ -117,8 +142,8 @@ fn run_signoff_action(
         crate::util::detected_ip_family(),
     )?;
     let spec = SignoffSpec {
-        repo: args[2].clone(),
-        arch: args[3].clone(),
+        repo: args[1].clone(),
+        arch: args[2].clone(),
         pkgbase: pkgbase.clone(),
     };
 
@@ -141,12 +166,14 @@ fn run_signoff_action(
     }
 }
 
-pub fn signoff_sign(args: &[String]) -> Result<()> {
-    run_signoff_action(args, "signoff", |session, spec| {
+pub fn signoff_sign(creds_b64: &str, args: &[String]) -> Result<()> {
+    run_signoff_action(creds_b64, args, "signoff", |session, spec| {
         session.signoff_package(spec)
     })
 }
 
-pub fn signoff_revoke(args: &[String]) -> Result<()> {
-    run_signoff_action(args, "revoke", |session, spec| session.revoke_package(spec))
+pub fn signoff_revoke(creds_b64: &str, args: &[String]) -> Result<()> {
+    run_signoff_action(creds_b64, args, "revoke", |session, spec| {
+        session.revoke_package(spec)
+    })
 }

@@ -1,0 +1,6 @@
+# Map Rust 64-bit integers (i64/u64) to TypeScript `number` in ts-rs bindings.
+# JSON.parse yields `number` at runtime and every value in this domain (sizes,
+# unix timestamps) fits in 2^53, so `bigint` would be a type lie. Set here so
+# every `cargo test` regenerates the bindings identically (CI drift guard).
+[env]
+TS_RS_LARGE_INT = "number"

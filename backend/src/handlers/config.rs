@@ -10,12 +10,7 @@ pub fn list_ignored() -> Result<()> {
 }
 
 pub fn add_ignored(package: &str) -> Result<()> {
-    let mut config = AppConfig::load()?;
-    let added = config.add_ignored(package);
-
-    if added {
-        config.save()?;
-    }
+    let added = AppConfig::update(|config| Ok(config.add_ignored(package)))?;
 
     let response = IgnoreOperationResponse {
         success: true,
@@ -31,12 +26,7 @@ pub fn add_ignored(package: &str) -> Result<()> {
 }
 
 pub fn remove_ignored(package: &str) -> Result<()> {
-    let mut config = AppConfig::load()?;
-    let removed = config.remove_ignored(package);
-
-    if removed {
-        config.save()?;
-    }
+    let removed = AppConfig::update(|config| Ok(config.remove_ignored(package)))?;
 
     let response = IgnoreOperationResponse {
         success: removed,

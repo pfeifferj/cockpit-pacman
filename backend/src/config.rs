@@ -5,6 +5,7 @@ use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use std::process::Command;
+use ts_rs::TS;
 
 use fs2::FileExt;
 
@@ -13,7 +14,8 @@ const TIMER_DROP_IN_DIR: &str = "/etc/systemd/system/cockpit-pacman-scheduled.ti
 const TIMER_DROP_IN_PATH: &str =
     "/etc/systemd/system/cockpit-pacman-scheduled.timer.d/schedule.conf";
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 #[serde(rename_all = "lowercase")]
 pub enum ScheduleMode {
     Check,
@@ -111,7 +113,17 @@ impl AppConfig {
             .with_context(|| format!("Failed to parse config from {}", CONFIG_PATH))
     }
 
-    pub fn save(&self) -> Result<()> {
+    /// Read-modify-write the on-disk config under a single exclusive lock.
+    /// Holding the lock across the whole load/mutate/store cycle prevents
+    /// concurrent backend invocations from clobbering each other's updates, and
+    /// truncation happens only after the lock is held so a reader never observes
+    /// an empty file. Returns whatever the closure returns.
+    pub fn update<F, R>(mutate: F) -> Result<R>
+    where
+        F: FnOnce(&mut AppConfig) -> Result<R>,
+    {
+        use std::io::{Read, Seek, SeekFrom};
+
         let path = Path::new(CONFIG_PATH);
 
         if let Some(parent) = path.parent() {
@@ -119,26 +131,42 @@ impl AppConfig {
                 .with_context(|| format!("Failed to create config directory {:?}", parent))?;
         }
 
-        let content = serde_json::to_string_pretty(self).context("Failed to serialize config")?;
-
-        // Open with exclusive lock and restrictive permissions (0600)
         let mut file = OpenOptions::new()
+            .read(true)
             .write(true)
             .create(true)
-            .truncate(true)
+            .truncate(false)
             .mode(0o600)
             .open(path)
             .with_context(|| format!("Failed to open config for writing: {}", CONFIG_PATH))?;
 
-        // Acquire exclusive lock for writing
         file.lock_exclusive()
             .with_context(|| format!("Failed to acquire write lock on {}", CONFIG_PATH))?;
 
-        file.write_all(content.as_bytes())
+        let mut content = String::new();
+        file.read_to_string(&mut content)
+            .with_context(|| format!("Failed to read config from {}", CONFIG_PATH))?;
+
+        let mut config = if content.trim().is_empty() {
+            AppConfig::default()
+        } else {
+            serde_json::from_str(&content)
+                .with_context(|| format!("Failed to parse config from {}", CONFIG_PATH))?
+        };
+
+        let result = mutate(&mut config)?;
+
+        let new_content =
+            serde_json::to_string_pretty(&config).context("Failed to serialize config")?;
+
+        file.seek(SeekFrom::Start(0))
+            .context("Failed to rewind config file")?;
+        file.set_len(0).context("Failed to truncate config file")?;
+        file.write_all(new_content.as_bytes())
             .with_context(|| format!("Failed to write config to {}", CONFIG_PATH))?;
 
-        // Lock is automatically released when file is dropped
-        Ok(())
+        // Lock is released when the file is dropped.
+        Ok(result)
     }
 
     pub fn add_ignored(&mut self, package: &str) -> bool {
@@ -252,7 +280,8 @@ impl AppConfig {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct IgnoredPackagesResponse {
     pub packages: Vec<String>,
     pub total: usize,
@@ -267,14 +296,20 @@ impl From<&AppConfig> for IgnoredPackagesResponse {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct IgnoreOperationResponse {
     pub success: bool,
     pub package: String,
     pub message: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
+#[ts(
+    export,
+    export_to = "../../src/bindings/index.ts",
+    rename = "ScheduleConfig"
+)]
 pub struct ScheduleConfigResponse {
     pub enabled: bool,
     pub mode: String,
@@ -331,7 +366,8 @@ fn get_timer_status() -> (bool, Option<String>) {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct ScheduleSetResponse {
     pub success: bool,
     pub message: String,

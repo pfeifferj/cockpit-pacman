@@ -5,6 +5,7 @@ use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use ts_rs::TS;
 
 use fs2::FileExt;
 
@@ -47,12 +48,18 @@ use crate::util::{config_path, emit_json, write_json_atomic};
 const ARCH_NEWS_URL: &str = "https://archlinux.org/feeds/news/";
 const MAX_RSS_BYTES: u64 = 512 * 1024;
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct NewsReadState {
     pub dismissed: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, TS)]
+#[ts(
+    export,
+    export_to = "../../src/bindings/index.ts",
+    rename = "DismissalState"
+)]
 pub struct Dismissal {
     pub signature: Option<String>,
 }

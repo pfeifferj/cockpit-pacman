@@ -36,12 +36,6 @@ import type {
   RebootStatus,
   PacnewStatus,
   StreamEvent,
-  StreamEventLog,
-  StreamEventProgress,
-  StreamEventDownload,
-  StreamEventEvent,
-  StreamEventComplete,
-  StreamEventMirrorTest,
   MirrorTestResult,
   OrphanPackage,
   NewsItem,
@@ -51,6 +45,15 @@ import type {
   CachedVersion,
   DowngradeResponse,
 } from "../api";
+
+// The StreamEvent variant interfaces were folded into the generated discriminated
+// union; recover the per-variant types by narrowing on the `type` tag.
+type StreamEventLog = Extract<StreamEvent, { type: "log" }>;
+type StreamEventProgress = Extract<StreamEvent, { type: "progress" }>;
+type StreamEventDownload = Extract<StreamEvent, { type: "download" }>;
+type StreamEventEvent = Extract<StreamEvent, { type: "event" }>;
+type StreamEventComplete = Extract<StreamEvent, { type: "complete" }>;
+type StreamEventMirrorTest = Extract<StreamEvent, { type: "mirror_test" }>;
 import {
   listInstalled,
   checkUpdates,

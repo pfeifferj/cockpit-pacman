@@ -96,6 +96,58 @@ describe("MirrorsView", () => {
     expect(screen.getByText("1")).toBeInTheDocument();
   });
 
+  describe("pagination", () => {
+    const makeMirrors = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        url: `https://mpage${String(i).padStart(4, "0")}.test/$repo/os/$arch`,
+        enabled: true,
+        comment: "",
+      }));
+
+    const respond = (n: number) =>
+      mockListMirrors.mockResolvedValue({
+        mirrors: makeMirrors(n),
+        total: n,
+        enabled_count: n,
+        path: "/etc/pacman.d/mirrorlist",
+        last_modified: 1704067200,
+      });
+
+    it("renders only the first page (50) and pages to the rest", async () => {
+      respond(60);
+      render(<MirrorsView />);
+      await waitFor(() => expect(screen.getByText(/mpage0000\./)).toBeInTheDocument());
+
+      expect(screen.queryByText(/mpage0055\./)).not.toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText("Go to next page"));
+      });
+
+      await waitFor(() => expect(screen.getByText(/mpage0055\./)).toBeInTheDocument());
+      expect(screen.queryByText(/mpage0000\./)).not.toBeInTheDocument();
+    });
+
+    it("resets to page 1 when the filter changes", async () => {
+      respond(60);
+      render(<MirrorsView />);
+      await waitFor(() => expect(screen.getByText(/mpage0000\./)).toBeInTheDocument());
+
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText("Go to next page"));
+      });
+      await waitFor(() => expect(screen.getByText(/mpage0055\./)).toBeInTheDocument());
+
+      const search = screen.getByLabelText("Search mirrors");
+      await act(async () => {
+        fireEvent.change(search, { target: { value: "mpage000" } });
+      });
+
+      await waitFor(() => expect(screen.getByText(/mpage0000\./)).toBeInTheDocument());
+      expect(screen.queryByText(/mpage0055\./)).not.toBeInTheDocument();
+    });
+  });
+
   it("shows error on API failure", async () => {
     mockListMirrors.mockRejectedValue(new Error("Permission denied"));
     render(<MirrorsView />);

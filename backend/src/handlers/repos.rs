@@ -1,8 +1,9 @@
 use anyhow::Result;
+use serde::Serialize;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use ts_rs::TS;
 
 use crate::models::{ListReposResponse, RepoDirectiveFull, RepoEntry, SaveReposResponse};
 use crate::util::emit_json;
@@ -10,6 +11,9 @@ use crate::validation::{validate_directive_value, validate_repo_name};
 
 const PACMAN_CONF_PATH: &str = "/etc/pacman.conf";
 const BACKUP_PREFIX: &str = "/etc/pacman.conf.backup.";
+const BACKUP_NAME_PREFIX: &str = "pacman.conf.backup.";
+const LOCK_PATH: &str = "/etc/pacman.conf.lock";
+const MAX_BACKUPS: usize = 5;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DirectiveKind {
@@ -249,46 +253,222 @@ pub fn save_repos(repos: &[RepoEntry]) -> Result<()> {
     let path = Path::new(PACMAN_CONF_PATH);
     let parent = path.parent().unwrap_or(Path::new("/etc"));
 
-    let original = fs::read_to_string(path)?;
-    let mut conf = parse_conf(&original);
+    // Serialize the whole read/modify/backup/rename cycle so concurrent saves
+    // can't lose each other's edits or clobber a backup.
+    let backup_path = crate::util::with_file_lock(Path::new(LOCK_PATH), || {
+        let original = fs::read_to_string(path)?;
+        let mut conf = parse_conf(&original);
 
-    conf.repos = repos.iter().map(entry_to_repo_section).collect();
+        conf.repos = repos.iter().map(entry_to_repo_section).collect();
 
-    let new_content = serialize_conf(&conf);
+        let new_content = serialize_conf(&conf);
 
-    let temp_path = parent.join(format!(".pacman.conf.tmp.{}", std::process::id()));
-    {
-        let mut file = fs::File::create(&temp_path)?;
-        file.write_all(new_content.as_bytes())?;
-        file.sync_all()?;
-    }
+        let temp_path = parent.join(format!(".pacman.conf.tmp.{}", std::process::id()));
+        {
+            let mut file = fs::File::create(&temp_path)?;
+            file.write_all(new_content.as_bytes())?;
+            file.sync_all()?;
+        }
 
-    let backup_path = if path.exists() {
-        let backup = format!(
-            "{}{}",
-            BACKUP_PREFIX,
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or(Duration::ZERO)
-                .as_secs()
-        );
-        if let Err(e) = fs::copy(path, &backup) {
+        let backup_path = if path.exists() {
+            let backup = crate::util::unique_backup_path(BACKUP_PREFIX);
+            if let Err(e) = fs::copy(path, &backup) {
+                let _ = fs::remove_file(&temp_path);
+                return Err(e.into());
+            }
+            Some(backup)
+        } else {
+            None
+        };
+
+        if let Err(e) = fs::rename(&temp_path, path) {
             let _ = fs::remove_file(&temp_path);
             return Err(e.into());
         }
-        Some(backup)
-    } else {
-        None
-    };
 
-    if let Err(e) = fs::rename(&temp_path, path) {
-        let _ = fs::remove_file(&temp_path);
-        return Err(e.into());
-    }
+        cleanup_old_backups();
+
+        Ok(backup_path)
+    })?;
 
     emit_json(&SaveReposResponse {
         success: true,
         backup_path,
         message: format!("Saved {} repositories to {}", repos.len(), PACMAN_CONF_PATH),
     })
+}
+
+#[derive(Serialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct RepoBackup {
+    pub timestamp: i64,
+    pub date: String,
+    pub repo_count: usize,
+    pub enabled_count: usize,
+    pub size: u64,
+}
+
+#[derive(Serialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct RepoBackupListResponse {
+    pub backups: Vec<RepoBackup>,
+}
+
+#[derive(Serialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct RestoreRepoBackupResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backup_path: Option<String>,
+    pub message: String,
+}
+
+fn count_repos_in_file(path: &Path) -> (usize, usize) {
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return (0, 0),
+    };
+    let conf = parse_conf(&content);
+    let total = conf.repos.len();
+    let enabled = conf.repos.iter().filter(|r| r.enabled).count();
+    (total, enabled)
+}
+
+pub fn list_repo_backups() -> Result<()> {
+    let parent = Path::new(PACMAN_CONF_PATH)
+        .parent()
+        .unwrap_or(Path::new("/etc"));
+    let mut backups: Vec<RepoBackup> = Vec::new();
+
+    let read_dir = match fs::read_dir(parent) {
+        Ok(rd) => rd,
+        Err(_) => return emit_json(&RepoBackupListResponse { backups }),
+    };
+
+    for entry in read_dir.flatten() {
+        let name = match entry.file_name().into_string() {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+        let timestamp_str = match name.strip_prefix(BACKUP_NAME_PREFIX) {
+            Some(s) => s,
+            None => continue,
+        };
+        let timestamp: i64 = match timestamp_str.parse() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        let (repo_count, enabled_count) = count_repos_in_file(&entry.path());
+        let date = chrono::DateTime::from_timestamp(timestamp, 0)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        backups.push(RepoBackup {
+            timestamp,
+            date,
+            repo_count,
+            enabled_count,
+            size,
+        });
+    }
+
+    backups.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
+    emit_json(&RepoBackupListResponse { backups })
+}
+
+pub fn restore_repo_backup(timestamp: i64) -> Result<()> {
+    let backup_path = format!("{}{}", BACKUP_PREFIX, timestamp);
+
+    let pre_restore_backup = crate::util::with_file_lock(Path::new(LOCK_PATH), || {
+        let backup = Path::new(&backup_path);
+        if !backup.exists() {
+            anyhow::bail!("Backup not found: {}", backup_path);
+        }
+
+        let conf = Path::new(PACMAN_CONF_PATH);
+
+        // Back up the current pacman.conf before overwriting it, so a restore is
+        // itself reversible.
+        let pre_restore_backup = if conf.exists() {
+            let p = crate::util::unique_backup_path(BACKUP_PREFIX);
+            fs::copy(conf, &p)?;
+            Some(p)
+        } else {
+            None
+        };
+
+        fs::copy(backup, conf)?;
+        cleanup_old_backups();
+
+        Ok(pre_restore_backup)
+    })?;
+
+    emit_json(&RestoreRepoBackupResponse {
+        success: true,
+        backup_path: pre_restore_backup,
+        message: format!("Restored pacman.conf from backup {}", backup_path),
+    })
+}
+
+pub fn delete_repo_backup(timestamp: i64) -> Result<()> {
+    let backup_path = format!("{}{}", BACKUP_PREFIX, timestamp);
+
+    crate::util::with_file_lock(Path::new(LOCK_PATH), || {
+        let backup = Path::new(&backup_path);
+        if !backup.exists() {
+            anyhow::bail!("Backup not found: {}", backup_path);
+        }
+        fs::remove_file(backup)?;
+        Ok(())
+    })?;
+
+    emit_json(&RestoreRepoBackupResponse {
+        success: true,
+        backup_path: None,
+        message: format!("Deleted backup {}", backup_path),
+    })
+}
+
+/// Keep only the most recent MAX_BACKUPS pacman.conf backups. Best-effort:
+/// failures are logged, not propagated, so cleanup never fails a save. Callers
+/// hold the pacman.conf lock.
+fn cleanup_old_backups() {
+    let parent = Path::new(PACMAN_CONF_PATH)
+        .parent()
+        .unwrap_or(Path::new("/etc"));
+
+    let read_dir = match fs::read_dir(parent) {
+        Ok(rd) => rd,
+        Err(e) => {
+            eprintln!("Warning: failed to scan for old pacman.conf backups: {}", e);
+            return;
+        }
+    };
+
+    let mut backups: Vec<_> = read_dir
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with(BACKUP_NAME_PREFIX))
+        })
+        .filter_map(|entry| {
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            Some((entry.path(), modified))
+        })
+        .collect();
+
+    if backups.len() <= MAX_BACKUPS {
+        return;
+    }
+
+    backups.sort_by_key(|b| std::cmp::Reverse(b.1));
+
+    for (path, _) in backups.into_iter().skip(MAX_BACKUPS) {
+        if let Err(e) = fs::remove_file(&path) {
+            eprintln!("Warning: failed to remove old backup {:?}: {}", path, e);
+        }
+    }
 }

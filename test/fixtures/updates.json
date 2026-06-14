@@ -7,7 +7,8 @@
       "download_size": 150000000,
       "current_size": 142000000,
       "new_size": 145000000,
-      "repository": "core"
+      "repository": "core",
+      "ignored": false
     },
     {
       "name": "glibc",
@@ -16,7 +17,8 @@
       "download_size": 8200000,
       "current_size": 44000000,
       "new_size": 45000000,
-      "repository": "core"
+      "repository": "core",
+      "ignored": false
     }
   ],
   "warnings": []

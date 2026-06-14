@@ -2,16 +2,17 @@ use std::env;
 
 use cockpit_pacman_backend::handlers::{
     add_ignored, check_lock, check_security, check_updates, clean_cache, delete_mirror_backup,
-    downgrade_from_archive, downgrade_package, fetch_mirror_status, fetch_news, get_cache_info,
-    get_dependency_tree, get_grouped_history, get_history, get_pacnew_status, get_reboot_status,
-    get_schedule_config, get_scheduled_runs, get_services_status, init_keyring, install_package,
-    keyring_status, list_archive_versions, list_downgrades, list_ignored, list_installed,
-    list_mirror_backups, list_mirrors, list_orphans, list_repos, local_package_info,
-    mark_dismissed, mark_news_read, preflight_upgrade, read_dismissal, read_news_state,
-    refresh_keyring, refresh_mirrors, remove_ignored, remove_orphans, remove_package,
-    remove_stale_lock, restore_mirror_backup, run_upgrade, save_mirrorlist, save_repos,
-    scheduled_run, search, security_info, set_schedule_config, signoff_list, signoff_revoke,
-    signoff_sign, sync_database, sync_package_info, test_mirrors,
+    delete_repo_backup, downgrade_from_archive, downgrade_package, fetch_mirror_status, fetch_news,
+    get_cache_info, get_dependency_tree, get_grouped_history, get_history, get_pacnew_status,
+    get_reboot_status, get_schedule_config, get_scheduled_runs, get_services_status, init_keyring,
+    install_package, keyring_status, list_archive_versions, list_downgrades, list_ignored,
+    list_installed, list_mirror_backups, list_mirrors, list_orphans, list_repo_backups, list_repos,
+    local_package_info, mark_dismissed, mark_news_read, preflight_upgrade,
+    read_credentials_from_stdin, read_dismissal, read_news_state, refresh_keyring, refresh_mirrors,
+    remove_ignored, remove_orphans, remove_package, remove_stale_lock, restore_mirror_backup,
+    restore_repo_backup, run_upgrade, save_mirrorlist, save_repos, scheduled_run, search,
+    security_info, set_schedule_config, signoff_list, signoff_revoke, signoff_sign, sync_database,
+    sync_package_info, test_mirrors,
 };
 use cockpit_pacman_backend::models::{MirrorEntry, RepoEntry, StructuredError};
 use cockpit_pacman_backend::util::{classify_error, emit_json};
@@ -134,18 +135,25 @@ fn print_usage() {
     eprintln!("                         direction: forward|reverse|both (default: forward)");
     eprintln!("  fetch-news [days]      Fetch recent Arch Linux news items");
     eprintln!("                         days: lookback period (default: 30)");
-    eprintln!("  signoff-list CREDS     List packages awaiting signoff");
-    eprintln!("  signoff-sign CREDS PKGBASE REPO ARCH");
+    eprintln!("  signoff-list           List packages awaiting signoff");
+    eprintln!("  signoff-sign PKGBASE REPO ARCH");
     eprintln!("                         Sign off a package");
-    eprintln!("  signoff-revoke CREDS PKGBASE REPO ARCH");
+    eprintln!("  signoff-revoke PKGBASE REPO ARCH");
     eprintln!("                         Revoke a signoff");
-    eprintln!("                         CREDS: base64-encoded JSON {{username, password}}");
+    eprintln!(
+        "                         credentials: base64-encoded JSON {{username, password}} on stdin"
+    );
     eprintln!("  check-security         Check installed packages against Arch Security Tracker");
     eprintln!("  security-info NAME     Get security advisory history for a package");
     eprintln!(
         "  check-lock             Check if the pacman database lock exists and if it's stale"
     );
     eprintln!("  remove-stale-lock      Remove a stale database lock (requires root)");
+    eprintln!("  list-repo-backups      List available pacman.conf backups");
+    eprintln!("  restore-repo-backup <timestamp>");
+    eprintln!("                         Restore a pacman.conf backup (requires root)");
+    eprintln!("  delete-repo-backup <timestamp>");
+    eprintln!("                         Delete a pacman.conf backup (requires root)");
 }
 
 fn main() {
@@ -526,32 +534,28 @@ fn main() {
             }
             mark_dismissed("pacnew", &args[2])
         }
-        "signoff-list" => {
-            if args.len() < 3 {
-                eprintln!("Error: signoff-list requires CREDS");
-                std::process::exit(1);
-            }
-            signoff_list(&args[2])
-        }
+        "signoff-list" => read_credentials_from_stdin().and_then(|creds| signoff_list(&creds)),
         "signoff-sign" => {
-            if args.len() < 6 {
-                eprintln!("Error: signoff-sign requires CREDS PKGBASE REPO ARCH");
+            if args.len() < 5 {
+                eprintln!("Error: signoff-sign requires PKGBASE REPO ARCH");
                 std::process::exit(1);
             }
-            validate_signoff_arg(&args[3], "pkgbase")
-                .and_then(|_| validate_signoff_arg(&args[4], "repo"))
-                .and_then(|_| validate_signoff_arg(&args[5], "arch"))
-                .and_then(|_| signoff_sign(&args[2..]))
+            validate_signoff_arg(&args[2], "pkgbase")
+                .and_then(|_| validate_signoff_arg(&args[3], "repo"))
+                .and_then(|_| validate_signoff_arg(&args[4], "arch"))
+                .and_then(|_| read_credentials_from_stdin())
+                .and_then(|creds| signoff_sign(&creds, &args[2..]))
         }
         "signoff-revoke" => {
-            if args.len() < 6 {
-                eprintln!("Error: signoff-revoke requires CREDS PKGBASE REPO ARCH");
+            if args.len() < 5 {
+                eprintln!("Error: signoff-revoke requires PKGBASE REPO ARCH");
                 std::process::exit(1);
             }
-            validate_signoff_arg(&args[3], "pkgbase")
-                .and_then(|_| validate_signoff_arg(&args[4], "repo"))
-                .and_then(|_| validate_signoff_arg(&args[5], "arch"))
-                .and_then(|_| signoff_revoke(&args[2..]))
+            validate_signoff_arg(&args[2], "pkgbase")
+                .and_then(|_| validate_signoff_arg(&args[3], "repo"))
+                .and_then(|_| validate_signoff_arg(&args[4], "arch"))
+                .and_then(|_| read_credentials_from_stdin())
+                .and_then(|creds| signoff_revoke(&creds, &args[2..]))
         }
         "check-security" => check_security(),
         "security-info" => {
@@ -574,6 +578,33 @@ fn main() {
                         .map_err(|e| anyhow::anyhow!("Invalid JSON: {}", e))
                 })
                 .and_then(|repos| save_repos(&repos))
+        }
+        "list-repo-backups" => list_repo_backups(),
+        "restore-repo-backup" => {
+            if args.len() < 3 {
+                eprintln!("Error: restore-repo-backup requires a timestamp");
+                std::process::exit(1);
+            }
+            match args[2].parse::<i64>() {
+                Ok(ts) => restore_repo_backup(ts),
+                Err(_) => {
+                    eprintln!("Error: invalid timestamp '{}'", args[2]);
+                    std::process::exit(1);
+                }
+            }
+        }
+        "delete-repo-backup" => {
+            if args.len() < 3 {
+                eprintln!("Error: delete-repo-backup requires a timestamp");
+                std::process::exit(1);
+            }
+            match args[2].parse::<i64>() {
+                Ok(ts) => delete_repo_backup(ts),
+                Err(_) => {
+                    eprintln!("Error: invalid timestamp '{}'", args[2]);
+                    std::process::exit(1);
+                }
+            }
         }
         "remove-stale-lock" => remove_stale_lock(),
         "help" | "--help" | "-h" => {

@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use crate::check_cancel_early;
 use crate::models::{
@@ -15,6 +15,7 @@ use crate::util::{TimeoutGuard, emit_event, emit_json, setup_signal_handler};
 use crate::validation::validate_mirror_url;
 
 const MIRRORLIST_PATH: &str = "/etc/pacman.d/mirrorlist";
+const LOCK_PATH: &str = "/etc/pacman.d/.mirrorlist.lock";
 const MIRROR_STATUS_URL: &str = "https://archlinux.org/mirrors/status/json/";
 const TEST_FILE: &str = "core.db";
 // core.db should be at least 100KB (100,000 bytes) to be valid
@@ -364,35 +365,40 @@ pub fn save_mirrorlist(mirrors: &[MirrorEntry]) -> Result<()> {
         }
     }
 
-    // Write to temp file first (atomic write pattern)
-    let temp_path = parent.join(format!(".mirrorlist.tmp.{}", std::process::id()));
-    {
-        let mut file = fs::File::create(&temp_path)?;
-        file.write_all(content.as_bytes())?;
-        file.sync_all()?;
-    }
+    // Serialize the whole write/backup/rename/cleanup cycle against other
+    // mirrorlist mutations (save, restore, delete) sharing this lock.
+    let backup_path = crate::util::with_file_lock(Path::new(LOCK_PATH), || {
+        // Write to temp file first (atomic write pattern)
+        let temp_path = parent.join(format!(".mirrorlist.tmp.{}", std::process::id()));
+        {
+            let mut file = fs::File::create(&temp_path)?;
+            file.write_all(content.as_bytes())?;
+            file.sync_all()?;
+        }
 
-    // Create backup if original exists
-    let backup_path = if path.exists() {
-        let backup = format!(
-            "{}{}",
-            BACKUP_PREFIX,
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or(Duration::ZERO)
-                .as_secs()
-        );
-        fs::copy(path, &backup)?;
-        Some(backup)
-    } else {
-        None
-    };
+        // Create backup if original exists
+        let backup_path = if path.exists() {
+            let backup = crate::util::unique_backup_path(BACKUP_PREFIX);
+            if let Err(e) = fs::copy(path, &backup) {
+                let _ = fs::remove_file(&temp_path);
+                return Err(e.into());
+            }
+            Some(backup)
+        } else {
+            None
+        };
 
-    // Atomic rename (on same filesystem)
-    fs::rename(&temp_path, path)?;
+        // Atomic rename (on same filesystem)
+        if let Err(e) = fs::rename(&temp_path, path) {
+            let _ = fs::remove_file(&temp_path);
+            return Err(e.into());
+        }
 
-    // Clean up old backups, keeping only the most recent MAX_BACKUPS
-    cleanup_old_backups()?;
+        // Clean up old backups, keeping only the most recent MAX_BACKUPS
+        cleanup_old_backups()?;
+
+        Ok(backup_path)
+    })?;
 
     let response = SaveMirrorlistResponse {
         success: true,
@@ -476,30 +482,31 @@ pub fn list_mirror_backups() -> Result<()> {
 
 pub fn restore_mirror_backup(timestamp: i64) -> Result<()> {
     let backup_path = format!("{}{}", BACKUP_PREFIX, timestamp);
-    let backup = Path::new(&backup_path);
 
-    if !backup.exists() {
-        anyhow::bail!("Backup not found: {}", backup_path);
-    }
+    let pre_restore_backup = crate::util::with_file_lock(Path::new(LOCK_PATH), || {
+        let backup = Path::new(&backup_path);
 
-    let mirrorlist = Path::new(MIRRORLIST_PATH);
+        if !backup.exists() {
+            anyhow::bail!("Backup not found: {}", backup_path);
+        }
 
-    // Create a backup of the current mirrorlist before restoring
-    let pre_restore_backup = if mirrorlist.exists() {
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO)
-            .as_secs();
-        let path = format!("{}{}", BACKUP_PREFIX, ts);
-        fs::copy(mirrorlist, &path)?;
-        Some(path)
-    } else {
-        None
-    };
+        let mirrorlist = Path::new(MIRRORLIST_PATH);
 
-    fs::copy(backup, mirrorlist)?;
+        // Create a backup of the current mirrorlist before restoring
+        let pre_restore_backup = if mirrorlist.exists() {
+            let path = crate::util::unique_backup_path(BACKUP_PREFIX);
+            fs::copy(mirrorlist, &path)?;
+            Some(path)
+        } else {
+            None
+        };
 
-    cleanup_old_backups()?;
+        fs::copy(backup, mirrorlist)?;
+
+        cleanup_old_backups()?;
+
+        Ok(pre_restore_backup)
+    })?;
 
     let response = RestoreMirrorBackupResponse {
         success: true,
@@ -512,13 +519,17 @@ pub fn restore_mirror_backup(timestamp: i64) -> Result<()> {
 
 pub fn delete_mirror_backup(timestamp: i64) -> Result<()> {
     let backup_path = format!("{}{}", BACKUP_PREFIX, timestamp);
-    let backup = Path::new(&backup_path);
 
-    if !backup.exists() {
-        anyhow::bail!("Backup not found: {}", backup_path);
-    }
+    crate::util::with_file_lock(Path::new(LOCK_PATH), || {
+        let backup = Path::new(&backup_path);
 
-    fs::remove_file(backup)?;
+        if !backup.exists() {
+            anyhow::bail!("Backup not found: {}", backup_path);
+        }
+
+        fs::remove_file(backup)?;
+        Ok(())
+    })?;
 
     emit_json(&RestoreMirrorBackupResponse {
         success: true,

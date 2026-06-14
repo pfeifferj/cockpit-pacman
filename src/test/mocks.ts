@@ -49,6 +49,7 @@ export const mockUpdatesResponse: UpdatesResponse = {
       download_size: 150000000,
       current_size: 142000000,
       new_size: 145000000,
+      ignored: false,
       repository: "core",
     },
   ],

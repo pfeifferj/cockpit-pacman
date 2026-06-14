@@ -1,31 +1,173 @@
 import { BACKEND_TIMEOUT_MS } from "./constants";
 import { isDbLockError, sanitizeSearchInput } from "./utils";
 
+// Wire types are generated from the Rust serde structs via ts-rs (see
+// backend/src + src/bindings). Imported for local use and re-exported so
+// consumers keep importing them from "../api".
+import type {
+  CacheInfo,
+  CachePackage,
+  CachedVersion,
+  ConflictInfo,
+  DependencyEdge,
+  DependencyNode,
+  DependencyTreeResponse,
+  DismissalState,
+  DowngradeResponse,
+  GroupedLogResponse,
+  IgnoreOperationResponse,
+  IgnoredPackagesResponse,
+  KeyringKey,
+  KeyringStatusResponse,
+  ListReposResponse,
+  LockRemoveResult,
+  LockStatus,
+  LogEntry,
+  LogGroup,
+  LogResponse,
+  MirrorBackup,
+  MirrorBackupListResponse,
+  MirrorEntry,
+  MirrorListResponse,
+  MirrorStatus,
+  MirrorStatusResponse,
+  MirrorTestResult,
+  NewsItem,
+  NewsReadState,
+  NewsResponse,
+  OrphanPackage,
+  OrphanResponse,
+  Package,
+  PackageDetails,
+  PackageListResponse,
+  PackageSecurityAdvisory,
+  PacnewFile,
+  PacnewStatus,
+  PreflightKeyInfo,
+  PreflightResponse,
+  PreflightWarning,
+  ProviderChoice,
+  RebootStatus,
+  RefreshMirrorsResponse,
+  ReplacementInfo,
+  RepoBackup,
+  RepoBackupListResponse,
+  RepoDirectiveFull,
+  RepoEntry,
+  RestartBlocked,
+  RestoreMirrorBackupResponse,
+  RestoreRepoBackupResponse,
+  SaveMirrorlistResponse,
+  SaveReposResponse,
+  ScheduleConfig,
+  ScheduleMode,
+  ScheduleSetResponse,
+  ScheduledRunEntry,
+  ScheduledRunsResponse,
+  SearchResponse,
+  SearchResult,
+  SecurityInfoAdvisory,
+  SecurityInfoGroup,
+  SecurityInfoIssue,
+  SecurityInfoResponse,
+  SecurityResponse,
+  ServiceRestart,
+  ServicesStatus,
+  Signoff,
+  SignoffActionResponse,
+  SignoffGroupWithLocal,
+  SignoffListResponse,
+  StreamEvent,
+  SyncPackageDetails,
+  UpdateInfo,
+  UpdateStats,
+  UpdatesResponse,
+  VersionMatch,
+  WarningSeverity,
+} from "./bindings";
+export type {
+  CacheInfo,
+  CachePackage,
+  CachedVersion,
+  ConflictInfo,
+  DependencyEdge,
+  DependencyNode,
+  DependencyTreeResponse,
+  DismissalState,
+  DowngradeResponse,
+  GroupedLogResponse,
+  IgnoreOperationResponse,
+  IgnoredPackagesResponse,
+  KeyringKey,
+  KeyringStatusResponse,
+  ListReposResponse,
+  LockRemoveResult,
+  LockStatus,
+  LogEntry,
+  LogGroup,
+  LogResponse,
+  MirrorBackup,
+  MirrorBackupListResponse,
+  MirrorEntry,
+  MirrorListResponse,
+  MirrorStatus,
+  MirrorStatusResponse,
+  MirrorTestResult,
+  NewsItem,
+  NewsReadState,
+  NewsResponse,
+  OrphanPackage,
+  OrphanResponse,
+  Package,
+  PackageDetails,
+  PackageListResponse,
+  PackageSecurityAdvisory,
+  PacnewFile,
+  PacnewStatus,
+  PreflightKeyInfo,
+  PreflightResponse,
+  PreflightWarning,
+  ProviderChoice,
+  RebootStatus,
+  RefreshMirrorsResponse,
+  ReplacementInfo,
+  RepoBackup,
+  RepoBackupListResponse,
+  RepoDirectiveFull,
+  RepoEntry,
+  RestartBlocked,
+  RestoreMirrorBackupResponse,
+  RestoreRepoBackupResponse,
+  SaveMirrorlistResponse,
+  SaveReposResponse,
+  ScheduleConfig,
+  ScheduleMode,
+  ScheduleSetResponse,
+  ScheduledRunEntry,
+  ScheduledRunsResponse,
+  SearchResponse,
+  SearchResult,
+  SecurityInfoAdvisory,
+  SecurityInfoGroup,
+  SecurityInfoIssue,
+  SecurityInfoResponse,
+  SecurityResponse,
+  ServiceRestart,
+  ServicesStatus,
+  Signoff,
+  SignoffActionResponse,
+  SignoffGroupWithLocal,
+  SignoffListResponse,
+  StreamEvent,
+  SyncPackageDetails,
+  UpdateInfo,
+  UpdateStats,
+  UpdatesResponse,
+  VersionMatch,
+  WarningSeverity,
+};
+
 const BACKEND_PATH = "/usr/libexec/cockpit-pacman/cockpit-pacman-backend";
-
-export interface Package {
-  name: string;
-  version: string;
-  description: string | null;
-  installed_size: number;
-  install_date: number | null;
-  reason: "explicit" | "dependency";
-  repository: string | null;
-}
-
-export interface PackageListResponse {
-  packages: Package[];
-  total: number;
-  total_explicit: number;
-  total_dependency: number;
-  repositories: string[];
-  warnings: string[];
-}
-
-export interface UpdatesResponse {
-  updates: UpdateInfo[];
-  warnings: string[];
-}
 
 export type FilterType = "all" | "explicit" | "dependency" | "orphan" | "graph";
 
@@ -41,66 +183,6 @@ export interface ListInstalledParams {
   sortDir?: SortDirection;
 }
 
-export interface UpdateInfo {
-  name: string;
-  current_version: string;
-  new_version: string;
-  download_size: number;
-  current_size: number;
-  new_size: number;
-  repository: string;
-  ignored?: boolean;
-}
-
-export interface PackageDetails {
-  name: string;
-  version: string;
-  description: string | null;
-  url: string | null;
-  licenses: string[];
-  groups: string[];
-  provides: string[];
-  depends: string[];
-  optdepends: string[];
-  conflicts: string[];
-  replaces: string[];
-  required_by: string[];
-  optional_for: string[];
-  installed_size: number;
-  packager: string | null;
-  architecture: string | null;
-  build_date: number | null;
-  install_date: number | null;
-  reason: string;
-  validation: string[];
-  repository: string | null;
-  update_stats: UpdateStats | null;
-}
-
-export interface UpdateStats {
-  update_count: number;
-  first_installed: string | null;
-  last_updated: string | null;
-  avg_days_between_updates: number | null;
-}
-
-export interface SearchResult {
-  name: string;
-  version: string;
-  description: string | null;
-  repository: string;
-  installed: boolean;
-  installed_version: string | null;
-}
-
-export interface SearchResponse {
-  results: SearchResult[];
-  total: number;
-  total_installed: number;
-  total_not_installed: number;
-  repositories: string[];
-}
-
 export type InstalledFilterType = "all" | "installed" | "not-installed";
 
 export interface SearchParams {
@@ -110,68 +192,6 @@ export interface SearchParams {
   installed?: InstalledFilterType;
   sortBy?: string;
   sortDir?: SortDirection;
-}
-
-export interface SyncPackageDetails {
-  name: string;
-  version: string;
-  description: string | null;
-  url: string | null;
-  licenses: string[];
-  groups: string[];
-  provides: string[];
-  depends: string[];
-  optdepends: string[];
-  conflicts: string[];
-  replaces: string[];
-  download_size: number;
-  installed_size: number;
-  packager: string | null;
-  architecture: string | null;
-  build_date: number | null;
-  repository: string;
-}
-
-// Preflight upgrade types
-export interface ConflictInfo {
-  package1: string;
-  package2: string;
-}
-
-export interface ReplacementInfo {
-  old_package: string;
-  new_package: string;
-}
-
-export interface ProviderChoice {
-  dependency: string;
-  providers: string[];
-}
-
-export interface PreflightKeyInfo {
-  fingerprint: string;
-  uid: string;
-}
-
-export interface PreflightWarning {
-  id: string;
-  severity: "warning" | "danger" | "info";
-  title: string;
-  message: string;
-  packages: string[];
-}
-
-export interface PreflightResponse {
-  success: boolean;
-  error?: string;
-  conflicts?: ConflictInfo[];
-  replacements?: ReplacementInfo[];
-  removals?: string[];
-  providers?: ProviderChoice[];
-  import_keys?: PreflightKeyInfo[];
-  warnings?: PreflightWarning[];
-  packages_to_upgrade: number;
-  total_download_size: number;
 }
 
 export type ErrorCode =
@@ -224,7 +244,27 @@ export class BackendError extends Error {
 
 }
 
-function parseErrorCode(message: string): ErrorCode {
+// Canonical network-error keyword list. Kept in sync with classify_message in
+// backend/src/util.rs; the two can't share code across the FFI boundary, so the
+// list is mirrored deliberately. parseErrorCode is the single TS classifier:
+// other views (e.g. UpdatesView) call it instead of re-deriving from regexes.
+const NETWORK_ERROR_KEYWORDS = [
+  "network",
+  "connection",
+  "could not connect",
+  "unable to connect",
+  "could not resolve",
+  "resolve host",
+  "host not found",
+  "name resolution",
+  "temporary failure in name resolution",
+  "dns",
+  "failed retrieving file",
+  "failed to retrieve",
+  "download library error",
+];
+
+export function parseErrorCode(message: string): ErrorCode {
   const lower = message.toLowerCase();
   if (lower.includes("timed out") || lower.includes("timeout")) {
     return "timeout";
@@ -232,16 +272,7 @@ function parseErrorCode(message: string): ErrorCode {
   if (isDbLockError(message)) {
     return "database_locked";
   }
-  if (
-    lower.includes("connection") ||
-    lower.includes("network") ||
-    lower.includes("could not connect") ||
-    lower.includes("resolve host") ||
-    lower.includes("host not found") ||
-    lower.includes("name resolution") ||
-    lower.includes("failed retrieving file") ||
-    lower.includes("download library error")
-  ) {
+  if (NETWORK_ERROR_KEYWORDS.some((kw) => lower.includes(kw))) {
     return "network_error";
   }
   if (lower.includes("transaction") || lower.includes("commit")) {
@@ -262,7 +293,7 @@ function parseErrorCode(message: string): ErrorCode {
   return "internal_error";
 }
 
-async function runBackend<T>(command: string, args: string[] = [], options?: { superuser?: "try" | "require" | "none" }): Promise<T> {
+async function runBackend<T>(command: string, args: string[] = [], options?: { superuser?: "try" | "require" | "none"; stdin?: string }): Promise<T> {
   const su = options?.superuser ?? "try";
   const spawnOpts: Record<string, unknown> = { err: "message" };
   if (su !== "none") {
@@ -272,6 +303,11 @@ async function runBackend<T>(command: string, args: string[] = [], options?: { s
     [BACKEND_PATH, command, ...args],
     spawnOpts,
   );
+
+  // Secrets go over stdin, never argv: /proc/<pid>/cmdline is world-readable.
+  if (options?.stdin !== undefined) {
+    spawnPromise.input(options.stdin);
+  }
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
@@ -350,40 +386,12 @@ export async function checkUpdates(): Promise<UpdatesResponse> {
   return runBackend<UpdatesResponse>("check-updates");
 }
 
-export interface LockStatus {
-  locked: boolean;
-  stale: boolean;
-  lock_path: string;
-  blocking_process?: string;
-}
-
-export interface LockRemoveResult {
-  removed: boolean;
-  error?: string;
-}
-
 export async function checkLock(): Promise<LockStatus> {
   return runBackend<LockStatus>("check-lock");
 }
 
 export async function removeStaleLock(): Promise<LockRemoveResult> {
   return runBackend<LockRemoveResult>("remove-stale-lock", [], { superuser: "require" });
-}
-
-export interface PackageSecurityAdvisory {
-  package: string;
-  severity: string;
-  advisory_type: string;
-  avg_name: string;
-  cve_ids: string[];
-  fixed_version: string | null;
-  status: string;
-}
-
-export interface SecurityResponse {
-  advisories: PackageSecurityAdvisory[];
-  /** True when served from the on-disk cache because the live fetch failed. */
-  stale?: boolean;
 }
 
 export async function checkSecurity(): Promise<SecurityResponse> {
@@ -408,49 +416,6 @@ export async function preflightUpgrade(ignore?: string[]): Promise<PreflightResp
   const args = ignore && ignore.length > 0 ? [ignore.map(pkg => sanitizeSearchInput(pkg)).join(",")] : [];
   return runBackend<PreflightResponse>("preflight-upgrade", args);
 }
-
-// Stream event types from backend
-export interface StreamEventLog {
-  type: "log";
-  level: string;
-  message: string;
-}
-
-export interface StreamEventProgress {
-  type: "progress";
-  operation: string;
-  package: string;
-  percent: number;
-  current: number;
-  total: number;
-}
-
-export interface StreamEventDownload {
-  type: "download";
-  filename: string;
-  event: string;
-  downloaded?: number;
-  total?: number;
-}
-
-export interface StreamEventEvent {
-  type: "event";
-  event: string;
-  package?: string;
-}
-
-export interface StreamEventComplete {
-  type: "complete";
-  success: boolean;
-  message?: string;
-}
-
-export type StreamEvent =
-  | StreamEventLog
-  | StreamEventProgress
-  | StreamEventDownload
-  | StreamEventEvent
-  | StreamEventComplete;
 
 /**
  * Callbacks for streaming backend operations (sync, upgrade, orphan removal, etc.)
@@ -654,22 +619,6 @@ export function formatNumber(n: number): string {
   return n.toLocaleString();
 }
 
-// Keyring types
-export interface KeyringKey {
-  fingerprint: string;
-  uid: string;
-  created: string | null;
-  expires: string | null;
-  trust: string;
-}
-
-export interface KeyringStatusResponse {
-  keys: KeyringKey[];
-  total: number;
-  master_key_initialized: boolean;
-  warnings: string[];
-}
-
 export async function getKeyringStatus(): Promise<KeyringStatusResponse> {
   return runBackend<KeyringStatusResponse>("keyring-status");
 }
@@ -680,21 +629,6 @@ export function refreshKeyring(callbacks: UpgradeCallbacks): { cancel: () => voi
 
 export function initKeyring(callbacks: UpgradeCallbacks): { cancel: () => void } {
   return runStreamingBackend("init-keyring", [], callbacks);
-}
-
-// Orphan package types
-export interface OrphanPackage {
-  name: string;
-  version: string;
-  description: string | null;
-  installed_size: number;
-  install_date: number | null;
-  repository: string | null;
-}
-
-export interface OrphanResponse {
-  orphans: OrphanPackage[];
-  total_size: number;
 }
 
 export async function listOrphans(): Promise<OrphanResponse> {
@@ -731,17 +665,6 @@ export function removeOrphans(callbacks: UpgradeCallbacks): { cancel: () => void
   return runStreamingBackend("remove-orphans", args, callbacks);
 }
 
-export interface IgnoredPackagesResponse {
-  packages: string[];
-  total: number;
-}
-
-export interface IgnoreOperationResponse {
-  success: boolean;
-  package: string;
-  message: string;
-}
-
 export async function listIgnoredPackages(): Promise<IgnoredPackagesResponse> {
   return runBackend<IgnoredPackagesResponse>("list-ignored");
 }
@@ -754,20 +677,6 @@ export async function removeIgnoredPackage(name: string): Promise<IgnoreOperatio
   return runBackend<IgnoreOperationResponse>("remove-ignored", [name]);
 }
 
-export interface CachePackage {
-  name: string;
-  version: string;
-  filename: string;
-  size: number;
-}
-
-export interface CacheInfo {
-  total_size: number;
-  package_count: number;
-  packages: CachePackage[];
-  path: string;
-}
-
 export async function getCacheInfo(): Promise<CacheInfo> {
   return runBackend<CacheInfo>("cache-info");
 }
@@ -775,14 +684,6 @@ export async function getCacheInfo(): Promise<CacheInfo> {
 export function cleanCache(callbacks: UpgradeCallbacks, keepVersions: number = 3, packages?: string[]): { cancel: () => void } {
   const pkgArg = packages && packages.length > 0 ? packages.map(pkg => sanitizeSearchInput(pkg)).join(",") : "";
   return runStreamingBackend("clean-cache", [String(keepVersions), pkgArg], callbacks);
-}
-
-export interface LogEntry {
-  timestamp: string;
-  action: string;
-  package: string;
-  old_version: string | null;
-  new_version: string | null;
 }
 
 export type HistoryFilterType = "all" | "upgraded" | "installed" | "removed";
@@ -794,27 +695,6 @@ export interface HistoryParams {
   search?: string;
 }
 
-export interface LogGroup {
-  id: string;
-  start_time: string;
-  end_time: string;
-  entries: LogEntry[];
-  upgraded_count: number;
-  installed_count: number;
-  removed_count: number;
-  downgraded_count: number;
-  reinstalled_count: number;
-}
-
-export interface GroupedLogResponse {
-  groups: LogGroup[];
-  total_groups: number;
-  total_upgraded: number;
-  total_installed: number;
-  total_removed: number;
-  total_other: number;
-}
-
 export async function getGroupedHistory(params: HistoryParams = {}): Promise<GroupedLogResponse> {
   const { offset = 0, limit = 20, filter = "all", search = "" } = params;
   return runBackend<GroupedLogResponse>("history-grouped", [
@@ -823,20 +703,6 @@ export async function getGroupedHistory(params: HistoryParams = {}): Promise<Gro
     filter,
     search,
   ]);
-}
-
-export interface CachedVersion {
-  name: string;
-  version: string;
-  filename: string;
-  size: number;
-  installed_version: string | null;
-  is_older: boolean;
-}
-
-export interface DowngradeResponse {
-  packages: CachedVersion[];
-  total: number;
 }
 
 export async function listDowngrades(packageName?: string): Promise<DowngradeResponse> {
@@ -866,37 +732,6 @@ export function downgradeFromArchive(
   filename: string
 ): { cancel: () => void } {
   return runStreamingBackend("downgrade-archive", [sanitizeSearchInput(name), filename], callbacks);
-}
-
-export type ScheduleMode = "check" | "upgrade";
-
-export interface ScheduleConfig {
-  enabled: boolean;
-  mode: ScheduleMode;
-  schedule: string;
-  max_packages: number;
-  timer_active: boolean;
-  timer_next_run: string | null;
-}
-
-export interface ScheduleSetResponse {
-  success: boolean;
-  message: string;
-}
-
-export interface ScheduledRunEntry {
-  timestamp: string;
-  mode: string;
-  success: boolean;
-  packages_checked: number;
-  packages_upgraded: number;
-  error: string | null;
-  details: string[];
-}
-
-export interface ScheduledRunsResponse {
-  runs: ScheduledRunEntry[];
-  total: number;
 }
 
 export interface ScheduledRunsParams {
@@ -932,31 +767,11 @@ export async function getScheduledRuns(params: ScheduledRunsParams = {}): Promis
 
 export type RebootReason = "kernel_update" | "critical_packages" | "none";
 
-export interface RebootStatus {
-  requires_reboot: boolean;
-  reason: RebootReason;
-  running_kernel: string | null;
-  installed_kernel: string | null;
-  kernel_package: string | null;
-  updated_packages: string[];
-}
-
 export async function getRebootStatus(): Promise<RebootStatus> {
   return runBackend<RebootStatus>("reboot-status");
 }
 
 export type PacnewKind = "pacnew" | "pacsave";
-
-export interface PacnewFile {
-  path: string;
-  package: string;
-  kind: PacnewKind;
-}
-
-export interface PacnewStatus {
-  has_pacnew: boolean;
-  files: PacnewFile[];
-}
 
 export async function getPacnewStatus(): Promise<PacnewStatus> {
   return runBackend<PacnewStatus>("pacnew-status", [], { superuser: "none" });
@@ -973,21 +788,6 @@ export function rebootSystem(): Promise<void> {
     )
     .finally(() => client.close())
     .then(() => undefined);
-}
-
-export type RestartBlocked = "session_critical" | "cockpit_session" | "cockpit_transport";
-
-export interface ServiceRestart {
-  name: string;
-  pid: number;
-  affected_packages: string[];
-  reason: string;
-  restart_blocked?: RestartBlocked;
-}
-
-export interface ServicesStatus {
-  restart_required: boolean;
-  services: ServiceRestart[];
 }
 
 export async function getServicesStatus(): Promise<ServicesStatus> {
@@ -1015,61 +815,6 @@ export function restartServices(units: string[]): Promise<void> {
   )
     .finally(() => client.close())
     .then(() => undefined);
-}
-
-export interface MirrorEntry {
-  url: string;
-  enabled: boolean;
-  comment: string | null;
-}
-
-export interface MirrorListResponse {
-  mirrors: MirrorEntry[];
-  total: number;
-  enabled_count: number;
-  path: string;
-  last_modified: number | null;
-}
-
-export interface MirrorStatus {
-  url: string;
-  country: string | null;
-  country_code: string | null;
-  last_sync: string | null;
-  delay: number | null;
-  score: number | null;
-  completion_pct: number | null;
-  active: boolean;
-  ipv4: boolean;
-  ipv6: boolean;
-}
-
-export interface MirrorStatusResponse {
-  mirrors: MirrorStatus[];
-  total: number;
-  last_check: string | null;
-}
-
-export interface MirrorTestResult {
-  url: string;
-  success: boolean;
-  speed_bps: number | null;
-  latency_ms: number | null;
-  error: string | null;
-}
-
-export interface SaveMirrorlistResponse {
-  success: boolean;
-  backup_path: string | null;
-  message: string;
-}
-
-export interface StreamEventMirrorTest {
-  type: "mirror_test";
-  url: string;
-  current: number;
-  total: number;
-  result: MirrorTestResult;
 }
 
 export interface MirrorTestCallbacks {
@@ -1106,7 +851,7 @@ export function testMirrors(
     superuser: "try",
     onRawEvent: (event) => {
       if (event.type === "mirror_test") {
-        const e = event as unknown as StreamEventMirrorTest;
+        const e = event as unknown as Extract<StreamEvent, { type: "mirror_test" }>;
         callbacks.onTestResult?.(e.result, e.current, e.total);
         callbacks.onData?.(`[${e.current}/${e.total}] ${e.url}: ${e.result.success ? `${e.result.latency_ms}ms` : e.result.error}\n`);
         return true;
@@ -1130,12 +875,6 @@ export interface RefreshMirrorsParams {
   sortBy?: RefreshMirrorsSortBy;
 }
 
-export interface RefreshMirrorsResponse {
-  mirrors: MirrorEntry[];
-  total: number;
-  last_check: string | null;
-}
-
 export async function refreshMirrors(params: RefreshMirrorsParams = {}): Promise<RefreshMirrorsResponse> {
   const { count = 20, country = "", protocol = "https", sortBy = "score" } = params;
   return runBackend<RefreshMirrorsResponse>("refresh-mirrors", [
@@ -1144,24 +883,6 @@ export async function refreshMirrors(params: RefreshMirrorsParams = {}): Promise
     protocol,
     sortBy,
   ]);
-}
-
-export interface MirrorBackup {
-  timestamp: number;
-  date: string;
-  enabled_count: number;
-  total_count: number;
-  size: number;
-}
-
-export interface MirrorBackupListResponse {
-  backups: MirrorBackup[];
-}
-
-export interface RestoreMirrorBackupResponse {
-  success: boolean;
-  backup_path: string | null;
-  message: string;
 }
 
 export async function listMirrorBackups(): Promise<MirrorBackupListResponse> {
@@ -1176,59 +897,8 @@ export async function deleteMirrorBackup(timestamp: number): Promise<RestoreMirr
   return runBackend<RestoreMirrorBackupResponse>("delete-mirror-backup", [String(timestamp)], { superuser: "require" });
 }
 
-export interface RepoDirective {
-  directive_type: "Server" | "Include";
-  value: string;
-}
-
-export interface RepoConfig {
-  name: string;
-  directives: RepoDirective[];
-}
-
-export interface DependencyNode {
-  id: string;
-  name: string;
-  version: string;
-  depth: number;
-  installed: boolean;
-  reason: "explicit" | "dependency" | null;
-  repository: string | null;
-}
-
-export interface DependencyEdge {
-  source: string;
-  target: string;
-  edge_type: "depends" | "optdepends" | "required_by" | "optional_for";
-}
-
-export interface DependencyTreeResponse {
-  nodes: DependencyNode[];
-  edges: DependencyEdge[];
-  root: string;
-  max_depth_reached: boolean;
-  warnings: string[];
-}
-
-export interface NewsItem {
-  title: string;
-  link: string;
-  published: string;
-  summary: string;
-}
-
-export interface NewsResponse {
-  items: NewsItem[];
-  /** True when served from the on-disk cache because the live fetch failed. */
-  stale?: boolean;
-}
-
 export async function fetchNews(days: number = 30): Promise<NewsResponse> {
   return runBackend<NewsResponse>("fetch-news", [String(days)]);
-}
-
-export interface NewsReadState {
-  dismissed: string[];
 }
 
 export async function getNewsReadState(): Promise<NewsReadState> {
@@ -1237,10 +907,6 @@ export async function getNewsReadState(): Promise<NewsReadState> {
 
 export async function markNewsRead(link: string): Promise<void> {
   await runBackend<NewsReadState>("news-mark-read", [link], { superuser: "none" });
-}
-
-export interface DismissalState {
-  signature: string | null;
 }
 
 function makeDismissalApi(prefix: string) {
@@ -1289,48 +955,12 @@ export interface KeyringCredentials {
   password: string;
 }
 
-export interface Signoff {
-  user: string;
-  created: string;
-  revoked: boolean;
-}
-
-export type VersionMatch = "match" | "mismatch" | "not_installed";
-
-export interface SignoffGroupWithLocal {
-  pkgbase: string;
-  pkgnames: string[];
-  version: string;
-  arch: string;
-  repo: string;
-  packager: string;
-  known_bad: boolean;
-  approved: boolean;
-  required: number;
-  enabled: boolean;
-  signoffs: Signoff[];
-  local_version: string | null;
-  version_match: VersionMatch;
-}
-
-export interface SignoffListResponse {
-  signoff_groups: SignoffGroupWithLocal[];
-  total: number;
-}
-
-export interface SignoffActionResponse {
-  success: boolean;
-  pkgbase: string;
-  action: string;
-  error?: string;
-}
-
 function encodeCredentials(credentials: KeyringCredentials): string {
   return btoa(JSON.stringify({ username: credentials.username, password: credentials.password }));
 }
 
 export async function getSignoffList(credentials: KeyringCredentials): Promise<SignoffListResponse> {
-  return runBackend<SignoffListResponse>("signoff-list", [encodeCredentials(credentials)], { superuser: "none" });
+  return runBackend<SignoffListResponse>("signoff-list", [], { superuser: "none", stdin: encodeCredentials(credentials) });
 }
 
 export async function signoffPackage(
@@ -1339,7 +969,7 @@ export async function signoffPackage(
   arch: string,
   credentials: KeyringCredentials,
 ): Promise<SignoffActionResponse> {
-  return runBackend<SignoffActionResponse>("signoff-sign", [encodeCredentials(credentials), pkgbase, repo, arch], { superuser: "none" });
+  return runBackend<SignoffActionResponse>("signoff-sign", [pkgbase, repo, arch], { superuser: "none", stdin: encodeCredentials(credentials) });
 }
 
 export async function revokeSignoff(
@@ -1348,30 +978,7 @@ export async function revokeSignoff(
   arch: string,
   credentials: KeyringCredentials,
 ): Promise<SignoffActionResponse> {
-  return runBackend<SignoffActionResponse>("signoff-revoke", [encodeCredentials(credentials), pkgbase, repo, arch], { superuser: "none" });
-}
-
-export interface RepoDirectiveFull {
-  directive_type: "Server" | "Include";
-  value: string;
-  enabled: boolean;
-}
-
-export interface RepoEntry {
-  name: string;
-  enabled: boolean;
-  sig_level: string | null;
-  directives: RepoDirectiveFull[];
-}
-
-export interface ListReposResponse {
-  repos: RepoEntry[];
-}
-
-export interface SaveReposResponse {
-  success: boolean;
-  backup_path: string | null;
-  message: string;
+  return runBackend<SignoffActionResponse>("signoff-revoke", [pkgbase, repo, arch], { superuser: "none", stdin: encodeCredentials(credentials) });
 }
 
 export async function listRepos(): Promise<ListReposResponse> {
@@ -1380,4 +987,16 @@ export async function listRepos(): Promise<ListReposResponse> {
 
 export async function saveRepos(repos: RepoEntry[]): Promise<SaveReposResponse> {
   return runBackend<SaveReposResponse>("save-repos", [JSON.stringify(repos)], { superuser: "require" });
+}
+
+export async function listRepoBackups(): Promise<RepoBackupListResponse> {
+  return runBackend<RepoBackupListResponse>("list-repo-backups", [], { superuser: "require" });
+}
+
+export async function restoreRepoBackup(timestamp: number): Promise<RestoreRepoBackupResponse> {
+  return runBackend<RestoreRepoBackupResponse>("restore-repo-backup", [String(timestamp)], { superuser: "require" });
+}
+
+export async function deleteRepoBackup(timestamp: number): Promise<RestoreRepoBackupResponse> {
+  return runBackend<RestoreRepoBackupResponse>("delete-repo-backup", [String(timestamp)], { superuser: "require" });
 }

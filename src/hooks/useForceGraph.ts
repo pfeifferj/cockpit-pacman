@@ -65,15 +65,18 @@ export function useForceGraph(
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
 
+    // The backend only emits the documented reason/edge_type literals; the
+    // generated wire types widen them to string, so narrow back here.
     const graphNodes: ForceGraphNode[] = nodes.map((n) => ({
       ...n,
+      reason: n.reason as ForceGraphNode["reason"],
       isRoot: n.id === rootId,
     }));
 
     const graphEdges: ForceGraphEdge[] = edges.map((e) => ({
       source: e.source,
       target: e.target,
-      edge_type: e.edge_type,
+      edge_type: e.edge_type as ForceGraphEdge["edge_type"],
     }));
 
     const container = svg.append("g");

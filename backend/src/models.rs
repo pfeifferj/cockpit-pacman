@@ -1,7 +1,19 @@
-use archweb_client::models::Signoff;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
-#[derive(Serialize, Deserialize)]
+/// Wire mirror of archweb_client's Signoff so the type can derive TS bindings
+/// without depending on the external crate's type. Mapped from the client type
+/// in the signoff handler.
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct Signoff {
+    pub user: String,
+    pub created: String,
+    pub revoked: bool,
+}
+
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct NewsItem {
     pub title: String,
     pub link: String,
@@ -9,7 +21,8 @@ pub struct NewsItem {
     pub summary: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct NewsResponse {
     pub items: Vec<NewsItem>,
     /// True when served from the on-disk cache because the live fetch failed.
@@ -17,7 +30,8 @@ pub struct NewsResponse {
     pub stale: bool,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct Package {
     pub name: String,
     pub version: String,
@@ -28,7 +42,8 @@ pub struct Package {
     pub repository: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct PackageListResponse {
     pub packages: Vec<Package>,
     pub total: usize,
@@ -38,13 +53,15 @@ pub struct PackageListResponse {
     pub warnings: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct UpdatesResponse {
     pub updates: Vec<UpdateInfo>,
     pub warnings: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct UpdateInfo {
     pub name: String,
     pub current_version: String,
@@ -57,7 +74,8 @@ pub struct UpdateInfo {
     pub ignored: bool,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct PackageDetails {
     pub name: String,
     pub version: String,
@@ -83,7 +101,8 @@ pub struct PackageDetails {
     pub update_stats: Option<UpdateStats>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct UpdateStats {
     pub update_count: usize,
     pub first_installed: Option<String>,
@@ -91,7 +110,8 @@ pub struct UpdateStats {
     pub avg_days_between_updates: Option<f64>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct SearchResult {
     pub name: String,
     pub version: String,
@@ -101,7 +121,8 @@ pub struct SearchResult {
     pub installed_version: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct SearchResponse {
     pub results: Vec<SearchResult>,
     pub total: usize,
@@ -110,7 +131,8 @@ pub struct SearchResponse {
     pub repositories: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct SyncPackageDetails {
     pub name: String,
     pub version: String,
@@ -131,13 +153,19 @@ pub struct SyncPackageDetails {
     pub repository: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(
+    export,
+    export_to = "../../src/bindings/index.ts",
+    rename = "PreflightKeyInfo"
+)]
 pub struct KeyInfo {
     pub fingerprint: String,
     pub uid: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 #[serde(rename_all = "lowercase")]
 pub enum WarningSeverity {
     Info,
@@ -145,7 +173,8 @@ pub enum WarningSeverity {
     Danger,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct PreflightWarning {
     pub id: String,
     pub severity: WarningSeverity,
@@ -154,10 +183,12 @@ pub struct PreflightWarning {
     pub packages: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct PreflightResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub conflicts: Vec<ConflictInfo>,
@@ -175,19 +206,22 @@ pub struct PreflightResponse {
     pub total_download_size: i64,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct ConflictInfo {
     pub package1: String,
     pub package2: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct ReplacementInfo {
     pub old_package: String,
     pub new_package: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct ProviderChoice {
     pub dependency: String,
     pub providers: Vec<String>,
@@ -204,6 +238,8 @@ pub struct PreflightState {
 
 /// Error envelope emitted to stdout for classified failures, consumed by the
 /// frontend as an authoritative error code (see runBackend in api.ts).
+// Not TS-exported: the frontend keeps a hand-written StructuredError whose
+// `code` is the ErrorCode union rather than a bare string.
 #[derive(Serialize, Deserialize)]
 pub struct StructuredError {
     pub code: String,
@@ -212,7 +248,8 @@ pub struct StructuredError {
     pub details: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 #[serde(tag = "type")]
 pub enum StreamEvent {
     #[serde(rename = "log")]
@@ -230,18 +267,22 @@ pub enum StreamEvent {
         filename: String,
         event: String,
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         downloaded: Option<i64>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         total: Option<i64>,
     },
     #[serde(rename = "event")]
     Event {
         event: String,
+        #[ts(optional)]
         package: Option<String>,
     },
     #[serde(rename = "complete")]
     Complete {
         success: bool,
+        #[ts(optional)]
         message: Option<String>,
     },
     #[serde(rename = "mirror_test")]
@@ -253,7 +294,8 @@ pub enum StreamEvent {
     },
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct KeyringKey {
     pub fingerprint: String,
     pub uid: String,
@@ -262,7 +304,8 @@ pub struct KeyringKey {
     pub trust: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct KeyringStatusResponse {
     pub keys: Vec<KeyringKey>,
     pub total: usize,
@@ -270,7 +313,8 @@ pub struct KeyringStatusResponse {
     pub warnings: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct OrphanPackage {
     pub name: String,
     pub version: String,
@@ -280,13 +324,15 @@ pub struct OrphanPackage {
     pub repository: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct OrphanResponse {
     pub orphans: Vec<OrphanPackage>,
     pub total_size: i64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct CachePackage {
     pub name: String,
     pub version: String,
@@ -294,7 +340,8 @@ pub struct CachePackage {
     pub size: i64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct CacheInfo {
     pub total_size: i64,
     pub package_count: usize,
@@ -302,7 +349,8 @@ pub struct CacheInfo {
     pub path: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct LogEntry {
     pub timestamp: String,
     pub action: String,
@@ -311,7 +359,8 @@ pub struct LogEntry {
     pub new_version: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct LogResponse {
     pub entries: Vec<LogEntry>,
     pub total: usize,
@@ -321,7 +370,8 @@ pub struct LogResponse {
     pub total_other: usize,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct LogGroup {
     pub id: String,
     pub start_time: String,
@@ -334,7 +384,8 @@ pub struct LogGroup {
     pub reinstalled_count: usize,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct GroupedLogResponse {
     pub groups: Vec<LogGroup>,
     pub total_groups: usize,
@@ -344,7 +395,8 @@ pub struct GroupedLogResponse {
     pub total_other: usize,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct CachedVersion {
     pub name: String,
     pub version: String,
@@ -354,13 +406,15 @@ pub struct CachedVersion {
     pub is_older: bool,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct DowngradeResponse {
     pub packages: Vec<CachedVersion>,
     pub total: usize,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct ScheduledRunEntry {
     pub timestamp: String,
     pub mode: String,
@@ -371,13 +425,15 @@ pub struct ScheduledRunEntry {
     pub details: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct ScheduledRunsResponse {
     pub runs: Vec<ScheduledRunEntry>,
     pub total: usize,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct RebootStatus {
     pub requires_reboot: bool,
     pub reason: String,
@@ -387,20 +443,23 @@ pub struct RebootStatus {
     pub updated_packages: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct PacnewFile {
     pub path: String,
     pub package: String,
     pub kind: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct PacnewStatus {
     pub has_pacnew: bool,
     pub files: Vec<PacnewFile>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 #[serde(rename_all = "snake_case")]
 pub enum RestartBlocked {
     SessionCritical,
@@ -408,7 +467,8 @@ pub enum RestartBlocked {
     CockpitTransport,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct ServiceRestart {
     pub name: String,
     pub pid: u32,
@@ -418,20 +478,23 @@ pub struct ServiceRestart {
     pub restart_blocked: Option<RestartBlocked>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct ServicesStatus {
     pub restart_required: bool,
     pub services: Vec<ServiceRestart>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct MirrorEntry {
     pub url: String,
     pub enabled: bool,
     pub comment: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct MirrorListResponse {
     pub mirrors: Vec<MirrorEntry>,
     pub total: usize,
@@ -440,7 +503,8 @@ pub struct MirrorListResponse {
     pub last_modified: Option<i64>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct MirrorStatus {
     pub url: String,
     pub country: Option<String>,
@@ -454,14 +518,16 @@ pub struct MirrorStatus {
     pub ipv6: bool,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct MirrorStatusResponse {
     pub mirrors: Vec<MirrorStatus>,
     pub total: usize,
     pub last_check: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct MirrorTestResult {
     pub url: String,
     pub success: bool,
@@ -470,21 +536,24 @@ pub struct MirrorTestResult {
     pub error: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct SaveMirrorlistResponse {
     pub success: bool,
     pub backup_path: Option<String>,
     pub message: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct RefreshMirrorsResponse {
     pub mirrors: Vec<MirrorEntry>,
     pub total: usize,
     pub last_check: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct MirrorBackup {
     pub timestamp: i64,
     pub date: String,
@@ -493,19 +562,22 @@ pub struct MirrorBackup {
     pub size: u64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct MirrorBackupListResponse {
     pub backups: Vec<MirrorBackup>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct RestoreMirrorBackupResponse {
     pub success: bool,
     pub backup_path: Option<String>,
     pub message: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct DependencyNode {
     pub id: String,
     pub name: String,
@@ -516,14 +588,16 @@ pub struct DependencyNode {
     pub repository: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct DependencyEdge {
     pub source: String,
     pub target: String,
     pub edge_type: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct DependencyTreeResponse {
     pub nodes: Vec<DependencyNode>,
     pub edges: Vec<DependencyEdge>,
@@ -532,7 +606,8 @@ pub struct DependencyTreeResponse {
     pub warnings: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 #[serde(rename_all = "snake_case")]
 pub enum VersionMatch {
     Match,
@@ -540,7 +615,8 @@ pub enum VersionMatch {
     NotInstalled,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct SignoffGroupWithLocal {
     pub pkgbase: String,
     pub pkgnames: Vec<String>,
@@ -549,6 +625,7 @@ pub struct SignoffGroupWithLocal {
     pub repo: String,
     pub packager: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub comments: Option<String>,
     pub last_update: String,
     pub known_bad: bool,
@@ -561,13 +638,15 @@ pub struct SignoffGroupWithLocal {
     pub version_match: VersionMatch,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct SignoffListResponse {
     pub signoff_groups: Vec<SignoffGroupWithLocal>,
     pub total: usize,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct SignoffActionResponse {
     pub success: bool,
     pub pkgbase: String,
@@ -576,7 +655,8 @@ pub struct SignoffActionResponse {
     pub error: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct PackageSecurityAdvisory {
     pub package: String,
     pub severity: String,
@@ -588,7 +668,8 @@ pub struct PackageSecurityAdvisory {
     pub status: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct SecurityResponse {
     pub advisories: Vec<PackageSecurityAdvisory>,
     /// True when served from the on-disk cache because the live fetch failed.
@@ -596,7 +677,8 @@ pub struct SecurityResponse {
     pub stale: bool,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct SecurityInfoAdvisory {
     pub name: String,
     pub date: String,
@@ -604,14 +686,16 @@ pub struct SecurityInfoAdvisory {
     pub advisory_type: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct SecurityInfoGroup {
     pub name: String,
     pub status: String,
     pub severity: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct SecurityInfoIssue {
     pub name: String,
     pub severity: String,
@@ -619,7 +703,8 @@ pub struct SecurityInfoIssue {
     pub status: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct SecurityInfoResponse {
     pub name: String,
     pub advisories: Vec<SecurityInfoAdvisory>,
@@ -627,14 +712,16 @@ pub struct SecurityInfoResponse {
     pub issues: Vec<SecurityInfoIssue>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct RepoDirectiveFull {
     pub directive_type: String,
     pub value: String,
     pub enabled: bool,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct RepoEntry {
     pub name: String,
     pub enabled: bool,
@@ -642,12 +729,14 @@ pub struct RepoEntry {
     pub directives: Vec<RepoDirectiveFull>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct ListReposResponse {
     pub repos: Vec<RepoEntry>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct SaveReposResponse {
     pub success: bool,
     pub backup_path: Option<String>,

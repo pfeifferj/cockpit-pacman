@@ -90,6 +90,12 @@ jobs:
         working-directory: backend
         run: cargo test
 
+      - name: Check generated TS bindings are up to date
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git diff --exit-code src/bindings \
+            || (echo "src/bindings is stale; run 'make generate-types' and commit." && exit 1)
+
       - name: Build
         working-directory: backend
         run: cargo build --release

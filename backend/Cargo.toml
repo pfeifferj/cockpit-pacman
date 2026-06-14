@@ -13,7 +13,7 @@ pacmanconf = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
-ctrlc = "3"
+ctrlc = { version = "3", features = ["termination"] }
 chrono = "0.4"
 fs2 = "0.4"
 pacman-key = "0.1.2"
@@ -27,6 +27,7 @@ arch-security-client = { path = "crates/arch-security-client" }
 archweb-client = { path = "crates/archweb-client" }
 base64 = "0.22"
 zbus = "5"
+ts-rs = "12.0.1"
 
 [profile.release]
 lto = true

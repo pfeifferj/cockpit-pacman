@@ -2,22 +2,27 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
+use ts_rs::TS;
 
 use crate::util::emit_json;
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct LockStatus {
     pub locked: bool,
     pub stale: bool,
     pub lock_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub blocking_process: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct LockRemoveResult {
     pub removed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub error: Option<String>,
 }
 

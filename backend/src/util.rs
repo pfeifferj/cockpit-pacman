@@ -7,7 +7,7 @@ use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::Path;
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use ureq::config::IpFamily;
 
 use crate::models::StreamEvent;
@@ -71,6 +71,12 @@ impl TimeoutGuard {
     }
 }
 
+/// Install the cooperative-cancellation handler. ctrlc's `termination` feature
+/// makes this catch SIGTERM (and SIGHUP) too, not just SIGINT, so cockpit's
+/// `proc.close()` sets the CANCELLED flag instead of hard-killing the process.
+/// Handlers poll `is_cancelled()` at safe points; a cancel arriving during an
+/// alpm commit is therefore deferred until the commit finishes rather than
+/// tearing the transaction apart mid-write.
 pub fn setup_signal_handler() {
     static HANDLER_SET: AtomicBool = AtomicBool::new(false);
 
@@ -113,6 +119,59 @@ pub fn config_path(file: &str) -> Result<std::path::PathBuf> {
     Ok(std::path::PathBuf::from(home)
         .join(".config/cockpit-pacman")
         .join(file))
+}
+
+/// Run `f` while holding an exclusive advisory lock on `lock_path`, serializing
+/// concurrent backend invocations (each a separate process) that mutate the
+/// same on-disk file. The lock is a dedicated sidecar file, never the data file
+/// itself: the data file is replaced via rename, so a lock on its inode would
+/// not cover a second writer that opens the path fresh. The sidecar is created
+/// if absent and left in place between runs.
+pub fn with_file_lock<F, R>(lock_path: &Path, f: F) -> Result<R>
+where
+    F: FnOnce() -> Result<R>,
+{
+    use fs2::FileExt;
+    use std::fs::OpenOptions;
+
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory for lock {:?}", lock_path))?;
+    }
+
+    let lock_file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_path)
+        .with_context(|| format!("Failed to open lock file {:?}", lock_path))?;
+
+    lock_file
+        .lock_exclusive()
+        .with_context(|| format!("Failed to acquire lock on {:?}", lock_path))?;
+
+    // Lock is released when lock_file is dropped, including on early return.
+    f()
+}
+
+/// Return a backup path of the form `{prefix}{unix_secs}` that does not yet
+/// exist, advancing the second counter on collision. Callers hold the relevant
+/// file lock, so the existence check is race-free against other backend
+/// processes and two saves in the same wall-clock second won't clobber a
+/// backup. The suffix stays a plain unix-seconds integer so the listing/restore
+/// parsers keep working.
+pub fn unique_backup_path(prefix: &str) -> String {
+    let mut secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_secs();
+    loop {
+        let candidate = format!("{prefix}{secs}");
+        if !Path::new(&candidate).exists() {
+            return candidate;
+        }
+        secs += 1;
+    }
 }
 
 /// Serialize `state` to `path` via a temp file and atomic rename, so a crash
@@ -164,17 +223,25 @@ pub fn classify_message(message: &str) -> Option<&'static str> {
     if lower.contains("unable to lock database") || lower.contains("database is locked") {
         return Some("database_locked");
     }
-    if lower.contains("network")
-        || lower.contains("connection")
-        || lower.contains("could not connect")
-        || lower.contains("connection refused")
-        || lower.contains("resolve host")
-        || lower.contains("host not found")
-        || lower.contains("name resolution")
-        || lower.contains("failed retrieving file")
-        || lower.contains("download library error")
-        || lower.contains("temporary failure in name resolution")
-    {
+    // Canonical network-error keyword list. Kept in sync with
+    // NETWORK_ERROR_KEYWORDS / parseErrorCode in src/api.ts; the two can't share
+    // code across the FFI boundary, so the list is mirrored deliberately.
+    const NETWORK_ERROR_KEYWORDS: &[&str] = &[
+        "network",
+        "connection",
+        "could not connect",
+        "unable to connect",
+        "could not resolve",
+        "resolve host",
+        "host not found",
+        "name resolution",
+        "temporary failure in name resolution",
+        "dns",
+        "failed retrieving file",
+        "failed to retrieve",
+        "download library error",
+    ];
+    if NETWORK_ERROR_KEYWORDS.iter().any(|kw| lower.contains(kw)) {
         return Some("network_error");
     }
     None
