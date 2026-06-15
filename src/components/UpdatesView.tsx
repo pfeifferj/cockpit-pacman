@@ -180,7 +180,10 @@ const SystemOverviewCard: React.FC<{
   keyringStatus: KeyringStatusResponse | null;
   summaryLoading: boolean;
   pendingSignoffs?: number | null;
-}> = ({ updates, securityCount, securityLoading, securityUnavailable, orphanCount, cacheSize, keyringStatus, summaryLoading, pendingSignoffs }) => {
+  securityFilterActive?: boolean;
+  onToggleSecurityFilter?: () => void;
+}> = ({ updates, securityCount, securityLoading, securityUnavailable, orphanCount, cacheSize, keyringStatus, summaryLoading, pendingSignoffs, securityFilterActive, onToggleSecurityFilter }) => {
+  const securityFilterable = !!onToggleSecurityFilter && !securityLoading && !securityUnavailable && securityCount > 0;
   const { onViewOrphans, onViewCache, onViewKeyring, onViewSignoffs } = useNavigation();
   return (
   <Card className="pf-v6-u-mb-md">
@@ -196,10 +199,19 @@ const SystemOverviewCard: React.FC<{
         </FlexItem>
         <FlexItem>
           <StatBox
-            label="Security"
-            value={securityLoading || securityUnavailable ? "-" : formatNumber(securityCount)}
-            color={!securityUnavailable && securityCount > 0 ? "danger" : "default"}
+            label={securityFilterActive ? "Show all" : "Security"}
+            value={
+              securityFilterActive
+                ? formatNumber(updates.length)
+                : securityLoading || securityUnavailable
+                  ? "-"
+                  : formatNumber(securityCount)
+            }
+            color={!securityFilterActive && !securityUnavailable && securityCount > 0 ? "danger" : "default"}
             isLoading={securityLoading}
+            onClick={securityFilterable ? onToggleSecurityFilter : undefined}
+            isActive={securityFilterable ? securityFilterActive : undefined}
+            ariaLabel={securityFilterActive ? "Show all updates" : "Filter to security updates"}
           />
         </FlexItem>
         <FlexItem>
@@ -365,6 +377,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const { selectedPackage, detailsLoading: packageLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
   const [searchFilter, setSearchFilter] = useState("");
   const [repoFilter, setRepoFilter] = useState("all");
+  const [securityFilterActive, setSecurityFilterActive] = useState(false);
   const [repoSelectOpen, setRepoSelectOpen] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   useBackdropClose(confirmModalOpen, () => setConfirmModalOpen(false));
@@ -435,6 +448,14 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     return Array.from(repos).sort();
   }, [updates]);
 
+  const securityUpdateCount = useMemo(() => {
+    return updates.filter((u) => securityMap.has(u.name)).length;
+  }, [updates, securityMap]);
+
+  // The filter only applies while there are security updates to show, so a
+  // refresh that drops the count to zero never strands the list on an empty result.
+  const securityFilterOn = securityFilterActive && securityUpdateCount > 0;
+
   const filteredUpdates = useMemo(() => {
     let result = updates;
     if (searchFilter) {
@@ -449,8 +470,11 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     if (repoFilter !== "all") {
       result = result.filter((u) => u.repository === repoFilter);
     }
+    if (securityFilterOn) {
+      result = result.filter((u) => securityMap.has(u.name));
+    }
     return result;
-  }, [updates, searchFilter, repoFilter]);
+  }, [updates, searchFilter, repoFilter, securityFilterOn, securityMap]);
 
   const sortedUpdates = useMemo(() => {
     if (activeSortKey === null) return filteredUpdates;
@@ -487,7 +511,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   // a filter never strands the user on a now-empty page.
   useEffect(() => {
     setPage(1);
-  }, [searchFilter, repoFilter, activeSortKey, activeSortDirection, setPage]);
+  }, [searchFilter, repoFilter, securityFilterOn, activeSortKey, activeSortDirection, setPage]);
 
   const pagedUpdates = useMemo(
     () => sortedUpdates.slice(offset, offset + perPage),
@@ -525,10 +549,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       allWarningsAcked
     );
   }, [preflightData, acknowledgedRemovals, acknowledgedConflicts, acknowledgedKeyImports, acknowledgedWarnings]);
-
-  const securityUpdateCount = useMemo(() => {
-    return updates.filter((u) => securityMap.has(u.name)).length;
-  }, [updates, securityMap]);
 
   const visibleNews = useMemo(
     () => newsItems.filter((item) => !dismissedNews.has(item.link)),
@@ -1592,6 +1612,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         keyringStatus={keyringStatus}
         summaryLoading={summaryLoading}
         pendingSignoffs={pendingSignoffs}
+        securityFilterActive={securityFilterOn}
+        onToggleSecurityFilter={() => setSecurityFilterActive((v) => !v)}
       />
 
       <Card>

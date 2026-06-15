@@ -1446,6 +1446,125 @@ describe("UpdatesView", () => {
     });
   });
 
+  describe("Security tile filter", () => {
+    const advisory = {
+      package: "zzz-package",
+      severity: "High",
+      advisory_type: "security",
+      avg_name: "AVG-1",
+      cve_ids: ["CVE-1"],
+      fixed_version: null,
+      status: "Vulnerable",
+    };
+
+    const twoPackages = {
+      updates: [
+        { name: "aaa-package", current_version: "1.0-1", new_version: "1.1-1", download_size: 1000, current_size: 2000, new_size: 2500, ignored: false, repository: "extra" },
+        { name: "zzz-package", current_version: "2.0-1", new_version: "2.1-1", download_size: 5000, current_size: 3000, new_size: 3500, ignored: false, repository: "core" },
+      ],
+      warnings: [],
+    };
+
+    const makeUpdates = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        name: `pgpkg${String(i).padStart(4, "0")}`,
+        current_version: "1.0.0-1",
+        new_version: "1.0.1-1",
+        download_size: 1000,
+        current_size: 2000,
+        new_size: 2000,
+        repository: "core",
+        ignored: false,
+      }));
+
+    it("filters the list to security updates when the tile is clicked", async () => {
+      mockCheckUpdates.mockResolvedValue(twoPackages);
+      mockCheckSecurity.mockResolvedValue({ advisories: [advisory] });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("aaa-package")).toBeInTheDocument();
+      });
+
+      const tile = await screen.findByRole("button", { name: "Filter to security updates" });
+      await act(async () => {
+        fireEvent.click(tile);
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByText("aaa-package")).not.toBeInTheDocument();
+      });
+      expect(screen.getByText("zzz-package")).toBeInTheDocument();
+    });
+
+    it("flips the tile to Show all while active and restores the list on a second click", async () => {
+      mockCheckUpdates.mockResolvedValue(twoPackages);
+      mockCheckSecurity.mockResolvedValue({ advisories: [advisory] });
+
+      render(<UpdatesView />);
+      const tile = await screen.findByRole("button", { name: "Filter to security updates" });
+      await act(async () => {
+        fireEvent.click(tile);
+      });
+
+      const activeTile = await screen.findByRole("button", { name: "Show all updates" });
+      expect(within(activeTile).getByText("Show all")).toBeInTheDocument();
+      expect(activeTile).toHaveAttribute("aria-pressed", "true");
+
+      await act(async () => {
+        fireEvent.click(activeTile);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("aaa-package")).toBeInTheDocument();
+      });
+      expect(screen.getByText("zzz-package")).toBeInTheDocument();
+    });
+
+    it("resets to page 1 when the security filter is toggled", async () => {
+      const updates = makeUpdates(60);
+      mockCheckUpdates.mockResolvedValue({ updates, warnings: [] });
+      mockCheckSecurity.mockResolvedValue({
+        advisories: [{ ...advisory, package: updates[0].name }],
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText(updates[0].name)).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText("Go to next page"));
+      });
+      await waitFor(() => {
+        expect(screen.queryByText(updates[0].name)).not.toBeInTheDocument();
+      });
+
+      const tile = await screen.findByRole("button", { name: "Filter to security updates" });
+      await act(async () => {
+        fireEvent.click(tile);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(updates[0].name)).toBeInTheDocument();
+      });
+    });
+
+    it("is not interactive when there are no security updates", async () => {
+      mockCheckUpdates.mockResolvedValue(twoPackages);
+      mockCheckSecurity.mockResolvedValue({ advisories: [] });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("aaa-package")).toBeInTheDocument();
+      });
+
+      expect(
+        screen.queryByRole("button", { name: "Filter to security updates" })
+      ).not.toBeInTheDocument();
+    });
+  });
+
   describe("News Feed", () => {
     it("displays news items when returned", async () => {
       mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });

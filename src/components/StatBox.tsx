@@ -18,9 +18,10 @@ export interface StatBoxProps {
   isLoading?: boolean;
   onClick?: () => void;
   ariaLabel?: string;
+  isActive?: boolean;
 }
 
-export const StatBox: React.FC<StatBoxProps> = ({ value, label, color = "default", isLoading, onClick, ariaLabel }) => (
+export const StatBox: React.FC<StatBoxProps> = ({ value, label, color = "default", isLoading, onClick, ariaLabel, isActive }) => (
   <div
     style={{
       textAlign: "center",
@@ -29,7 +30,10 @@ export const StatBox: React.FC<StatBoxProps> = ({ value, label, color = "default
       borderRadius: "6px",
       cursor: onClick ? "pointer" : undefined,
       transition: onClick ? "background 0.15s ease" : undefined,
+      outline: isActive ? "2px solid var(--pf-t--global--border--color--brand--default)" : undefined,
+      outlineOffset: isActive ? "-2px" : undefined,
     }}
+    aria-pressed={onClick ? isActive : undefined}
     onClick={onClick}
     onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") onClick(); } : undefined}
     role={onClick ? "button" : undefined}
