@@ -36,7 +36,9 @@ pub struct Package {
     pub name: String,
     pub version: String,
     pub description: Option<String>,
+    #[ts(type = "number")]
     pub installed_size: i64,
+    #[ts(type = "number | null")]
     pub install_date: Option<i64>,
     pub reason: String,
     pub repository: Option<String>,
@@ -66,8 +68,11 @@ pub struct UpdateInfo {
     pub name: String,
     pub current_version: String,
     pub new_version: String,
+    #[ts(type = "number")]
     pub download_size: i64,
+    #[ts(type = "number")]
     pub current_size: i64,
+    #[ts(type = "number")]
     pub new_size: i64,
     pub repository: String,
     #[serde(default)]
@@ -90,10 +95,13 @@ pub struct PackageDetails {
     pub replaces: Vec<String>,
     pub required_by: Vec<String>,
     pub optional_for: Vec<String>,
+    #[ts(type = "number")]
     pub installed_size: i64,
     pub packager: Option<String>,
     pub architecture: Option<String>,
+    #[ts(type = "number")]
     pub build_date: i64,
+    #[ts(type = "number | null")]
     pub install_date: Option<i64>,
     pub reason: String,
     pub validation: Vec<String>,
@@ -145,10 +153,13 @@ pub struct SyncPackageDetails {
     pub optdepends: Vec<String>,
     pub conflicts: Vec<String>,
     pub replaces: Vec<String>,
+    #[ts(type = "number")]
     pub download_size: i64,
+    #[ts(type = "number")]
     pub installed_size: i64,
     pub packager: Option<String>,
     pub architecture: Option<String>,
+    #[ts(type = "number")]
     pub build_date: i64,
     pub repository: String,
 }
@@ -203,6 +214,7 @@ pub struct PreflightResponse {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<PreflightWarning>,
     pub packages_to_upgrade: usize,
+    #[ts(type = "number")]
     pub total_download_size: i64,
 }
 
@@ -267,10 +279,10 @@ pub enum StreamEvent {
         filename: String,
         event: String,
         #[serde(skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
+        #[ts(optional, as = "Option<i32>")]
         downloaded: Option<i64>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
+        #[ts(optional, as = "Option<i32>")]
         total: Option<i64>,
     },
     #[serde(rename = "event")]
@@ -319,7 +331,9 @@ pub struct OrphanPackage {
     pub name: String,
     pub version: String,
     pub description: Option<String>,
+    #[ts(type = "number")]
     pub installed_size: i64,
+    #[ts(type = "number | null")]
     pub install_date: Option<i64>,
     pub repository: Option<String>,
 }
@@ -328,6 +342,7 @@ pub struct OrphanPackage {
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct OrphanResponse {
     pub orphans: Vec<OrphanPackage>,
+    #[ts(type = "number")]
     pub total_size: i64,
 }
 
@@ -337,12 +352,14 @@ pub struct CachePackage {
     pub name: String,
     pub version: String,
     pub filename: String,
+    #[ts(type = "number")]
     pub size: i64,
 }
 
 #[derive(Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct CacheInfo {
+    #[ts(type = "number")]
     pub total_size: i64,
     pub package_count: usize,
     pub packages: Vec<CachePackage>,
@@ -401,6 +418,7 @@ pub struct CachedVersion {
     pub name: String,
     pub version: String,
     pub filename: String,
+    #[ts(type = "number")]
     pub size: i64,
     pub installed_version: Option<String>,
     pub is_older: bool,
@@ -500,6 +518,7 @@ pub struct MirrorListResponse {
     pub total: usize,
     pub enabled_count: usize,
     pub path: String,
+    #[ts(type = "number | null")]
     pub last_modified: Option<i64>,
 }
 
@@ -510,6 +529,7 @@ pub struct MirrorStatus {
     pub country: Option<String>,
     pub country_code: Option<String>,
     pub last_sync: Option<String>,
+    #[ts(type = "number | null")]
     pub delay: Option<i64>,
     pub score: Option<f64>,
     pub completion_pct: Option<f64>,
@@ -531,7 +551,9 @@ pub struct MirrorStatusResponse {
 pub struct MirrorTestResult {
     pub url: String,
     pub success: bool,
+    #[ts(type = "number | null")]
     pub speed_bps: Option<u64>,
+    #[ts(type = "number | null")]
     pub latency_ms: Option<u64>,
     pub error: Option<String>,
 }
@@ -555,10 +577,12 @@ pub struct RefreshMirrorsResponse {
 #[derive(Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct MirrorBackup {
+    #[ts(type = "number")]
     pub timestamp: i64,
     pub date: String,
     pub enabled_count: usize,
     pub total_count: usize,
+    #[ts(type = "number")]
     pub size: u64,
 }
 

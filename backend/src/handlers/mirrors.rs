@@ -3,15 +3,15 @@ use serde::Deserialize;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use crate::check_cancel_early;
 use crate::models::{
     MirrorBackup, MirrorBackupListResponse, MirrorEntry, MirrorListResponse, MirrorStatus,
     MirrorStatusResponse, MirrorTestResult, RefreshMirrorsResponse, RestoreMirrorBackupResponse,
     SaveMirrorlistResponse, StreamEvent,
 };
-use crate::util::{TimeoutGuard, emit_event, emit_json, setup_signal_handler};
+use crate::util::{TimeoutGuard, emit_event, emit_json, is_cancelled, setup_signal_handler};
 use crate::validation::validate_mirror_url;
 
 const MIRRORLIST_PATH: &str = "/etc/pacman.d/mirrorlist";
@@ -245,6 +245,8 @@ pub fn refresh_mirrors(
     emit_json(&response)
 }
 
+const MIRROR_TEST_CONCURRENCY: usize = 8;
+
 pub fn test_mirrors(urls: &[String], timeout_secs: u64) -> Result<()> {
     setup_signal_handler();
     let timeout = TimeoutGuard::new(timeout_secs);
@@ -257,24 +259,60 @@ pub fn test_mirrors(urls: &[String], timeout_secs: u64) -> Result<()> {
             .build(),
     );
 
-    for (i, url) in urls.iter().enumerate() {
-        check_cancel_early!(&timeout);
+    // Probe mirrors concurrently with a bounded pool: the requests are
+    // independent and I/O-bound, so a sequential loop costs ~N x per-request
+    // timeout. Workers pull from a shared index; `completed` drives the progress
+    // counter in completion order. emit_event locks stdout, so result lines never
+    // interleave. Each worker stops pulling on cancel/timeout.
+    let next = AtomicUsize::new(0);
+    let completed = AtomicUsize::new(0);
+    let workers = total.clamp(1, MIRROR_TEST_CONCURRENCY);
 
-        let current = i + 1;
-        let result = test_single_mirror(&agent, url);
-
-        emit_event(&StreamEvent::MirrorTest {
-            url: url.clone(),
-            current,
-            total,
-            result,
-        });
-    }
-
-    emit_event(&StreamEvent::Complete {
-        success: true,
-        message: Some(format!("Tested {} mirrors", total)),
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| {
+                loop {
+                    if is_cancelled() || timeout.is_timed_out() {
+                        break;
+                    }
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    if i >= total {
+                        break;
+                    }
+                    let url = &urls[i];
+                    let result = test_single_mirror(&agent, url);
+                    let current = completed.fetch_add(1, Ordering::Relaxed) + 1;
+                    emit_event(&StreamEvent::MirrorTest {
+                        url: url.clone(),
+                        current,
+                        total,
+                        result,
+                    });
+                }
+            });
+        }
     });
+
+    let complete = if is_cancelled() {
+        StreamEvent::Complete {
+            success: false,
+            message: Some("Operation cancelled by user".to_string()),
+        }
+    } else if timeout.is_timed_out() {
+        StreamEvent::Complete {
+            success: false,
+            message: Some(format!(
+                "Operation timed out after {} seconds",
+                timeout_secs
+            )),
+        }
+    } else {
+        StreamEvent::Complete {
+            success: true,
+            message: Some(format!("Tested {} mirrors", total)),
+        }
+    };
+    emit_event(&complete);
 
     Ok(())
 }
@@ -337,6 +375,8 @@ fn test_single_mirror(agent: &ureq::Agent, mirror_url: &str) -> MirrorTestResult
 }
 
 const MAX_BACKUPS: usize = 5;
+const BACKUP_DIR: &str = "/etc/pacman.d";
+const BACKUP_NAME_PREFIX: &str = "mirrorlist.backup.";
 const BACKUP_PREFIX: &str = "/etc/pacman.d/mirrorlist.backup.";
 
 pub fn save_mirrorlist(mirrors: &[MirrorEntry]) -> Result<()> {
@@ -395,7 +435,7 @@ pub fn save_mirrorlist(mirrors: &[MirrorEntry]) -> Result<()> {
         }
 
         // Clean up old backups, keeping only the most recent MAX_BACKUPS
-        cleanup_old_backups()?;
+        cleanup_old_backups();
 
         Ok(backup_path)
     })?;
@@ -447,7 +487,7 @@ pub fn list_mirror_backups() -> Result<()> {
             Err(_) => continue,
         };
 
-        let timestamp_str = match name.strip_prefix("mirrorlist.backup.") {
+        let timestamp_str = match name.strip_prefix(BACKUP_NAME_PREFIX) {
             Some(s) => s,
             None => continue,
         };
@@ -503,7 +543,7 @@ pub fn restore_mirror_backup(timestamp: i64) -> Result<()> {
 
         fs::copy(backup, mirrorlist)?;
 
-        cleanup_old_backups()?;
+        cleanup_old_backups();
 
         Ok(pre_restore_backup)
     })?;
@@ -538,37 +578,8 @@ pub fn delete_mirror_backup(timestamp: i64) -> Result<()> {
     })
 }
 
-fn cleanup_old_backups() -> Result<()> {
-    let parent = Path::new("/etc/pacman.d");
-    let mut backups: Vec<_> = fs::read_dir(parent)?
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .file_name()
-                .to_str()
-                .is_some_and(|name| name.starts_with("mirrorlist.backup."))
-        })
-        .filter_map(|entry| {
-            let metadata = entry.metadata().ok()?;
-            let modified = metadata.modified().ok()?;
-            Some((entry.path(), modified))
-        })
-        .collect();
-
-    if backups.len() <= MAX_BACKUPS {
-        return Ok(());
-    }
-
-    backups.sort_by_key(|b| std::cmp::Reverse(b.1));
-
-    // Remove all but MAX_BACKUPS
-    for (path, _) in backups.into_iter().skip(MAX_BACKUPS) {
-        if let Err(e) = fs::remove_file(&path) {
-            eprintln!("Warning: failed to remove old backup {:?}: {}", path, e);
-        }
-    }
-
-    Ok(())
+fn cleanup_old_backups() {
+    crate::util::prune_old_backups(Path::new(BACKUP_DIR), BACKUP_NAME_PREFIX, MAX_BACKUPS);
 }
 
 #[cfg(test)]

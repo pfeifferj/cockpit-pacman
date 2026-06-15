@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use ts_rs::TS;
 
@@ -65,6 +66,14 @@ fn find_lock_holder(lock: &Path) -> Option<String> {
     None
 }
 
+/// Identify a specific file instance: (dev, ino, ctime_secs, ctime_nsec). ctime
+/// is included so a same-path replacement that happens to reuse the inode is
+/// still detected as a different instance.
+fn lock_identity(path: &Path) -> Option<(u64, u64, i64, i64)> {
+    let m = fs::metadata(path).ok()?;
+    Some((m.dev(), m.ino(), m.ctime(), m.ctime_nsec()))
+}
+
 pub fn check_lock() -> Result<()> {
     let db = db_path();
     let lock = db.join("db.lck");
@@ -110,10 +119,36 @@ pub fn remove_stale_lock() -> Result<()> {
         }
     };
 
+    let before = match lock_identity(&canonical) {
+        Some(id) => id,
+        None => {
+            return emit_json(&LockRemoveResult {
+                removed: false,
+                error: Some("Could not stat lock file".to_string()),
+            });
+        }
+    };
+
     if let Some(proc) = find_lock_holder(&canonical) {
         return emit_json(&LockRemoveResult {
             removed: false,
             error: Some(format!("Database in use by {}", proc)),
+        });
+    }
+
+    // db.lck is an O_EXCL presence lock: it can't be acquired while it exists, so
+    // an unchanged identity from inspection to here proves it was never released
+    // and re-taken, i.e. genuinely stale. A live lock only reaches this path if
+    // the stale file was replaced by a new instance, which a changed identity
+    // catches. The remaining stat->unlink gap is an accepted micro-window (a
+    // path-based unlink can't be made conditional on inode).
+    if lock_identity(&canonical) != Some(before) {
+        return emit_json(&LockRemoveResult {
+            removed: false,
+            error: Some(
+                "Lock file changed during check; not removing (a process may have taken the lock)"
+                    .to_string(),
+            ),
         });
     }
 
@@ -128,8 +163,38 @@ pub fn remove_stale_lock() -> Result<()> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::find_lock_holder;
+    use super::{find_lock_holder, lock_identity};
     use std::fs::File;
+
+    #[test]
+    fn lock_identity_detects_replacement() {
+        let path = std::env::temp_dir().join(format!("db-lck-id-{}", std::process::id()));
+
+        File::create(&path).unwrap();
+        let id1 = lock_identity(&path);
+        assert!(id1.is_some());
+
+        std::fs::remove_file(&path).unwrap();
+        // Ensure the clock advances so ctime differs even if the inode is reused.
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        File::create(&path).unwrap();
+        let id2 = lock_identity(&path);
+        assert!(id2.is_some());
+        assert_ne!(id1, id2, "a replaced file must have a different identity");
+
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(lock_identity(&path), None);
+    }
+
+    #[test]
+    fn lock_identity_stable_for_same_file() {
+        let path = std::env::temp_dir().join(format!("db-lck-stable-{}", std::process::id()));
+        File::create(&path).unwrap();
+
+        assert_eq!(lock_identity(&path), lock_identity(&path));
+
+        std::fs::remove_file(&path).unwrap();
+    }
 
     #[test]
     fn reports_only_the_process_holding_the_lock_file_open() {

@@ -5,14 +5,23 @@ use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
 use ts_rs::TS;
 
-use fs2::FileExt;
-
 const CONFIG_PATH: &str = "/etc/cockpit-pacman/config.json";
+const CONFIG_LOCK_PATH: &str = "/etc/cockpit-pacman/config.json.lock";
 const TIMER_DROP_IN_DIR: &str = "/etc/systemd/system/cockpit-pacman-scheduled.timer.d";
 const TIMER_DROP_IN_PATH: &str =
     "/etc/systemd/system/cockpit-pacman-scheduled.timer.d/schedule.conf";
+const SYSTEMCTL_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Run `systemctl <args>` bounded by SYSTEMCTL_TIMEOUT so a wedged systemd can't
+/// hang the request.
+fn run_systemctl(args: &[&str]) -> Result<std::process::Output> {
+    let mut cmd = Command::new("systemctl");
+    cmd.args(args);
+    crate::util::output_with_timeout(cmd, SYSTEMCTL_TIMEOUT)
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
@@ -113,60 +122,38 @@ impl AppConfig {
             .with_context(|| format!("Failed to parse config from {}", CONFIG_PATH))
     }
 
-    /// Read-modify-write the on-disk config under a single exclusive lock.
-    /// Holding the lock across the whole load/mutate/store cycle prevents
-    /// concurrent backend invocations from clobbering each other's updates, and
-    /// truncation happens only after the lock is held so a reader never observes
-    /// an empty file. Returns whatever the closure returns.
+    /// Read-modify-write the on-disk config under a sidecar lock. The lock is a
+    /// dedicated `.lock` file, not config.json itself: the data file is replaced
+    /// via atomic rename (write_json_atomic_with_mode), so a lock on its inode
+    /// would not cover a second writer that opens the path fresh. Holding the
+    /// sidecar lock across read/mutate/write serializes concurrent backend
+    /// invocations, and the atomic rename means a crash mid-write can never
+    /// leave a partial config.json. Returns whatever the closure returns.
     pub fn update<F, R>(mutate: F) -> Result<R>
     where
         F: FnOnce(&mut AppConfig) -> Result<R>,
     {
-        use std::io::{Read, Seek, SeekFrom};
-
         let path = Path::new(CONFIG_PATH);
 
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create config directory {:?}", parent))?;
-        }
+        crate::util::with_file_lock(Path::new(CONFIG_LOCK_PATH), || {
+            let mut config = match fs::read_to_string(path) {
+                Ok(content) if content.trim().is_empty() => AppConfig::default(),
+                Ok(content) => serde_json::from_str(&content)
+                    .with_context(|| format!("Failed to parse config from {}", CONFIG_PATH))?,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => AppConfig::default(),
+                Err(e) => {
+                    return Err(e)
+                        .with_context(|| format!("Failed to read config from {}", CONFIG_PATH));
+                }
+            };
 
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o600)
-            .open(path)
-            .with_context(|| format!("Failed to open config for writing: {}", CONFIG_PATH))?;
+            let result = mutate(&mut config)?;
 
-        file.lock_exclusive()
-            .with_context(|| format!("Failed to acquire write lock on {}", CONFIG_PATH))?;
+            crate::util::write_json_atomic_with_mode(path, &config, 0o600)
+                .with_context(|| format!("Failed to write config to {}", CONFIG_PATH))?;
 
-        let mut content = String::new();
-        file.read_to_string(&mut content)
-            .with_context(|| format!("Failed to read config from {}", CONFIG_PATH))?;
-
-        let mut config = if content.trim().is_empty() {
-            AppConfig::default()
-        } else {
-            serde_json::from_str(&content)
-                .with_context(|| format!("Failed to parse config from {}", CONFIG_PATH))?
-        };
-
-        let result = mutate(&mut config)?;
-
-        let new_content =
-            serde_json::to_string_pretty(&config).context("Failed to serialize config")?;
-
-        file.seek(SeekFrom::Start(0))
-            .context("Failed to rewind config file")?;
-        file.set_len(0).context("Failed to truncate config file")?;
-        file.write_all(new_content.as_bytes())
-            .with_context(|| format!("Failed to write config to {}", CONFIG_PATH))?;
-
-        // Lock is released when the file is dropped.
-        Ok(result)
+            Ok(result)
+        })
     }
 
     pub fn add_ignored(&mut self, package: &str) -> bool {
@@ -223,56 +210,59 @@ impl AppConfig {
                     format!("Failed to write timer drop-in to {}", TIMER_DROP_IN_PATH)
                 })?;
 
-            // Reload systemd and check exit status
-            let output = Command::new("systemctl")
-                .args(["daemon-reload"])
-                .output()
-                .context("Failed to run systemctl daemon-reload")?;
-
-            if !output.status.success() {
-                // Rollback: remove the drop-in file
+            // Undo the drop-in we just wrote when a systemctl step fails (spawn
+            // error, timeout, or non-zero exit).
+            let rollback = || {
                 let _ = fs::remove_file(TIMER_DROP_IN_PATH);
-                bail!(
-                    "systemctl daemon-reload failed: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
+                let _ = run_systemctl(&["daemon-reload"]);
+            };
+
+            match run_systemctl(&["daemon-reload"]) {
+                Ok(o) if o.status.success() => {}
+                Ok(o) => {
+                    rollback();
+                    bail!(
+                        "systemctl daemon-reload failed: {}",
+                        String::from_utf8_lossy(&o.stderr)
+                    );
+                }
+                Err(e) => {
+                    rollback();
+                    return Err(e).context("Failed to run systemctl daemon-reload");
+                }
             }
 
-            // Enable timer and check exit status
-            let output = Command::new("systemctl")
-                .args(["enable", "--now", "cockpit-pacman-scheduled.timer"])
-                .output()
-                .context("Failed to enable timer")?;
-
-            if !output.status.success() {
-                // Rollback: remove drop-in and reload
-                let _ = fs::remove_file(TIMER_DROP_IN_PATH);
-                let _ = Command::new("systemctl").args(["daemon-reload"]).output();
-                bail!(
-                    "Failed to enable timer: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
+            match run_systemctl(&["enable", "--now", "cockpit-pacman-scheduled.timer"]) {
+                Ok(o) if o.status.success() => {}
+                Ok(o) => {
+                    rollback();
+                    bail!(
+                        "Failed to enable timer: {}",
+                        String::from_utf8_lossy(&o.stderr)
+                    );
+                }
+                Err(e) => {
+                    rollback();
+                    return Err(e).context("Failed to enable timer");
+                }
             }
         } else {
             // Disable timer (ignore errors - timer might not exist)
-            let _ = Command::new("systemctl")
-                .args(["disable", "--now", "cockpit-pacman-scheduled.timer"])
-                .output();
+            let _ = run_systemctl(&["disable", "--now", "cockpit-pacman-scheduled.timer"]);
 
             // Remove drop-in file
             let _ = fs::remove_file(TIMER_DROP_IN_PATH);
 
             // Reload systemd
-            let output = Command::new("systemctl")
-                .args(["daemon-reload"])
-                .output()
-                .context("Failed to run systemctl daemon-reload")?;
-
-            if !output.status.success() {
-                bail!(
-                    "systemctl daemon-reload failed: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
+            match run_systemctl(&["daemon-reload"]) {
+                Ok(o) if o.status.success() => {}
+                Ok(o) => {
+                    bail!(
+                        "systemctl daemon-reload failed: {}",
+                        String::from_utf8_lossy(&o.stderr)
+                    );
+                }
+                Err(e) => return Err(e).context("Failed to run systemctl daemon-reload"),
             }
         }
 
@@ -334,13 +324,11 @@ impl ScheduleConfigResponse {
 }
 
 fn get_timer_status() -> (bool, Option<String>) {
-    let output = Command::new("systemctl")
-        .args([
-            "show",
-            "cockpit-pacman-scheduled.timer",
-            "--property=ActiveState,NextElapseUSecRealtime",
-        ])
-        .output();
+    let output = run_systemctl(&[
+        "show",
+        "cockpit-pacman-scheduled.timer",
+        "--property=ActiveState,NextElapseUSecRealtime",
+    ]);
 
     match output {
         Ok(output) => {

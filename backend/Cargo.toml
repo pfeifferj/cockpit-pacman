@@ -16,6 +16,7 @@ anyhow = "1"
 ctrlc = { version = "3", features = ["termination"] }
 chrono = "0.4"
 fs2 = "0.4"
+libc = "0.2"
 pacman-key = "0.1.2"
 pacman-log = "0.1.0"
 tokio = { version = "1", features = ["rt-multi-thread"] }

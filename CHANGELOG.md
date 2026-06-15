@@ -6,8 +6,12 @@
 - `pacman.conf` backup history with restore and delete in the Repositories tab
 - Pagination in the Updates and Mirrors lists
 
+### Changed
+- Cache info, downgrade listing, and mirror testing are much faster on large package caches and when testing many mirrors
+
 ### Fixed
 - Cancelling a sync or upgrade no longer risks interrupting a transaction mid-commit
+- Cancelling a downgrade no longer risks leaving the pacman database locked
 
 ## [0.3.6] - 2026-05-11
 

@@ -328,6 +328,7 @@ dependencies = [
  "ctrlc",
  "fs2",
  "html2text",
+ "libc",
  "pacman-key",
  "pacman-log",
  "pacmanconf",

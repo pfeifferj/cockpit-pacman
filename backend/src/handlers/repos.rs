@@ -301,10 +301,12 @@ pub fn save_repos(repos: &[RepoEntry]) -> Result<()> {
 #[derive(Serialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct RepoBackup {
+    #[ts(type = "number")]
     pub timestamp: i64,
     pub date: String,
     pub repo_count: usize,
     pub enabled_count: usize,
+    #[ts(type = "number")]
     pub size: u64,
 }
 
@@ -437,38 +439,5 @@ fn cleanup_old_backups() {
     let parent = Path::new(PACMAN_CONF_PATH)
         .parent()
         .unwrap_or(Path::new("/etc"));
-
-    let read_dir = match fs::read_dir(parent) {
-        Ok(rd) => rd,
-        Err(e) => {
-            eprintln!("Warning: failed to scan for old pacman.conf backups: {}", e);
-            return;
-        }
-    };
-
-    let mut backups: Vec<_> = read_dir
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .file_name()
-                .to_str()
-                .is_some_and(|name| name.starts_with(BACKUP_NAME_PREFIX))
-        })
-        .filter_map(|entry| {
-            let modified = entry.metadata().ok()?.modified().ok()?;
-            Some((entry.path(), modified))
-        })
-        .collect();
-
-    if backups.len() <= MAX_BACKUPS {
-        return;
-    }
-
-    backups.sort_by_key(|b| std::cmp::Reverse(b.1));
-
-    for (path, _) in backups.into_iter().skip(MAX_BACKUPS) {
-        if let Err(e) = fs::remove_file(&path) {
-            eprintln!("Warning: failed to remove old backup {:?}: {}", path, e);
-        }
-    }
+    crate::util::prune_old_backups(parent, BACKUP_NAME_PREFIX, MAX_BACKUPS);
 }

@@ -733,6 +733,7 @@ fn stream_event_complete_message_serializes_as_null_when_none() {
     let v = to_json(&event);
     assert_eq!(v["type"], "complete");
     assert_bool(&v, "success");
+    assert_eq!(v["success"], true);
     assert_null(&v, "message");
 }
 
