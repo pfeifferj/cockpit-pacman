@@ -1,12 +1,13 @@
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::cmp::Ordering;
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{self, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+use std::sync::{Arc, Condvar, LazyLock, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use ureq::config::IpFamily;
 
@@ -97,20 +98,147 @@ pub fn setup_signal_handler() {
     }
 }
 
-pub fn emit_event(event: &StreamEvent) {
-    let mut out = io::stdout().lock();
-    let _ = write_event_flushed(&mut out, event);
+const EVENT_QUEUE_CAP: usize = 4096;
+
+struct WriterState {
+    buf: VecDeque<(String, bool)>,
+    stop: bool,
+    writing: bool,
 }
 
-/// Serialize `event` as a JSON line and flush before returning, so the line is
-/// handed to the channel even if the process dies immediately after (e.g. a kill
-/// right after a successful commit). Generic over the writer for testing.
-fn write_event_flushed<W: Write>(w: &mut W, event: &StreamEvent) -> io::Result<()> {
-    if let Ok(json) = serde_json::to_string(event) {
-        writeln!(w, "{}", json)?;
-        w.flush()?;
+struct WriterInner {
+    state: Mutex<WriterState>,
+    not_empty: Condvar,
+    drained: Condvar,
+}
+
+static EVENT_WRITER: OnceLock<Arc<WriterInner>> = OnceLock::new();
+
+/// Get (lazily starting) the background stdout writer. Streaming events are
+/// enqueued by the alpm/main thread and drained here, so a stalled Cockpit
+/// channel can never block the transaction (and, with DownloadUser, deadlock the
+/// download child). The writer is created on first use, so non-streaming commands
+/// never spawn it.
+fn event_writer() -> &'static Arc<WriterInner> {
+    EVENT_WRITER.get_or_init(|| {
+        let inner = Arc::new(WriterInner {
+            state: Mutex::new(WriterState {
+                buf: VecDeque::new(),
+                stop: false,
+                writing: false,
+            }),
+            not_empty: Condvar::new(),
+            drained: Condvar::new(),
+        });
+        let worker = Arc::clone(&inner);
+        std::thread::spawn(move || writer_loop(&worker));
+        inner
+    })
+}
+
+fn writer_loop(inner: &WriterInner) {
+    loop {
+        let line = {
+            let mut state = inner.state.lock().unwrap_or_else(|e| e.into_inner());
+            while state.buf.is_empty() && !state.stop {
+                state = inner
+                    .not_empty
+                    .wait(state)
+                    .unwrap_or_else(|e| e.into_inner());
+            }
+            match state.buf.pop_front() {
+                Some((line, _terminal)) => {
+                    state.writing = true;
+                    line
+                }
+                None => {
+                    // stop requested and queue drained
+                    inner.drained.notify_all();
+                    return;
+                }
+            }
+        };
+
+        // Blocking write happens outside the lock: a stalled consumer parks this
+        // thread only, never a producer. IO errors (dead pipe) are expected.
+        let _ = write_line_flushed(&mut io::stdout().lock(), &line);
+
+        let mut state = inner.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.writing = false;
+        if state.buf.is_empty() {
+            inner.drained.notify_all();
+        }
     }
+}
+
+/// Enqueue a serialized event line for the background writer. Never blocks on
+/// stdout.
+pub fn emit_event(event: &StreamEvent) {
+    let Ok(line) = serde_json::to_string(event) else {
+        return;
+    };
+    let terminal = matches!(event, StreamEvent::Complete { .. });
+    let inner = event_writer();
+    let mut state = inner.state.lock().unwrap_or_else(|e| e.into_inner());
+    enqueue_capped(&mut state.buf, (line, terminal), EVENT_QUEUE_CAP);
+    inner.not_empty.notify_one();
+}
+
+/// Push an event onto the bounded queue. At capacity, evict the oldest
+/// non-terminal (log/progress/download) entry to make room; terminal events
+/// (Complete) are never dropped, so the frontend always receives the outcome.
+fn enqueue_capped(buf: &mut VecDeque<(String, bool)>, item: (String, bool), cap: usize) {
+    if buf.len() >= cap
+        && let Some(pos) = buf.iter().position(|(_, terminal)| !*terminal)
+    {
+        buf.remove(pos);
+    }
+    buf.push_back(item);
+}
+
+/// Drain the event queue and stop the writer, waiting up to `timeout` for the
+/// queue to flush (so a queued Complete reaches a live consumer). If the consumer
+/// is dead the writer stays blocked in write(); we time out and let the process
+/// exit reap it. No-op when no writer was started.
+pub fn shutdown_event_writer(timeout: Duration) {
+    let Some(inner) = EVENT_WRITER.get() else {
+        return;
+    };
+    let mut state = inner.state.lock().unwrap_or_else(|e| e.into_inner());
+    state.stop = true;
+    inner.not_empty.notify_all();
+
+    let deadline = Instant::now() + timeout;
+    while !state.buf.is_empty() || state.writing {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        let (next, res) = inner
+            .drained
+            .wait_timeout(state, remaining)
+            .unwrap_or_else(|e| e.into_inner());
+        state = next;
+        if res.timed_out() {
+            break;
+        }
+    }
+}
+
+fn write_line_flushed<W: Write>(w: &mut W, line: &str) -> io::Result<()> {
+    writeln!(w, "{line}")?;
+    w.flush()?;
     Ok(())
+}
+
+/// Serialize `event` and write it flushed. Only used by tests now (the writer
+/// thread uses `write_line_flushed`); kept to validate the serialize+flush path.
+#[cfg(test)]
+fn write_event_flushed<W: Write>(w: &mut W, event: &StreamEvent) -> io::Result<()> {
+    match serde_json::to_string(event) {
+        Ok(json) => write_line_flushed(w, &json),
+        Err(_) => Ok(()),
+    }
 }
 
 pub fn emit_json<T: Serialize>(response: &T) -> Result<()> {
@@ -634,12 +762,50 @@ macro_rules! check_cancel_early {
 #[cfg(test)]
 mod tests {
     use super::{
-        backups_to_prune, config_path, list_cache_packages, output_with_timeout, terminate_child,
-        write_event_flushed, write_json_atomic_with_mode,
+        backups_to_prune, config_path, enqueue_capped, list_cache_packages, output_with_timeout,
+        terminate_child, write_event_flushed, write_json_atomic_with_mode,
     };
     use crate::models::StreamEvent;
+    use std::collections::VecDeque;
     use std::path::PathBuf;
     use std::time::Duration;
+
+    fn ev(n: usize) -> (String, bool) {
+        (format!("e{n}"), false)
+    }
+
+    #[test]
+    fn enqueue_capped_drops_oldest_nonterminal_at_cap() {
+        let mut buf: VecDeque<(String, bool)> = (0..4).map(ev).collect();
+        enqueue_capped(&mut buf, ev(4), 4);
+        let lines: Vec<&str> = buf.iter().map(|(l, _)| l.as_str()).collect();
+        // oldest (e0) evicted, newest (e4) appended, size held at cap
+        assert_eq!(lines, vec!["e1", "e2", "e3", "e4"]);
+    }
+
+    #[test]
+    fn enqueue_capped_under_cap_just_appends() {
+        let mut buf: VecDeque<(String, bool)> = (0..2).map(ev).collect();
+        enqueue_capped(&mut buf, ev(2), 4);
+        assert_eq!(buf.len(), 3);
+    }
+
+    #[test]
+    fn enqueue_capped_never_drops_terminals() {
+        // a full buffer of terminal events: pushing another keeps them all
+        let mut buf: VecDeque<(String, bool)> = (0..3).map(|n| (format!("c{n}"), true)).collect();
+        enqueue_capped(&mut buf, ("c3".to_string(), true), 3);
+        let lines: Vec<&str> = buf.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(lines, vec!["c0", "c1", "c2", "c3"]);
+
+        // with one non-terminal present, that is the one evicted, terminal kept
+        let mut buf2: VecDeque<(String, bool)> = VecDeque::new();
+        buf2.push_back(("log".to_string(), false));
+        buf2.push_back(("done".to_string(), true));
+        enqueue_capped(&mut buf2, ("new".to_string(), false), 2);
+        let lines2: Vec<&str> = buf2.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(lines2, vec!["done", "new"]);
+    }
 
     #[test]
     #[allow(clippy::unwrap_used)]

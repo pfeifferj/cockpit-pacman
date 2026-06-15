@@ -223,13 +223,11 @@ fn commit_and_complete(
         )
         .map(|_| ()),
         None => {
-            // Invariant: emit + flush the success signal here, immediately after
-            // commit() returns Ok and before anything else runs. The caller's
-            // TransactionGuard releases (trans_release) on drop after this
-            // returns, then the process exits. Keeping nothing between the commit
-            // and this emit means a kill/crash right after the commit still
-            // delivers Complete{success:true}, so a succeeded upgrade is never
-            // reported as a failure. Do not insert work between commit() and here.
+            // Invariant: enqueue the success signal immediately after commit()
+            // returns Ok, before anything else. emit_event hands it to the async
+            // stdout writer; main drains the writer (shutdown_event_writer) before
+            // the process exits, so a succeeded upgrade always reports success and
+            // is never lost. Do not insert work between commit() and here.
             emit_event(&StreamEvent::Complete {
                 success: true,
                 message: success_msg,

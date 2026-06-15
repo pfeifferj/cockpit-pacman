@@ -1,4 +1,5 @@
 use std::env;
+use std::time::Duration;
 
 use cockpit_pacman_backend::handlers::{
     add_ignored, check_lock, check_security, check_updates, clean_cache, delete_mirror_backup,
@@ -15,7 +16,7 @@ use cockpit_pacman_backend::handlers::{
     sync_package_info, test_mirrors,
 };
 use cockpit_pacman_backend::models::{MirrorEntry, RepoEntry, StructuredError};
-use cockpit_pacman_backend::util::{classify_error, emit_json};
+use cockpit_pacman_backend::util::{classify_error, emit_json, shutdown_event_writer};
 use cockpit_pacman_backend::validation::{
     validate_archive_filename, validate_depth, validate_direction, validate_json_payload_size,
     validate_keep_versions, validate_mirror_timeout, validate_mirror_url, validate_package_name,
@@ -757,6 +758,11 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    // Deliver any queued stream events (incl. the terminal Complete) before the
+    // process exits, then continue to the result/envelope handling. Bounded so a
+    // dead Cockpit channel can't hold us here.
+    shutdown_event_writer(Duration::from_secs(5));
 
     if let Err(e) = result {
         // The structured envelope + exit 0 is for commands whose stdout the

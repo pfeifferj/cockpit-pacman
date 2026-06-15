@@ -14,6 +14,7 @@
 ### Fixed
 - Cancelling a sync or upgrade no longer risks interrupting a transaction mid-commit
 - Cancelling a downgrade no longer risks leaving the pacman database locked
+- An upgrade no longer hangs holding the package database lock if the Cockpit page stops reading its output
 
 ## [0.3.6] - 2026-05-11
 
