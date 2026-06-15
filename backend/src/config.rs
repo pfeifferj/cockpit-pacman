@@ -63,6 +63,10 @@ pub struct ScheduleConfig {
     pub schedule: String,
     #[serde(default)]
     pub max_packages: usize,
+    // Round-trip keys this binary doesn't know about (e.g. fields added by a
+    // newer version) instead of dropping them on the next update() rewrite.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 fn default_schedule() -> String {
@@ -76,6 +80,7 @@ impl Default for ScheduleConfig {
             mode: ScheduleMode::Upgrade,
             schedule: default_schedule(),
             max_packages: 0,
+            extra: serde_json::Map::new(),
         }
     }
 }
@@ -86,6 +91,10 @@ pub struct AppConfig {
     pub ignored_packages: Vec<String>,
     #[serde(default)]
     pub schedule: ScheduleConfig,
+    // Round-trip keys this binary doesn't know about (e.g. fields added by a
+    // newer version) instead of dropping them on the next update() rewrite.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl AppConfig {
