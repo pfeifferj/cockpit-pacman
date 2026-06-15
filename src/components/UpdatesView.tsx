@@ -829,7 +829,11 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   };
 
   const handleApplyUpdates = async () => {
-    // Run preflight check first
+    // Run preflight check first. Leave the error state if we're resuming from a
+    // lock error: the confirm modal and preflight indicator only render in the
+    // "available" view, so staying in "error" would silently swallow the
+    // confirmation prompt and the upgrade would never resume.
+    setState("available");
     setPreflightLoading(true);
     setError(null);
     setErrorCode(undefined);

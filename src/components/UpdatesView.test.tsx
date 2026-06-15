@@ -791,6 +791,37 @@ describe("UpdatesView", () => {
       expect(screen.getByText("Applying Updates")).toBeInTheDocument();
     });
 
+    it("renders the confirm modal when the resumed preflight needs confirmation", async () => {
+      // First upgrade attempt locks; the resumed preflight returns issues, so a
+      // confirmation is required. The modal only renders outside the error state,
+      // so this fails if the resume doesn't leave "error".
+      mockRunUpgrade.mockImplementationOnce((callbacks) => {
+        setTimeout(() => callbacks.onError("Failed to initialize transaction: unable to lock database"), 0);
+        return { cancel: vi.fn() };
+      });
+      mockPreflightUpgrade.mockResolvedValueOnce(mockPreflightResponse);
+      mockPreflightUpgrade.mockResolvedValueOnce(mockPreflightWithKeys);
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Apply 1 Update/i }));
+      });
+
+      const removeButton = await screen.findByRole("button", { name: /Remove stale lock/ });
+      await act(async () => {
+        fireEvent.click(removeButton);
+      });
+
+      // The resumed preflight has key imports -> the confirmation dialog appears,
+      // which only happens if we left the error state on resume.
+      expect(await screen.findByRole("dialog")).toBeInTheDocument();
+      expect(screen.queryByText("Database is locked")).not.toBeInTheDocument();
+    });
+
     it("re-runs the database sync after removing a stale lock", async () => {
       mockSyncDatabase.mockImplementationOnce((callbacks) => {
         setTimeout(() => callbacks.onError?.("unable to lock database"), 0);
