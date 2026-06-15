@@ -40,6 +40,9 @@ vi.mock("../api", async () => {
     markServicesDismissed: vi.fn(),
     getRebootDismissal: vi.fn(),
     markRebootDismissed: vi.fn(),
+    getScheduledRuns: vi.fn(),
+    getScheduledDismissal: vi.fn(),
+    markScheduledDismissed: vi.fn(),
     checkLock: vi.fn(),
     removeStaleLock: vi.fn(),
     addIgnoredPackage: vi.fn(),
@@ -69,6 +72,9 @@ const mockGetServicesDismissal = vi.mocked(api.getServicesDismissal);
 const mockMarkServicesDismissed = vi.mocked(api.markServicesDismissed);
 const mockGetRebootDismissal = vi.mocked(api.getRebootDismissal);
 const mockMarkRebootDismissed = vi.mocked(api.markRebootDismissed);
+const mockGetScheduledRuns = vi.mocked(api.getScheduledRuns);
+const mockGetScheduledDismissal = vi.mocked(api.getScheduledDismissal);
+const mockMarkScheduledDismissed = vi.mocked(api.markScheduledDismissed);
 
 describe("UpdatesView", () => {
   beforeEach(() => {
@@ -112,6 +118,9 @@ describe("UpdatesView", () => {
     mockMarkServicesDismissed.mockResolvedValue(undefined);
     mockGetRebootDismissal.mockResolvedValue({ signature: null });
     mockMarkRebootDismissed.mockResolvedValue(undefined);
+    mockGetScheduledRuns.mockResolvedValue({ runs: [], total: 0 });
+    mockGetScheduledDismissal.mockResolvedValue({ signature: null });
+    mockMarkScheduledDismissed.mockResolvedValue(undefined);
     mockRunUpgrade.mockReturnValue({ cancel: vi.fn() });
     mockSyncDatabase.mockImplementation((callbacks) => {
       setTimeout(() => callbacks.onComplete(), 0);
@@ -2071,6 +2080,70 @@ describe("UpdatesView", () => {
         expect(screen.getByText("Running services need to be restarted")).toBeInTheDocument();
       });
       expect(screen.queryByText(/systemd unreachable/i)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Scheduled run alerts", () => {
+    const run = (status: string, error: string | null, details: string[]) => ({
+      timestamp: "2026-06-14T03:00:00+0000",
+      mode: "upgrade",
+      success: status !== "failed",
+      status,
+      packages_checked: 3,
+      packages_upgraded: 0,
+      error,
+      details,
+    });
+
+    it("shows a danger alert when the last scheduled run failed", async () => {
+      mockGetScheduledRuns.mockResolvedValue({
+        runs: [run("failed", "Failed to commit upgrade: disk full", [])],
+        total: 1,
+      });
+      render(<UpdatesView />);
+      expect(await screen.findByText("Last scheduled upgrade failed")).toBeInTheDocument();
+      expect(screen.getByText(/disk full/)).toBeInTheDocument();
+    });
+
+    it("shows a warning alert when the last scheduled run was deferred", async () => {
+      mockGetScheduledRuns.mockResolvedValue({
+        runs: [run("skipped", null, ["Skipped: manual intervention required (conflicts detected)"])],
+        total: 1,
+      });
+      render(<UpdatesView />);
+      expect(await screen.findByText("Scheduled upgrade was deferred")).toBeInTheDocument();
+      expect(screen.getByText(/manual intervention required/)).toBeInTheDocument();
+    });
+
+    it("shows no alert when the last scheduled run succeeded", async () => {
+      mockGetScheduledRuns.mockResolvedValue({
+        runs: [run("ok", null, [])],
+        total: 1,
+      });
+      render(<UpdatesView />);
+      await waitFor(() => expect(mockGetScheduledRuns).toHaveBeenCalled());
+      expect(screen.queryByText("Last scheduled upgrade failed")).not.toBeInTheDocument();
+      expect(screen.queryByText("Scheduled upgrade was deferred")).not.toBeInTheDocument();
+    });
+
+    it("dismissing the alert persists the run timestamp and hides it", async () => {
+      mockGetScheduledRuns.mockResolvedValue({
+        runs: [run("failed", "boom", [])],
+        total: 1,
+      });
+      render(<UpdatesView />);
+      await screen.findByText("Last scheduled upgrade failed");
+      const closeButtons = screen.getAllByRole("button").filter(
+        (btn) => btn.getAttribute("aria-label")?.includes("Last scheduled upgrade failed"),
+      );
+      expect(closeButtons.length).toBeGreaterThan(0);
+      await act(async () => {
+        fireEvent.click(closeButtons[0]);
+      });
+      expect(mockMarkScheduledDismissed).toHaveBeenCalledWith("2026-06-14T03:00:00+0000");
+      await waitFor(() =>
+        expect(screen.queryByText("Last scheduled upgrade failed")).not.toBeInTheDocument(),
+      );
     });
   });
 });

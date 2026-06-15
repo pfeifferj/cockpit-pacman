@@ -76,6 +76,14 @@ const SIG_LEVEL_OPTIONS = [
 
 const KNOWN_SIG_LEVELS = new Set(SIG_LEVEL_OPTIONS.map((o) => o.value));
 
+// A SigLevel whose tokens turn off package signature verification. Used only to
+// prompt before applying; not a security control.
+function isInsecureSigLevel(value: string): boolean {
+  return value
+    .split(/\s+/)
+    .some((token) => token === "Never" || token === "TrustAll");
+}
+
 export const RepositoriesView: React.FC = () => {
   const [state, setState] = useState<ViewState>("loading");
   const [repos, setRepos] = useState<RepoEntry[]>([]);
@@ -96,6 +104,10 @@ export const RepositoriesView: React.FC = () => {
   const [backupBusy, setBackupBusy] = useState<number | null>(null);
   const [backupError, setBackupError] = useState<string | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<number | null>(null);
+  const [pendingSigLevel, setPendingSigLevel] = useState<{
+    index: number;
+    value: string;
+  } | null>(null);
 
   const loadRepos = useCallback(async () => {
     setState("loading");
@@ -528,7 +540,12 @@ export const RepositoriesView: React.FC = () => {
                     <FormSelect
                       value={isCustom ? "__custom__" : sigValue}
                       onChange={(_event, value) => {
-                        if (value !== "__custom__") {
+                        if (value === "__custom__") {
+                          return;
+                        }
+                        if (isInsecureSigLevel(value)) {
+                          setPendingSigLevel({ index: actualIndex, value });
+                        } else {
                           handleSigLevelChange(actualIndex, value);
                         }
                       }}
@@ -795,6 +812,35 @@ export const RepositoriesView: React.FC = () => {
           Restore
         </Button>
         <Button variant="link" onClick={() => setRestoreTarget(null)}>
+          Cancel
+        </Button>
+      </ModalFooter>
+    </Modal>
+    <Modal
+      variant={ModalVariant.small}
+      isOpen={pendingSigLevel !== null}
+      onClose={() => setPendingSigLevel(null)}
+      aria-labelledby="repo-siglevel-guard-title"
+    >
+      <ModalHeader title="Disable signature verification?" labelId="repo-siglevel-guard-title" />
+      <ModalBody>
+        SigLevel = Never makes pacman install packages from this repository
+        without verifying their signatures. The change still has to be saved to
+        take effect.
+      </ModalBody>
+      <ModalFooter>
+        <Button
+          variant="danger"
+          onClick={() => {
+            if (pendingSigLevel !== null) {
+              handleSigLevelChange(pendingSigLevel.index, pendingSigLevel.value);
+            }
+            setPendingSigLevel(null);
+          }}
+        >
+          Use Never anyway
+        </Button>
+        <Button variant="link" onClick={() => setPendingSigLevel(null)}>
           Cancel
         </Button>
       </ModalFooter>

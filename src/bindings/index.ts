@@ -118,7 +118,7 @@ export type ScheduleMode = "check" | "upgrade";
 
 export type ScheduleSetResponse = { success: boolean, message: string, };
 
-export type ScheduledRunEntry = { timestamp: string, mode: string, success: boolean, packages_checked: number, packages_upgraded: number, error: string | null, details: Array<string>, };
+export type ScheduledRunEntry = { timestamp: string, mode: string, success: boolean, status: string, packages_checked: number, packages_upgraded: number, error: string | null, details: Array<string>, };
 
 export type ScheduledRunsResponse = { runs: Array<ScheduledRunEntry>, total: number, };
 

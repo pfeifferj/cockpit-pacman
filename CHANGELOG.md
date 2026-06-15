@@ -5,6 +5,8 @@
 ### Added
 - `pacman.conf` backup history with restore and delete in the Repositories tab
 - Pagination in the Updates and Mirrors lists
+- Confirmation prompt before setting a repository SigLevel that disables signature verification
+- Failed or deferred scheduled upgrades now surface in the Updates view and the Cockpit overview health card
 
 ### Changed
 - Cache info, downgrade listing, and mirror testing are much faster on large package caches and when testing many mirrors

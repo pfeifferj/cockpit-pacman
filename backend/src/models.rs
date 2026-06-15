@@ -437,6 +437,9 @@ pub struct ScheduledRunEntry {
     pub timestamp: String,
     pub mode: String,
     pub success: bool,
+    // "ok" | "skipped" | "failed". `skipped` is a deferred run (safety limit or
+    // manual intervention required); `success` stays true for those.
+    pub status: String,
     pub packages_checked: usize,
     pub packages_upgraded: usize,
     pub error: Option<String>,

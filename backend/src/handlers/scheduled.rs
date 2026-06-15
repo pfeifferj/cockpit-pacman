@@ -30,10 +30,49 @@ struct LogEntry {
     timestamp: String,
     mode: String,
     success: bool,
+    #[serde(default)]
+    status: String,
     packages_checked: usize,
     packages_upgraded: usize,
     error: Option<String>,
     details: Vec<String>,
+}
+
+impl LogEntry {
+    /// `status` is "ok" | "skipped" | "failed"; `success` is kept in sync so old
+    /// readers and the wire `success` flag stay correct.
+    fn new(
+        timestamp: String,
+        mode: ScheduleMode,
+        status: &str,
+        packages_checked: usize,
+        packages_upgraded: usize,
+        error: Option<String>,
+        details: Vec<String>,
+    ) -> Self {
+        LogEntry {
+            timestamp,
+            mode: mode.to_string(),
+            success: status != "failed",
+            status: status.to_string(),
+            packages_checked,
+            packages_upgraded,
+            error,
+            details,
+        }
+    }
+}
+
+/// Status for a run record, deriving from `success` when an older log entry has
+/// no explicit `status` field.
+fn derive_status(status: &str, success: bool) -> String {
+    if !status.is_empty() {
+        status.to_string()
+    } else if success {
+        "ok".to_string()
+    } else {
+        "failed".to_string()
+    }
 }
 
 fn get_timestamp() -> String {
@@ -186,6 +225,7 @@ pub fn get_scheduled_runs(offset: usize, limit: usize) -> Result<()> {
                     timestamp: entry.timestamp,
                     mode: entry.mode,
                     success: entry.success,
+                    status: derive_status(&entry.status, entry.success),
                     packages_checked: entry.packages_checked,
                     packages_upgraded: entry.packages_upgraded,
                     error: entry.error,
@@ -229,15 +269,15 @@ pub fn scheduled_run() -> Result<()> {
 
     // Check for cancellation before starting
     if let CheckResult::Cancelled | CheckResult::TimedOut(_) = check_cancel(&_timeout_guard) {
-        let entry = LogEntry {
+        let entry = LogEntry::new(
             timestamp,
-            mode: mode.to_string(),
-            success: false,
-            packages_checked: 0,
-            packages_upgraded: 0,
-            error: Some("Operation cancelled or timed out before starting".to_string()),
+            mode,
+            "failed",
+            0,
+            0,
+            Some("Operation cancelled or timed out before starting".to_string()),
             details,
-        };
+        );
         log_run(&entry)?;
         anyhow::bail!("Operation cancelled or timed out");
     }
@@ -253,30 +293,30 @@ pub fn scheduled_run() -> Result<()> {
 
     eprintln!("Syncing package databases...");
     if let Err(e) = handle.syncdbs_mut().update(false) {
-        let entry = LogEntry {
+        let entry = LogEntry::new(
             timestamp,
-            mode: mode.to_string(),
-            success: false,
-            packages_checked: 0,
-            packages_upgraded: 0,
-            error: Some(format!("Failed to sync databases: {}", e)),
+            mode,
+            "failed",
+            0,
+            0,
+            Some(format!("Failed to sync databases: {}", e)),
             details,
-        };
+        );
         log_run(&entry)?;
         return Err(e.into());
     }
 
     // Check for cancellation after database sync
     if let CheckResult::Cancelled | CheckResult::TimedOut(_) = check_cancel(&_timeout_guard) {
-        let entry = LogEntry {
+        let entry = LogEntry::new(
             timestamp,
-            mode: mode.to_string(),
-            success: false,
-            packages_checked: 0,
-            packages_upgraded: 0,
-            error: Some("Operation cancelled or timed out after database sync".to_string()),
+            mode,
+            "failed",
+            0,
+            0,
+            Some("Operation cancelled or timed out after database sync".to_string()),
             details,
-        };
+        );
         log_run(&entry)?;
         anyhow::bail!("Operation cancelled or timed out");
     }
@@ -286,15 +326,15 @@ pub fn scheduled_run() -> Result<()> {
 
     if updates.is_empty() {
         eprintln!("No updates available");
-        let entry = LogEntry {
+        let entry = LogEntry::new(
             timestamp,
-            mode: mode.to_string(),
-            success: true,
-            packages_checked: 0,
-            packages_upgraded: 0,
-            error: None,
-            details: vec!["No updates available".to_string()],
-        };
+            mode,
+            "ok",
+            0,
+            0,
+            None,
+            vec!["No updates available".to_string()],
+        );
         log_run(&entry)?;
         return Ok(());
     }
@@ -306,15 +346,7 @@ pub fn scheduled_run() -> Result<()> {
 
     if mode == ScheduleMode::Check {
         eprintln!("Check mode: logging updates without applying");
-        let entry = LogEntry {
-            timestamp,
-            mode: mode.to_string(),
-            success: true,
-            packages_checked,
-            packages_upgraded: 0,
-            error: None,
-            details,
-        };
+        let entry = LogEntry::new(timestamp, mode, "ok", packages_checked, 0, None, details);
         log_run(&entry)?;
         return Ok(());
     }
@@ -324,18 +356,18 @@ pub fn scheduled_run() -> Result<()> {
             "Safety limit: {} updates exceed max_packages ({}), skipping upgrade",
             packages_checked, max_packages
         );
-        let entry = LogEntry {
+        let entry = LogEntry::new(
             timestamp,
-            mode: mode.to_string(),
-            success: true,
+            mode,
+            "skipped",
             packages_checked,
-            packages_upgraded: 0,
-            error: None,
-            details: vec![format!(
+            0,
+            None,
+            vec![format!(
                 "Skipped: {} updates exceed safety limit of {}",
                 packages_checked, max_packages
             )],
-        };
+        );
         log_run(&entry)?;
         return Ok(());
     }
@@ -362,30 +394,30 @@ pub fn scheduled_run() -> Result<()> {
     let mut tx = match TransactionGuard::new(&mut handle, TransFlag::NONE) {
         Ok(tx) => tx,
         Err(e) => {
-            let entry = LogEntry {
+            let entry = LogEntry::new(
                 timestamp,
-                mode: mode.to_string(),
-                success: false,
+                mode,
+                "failed",
                 packages_checked,
-                packages_upgraded: 0,
-                error: Some(format!("{:#}", e)),
+                0,
+                Some(format!("{:#}", e)),
                 details,
-            };
+            );
             log_run(&entry)?;
             return Err(e);
         }
     };
 
     if let Err(e) = tx.sync_sysupgrade(false) {
-        let entry = LogEntry {
+        let entry = LogEntry::new(
             timestamp,
-            mode: mode.to_string(),
-            success: false,
+            mode,
+            "failed",
             packages_checked,
-            packages_upgraded: 0,
-            error: Some(format!("Failed to prepare upgrade: {}", e)),
+            0,
+            Some(format!("Failed to prepare upgrade: {}", e)),
             details,
-        };
+        );
         log_run(&entry)?;
         return Err(e.into());
     }
@@ -394,8 +426,25 @@ pub fn scheduled_run() -> Result<()> {
     let removals_detected = has_removals.load(Ordering::SeqCst);
     let imports_detected = has_import_keys.load(Ordering::SeqCst);
 
-    if tx.prepare().is_err() || conflicts_detected || removals_detected || imports_detected {
-        eprintln!("Preflight check failed or manual intervention required, skipping");
+    let prepare_failed = tx.prepare().is_err();
+
+    if prepare_failed {
+        eprintln!("Failed to prepare upgrade transaction");
+        let entry = LogEntry::new(
+            timestamp,
+            mode,
+            "failed",
+            packages_checked,
+            0,
+            Some("Failed to prepare upgrade transaction".to_string()),
+            details,
+        );
+        log_run(&entry)?;
+        anyhow::bail!("Failed to prepare upgrade transaction");
+    }
+
+    if conflicts_detected || removals_detected || imports_detected {
+        eprintln!("Manual intervention required, skipping");
         let mut reasons = Vec::new();
         if conflicts_detected {
             reasons.push("conflicts detected");
@@ -406,18 +455,18 @@ pub fn scheduled_run() -> Result<()> {
         if imports_detected {
             reasons.push("key imports required");
         }
-        let entry = LogEntry {
+        let entry = LogEntry::new(
             timestamp,
-            mode: mode.to_string(),
-            success: true,
+            mode,
+            "skipped",
             packages_checked,
-            packages_upgraded: 0,
-            error: None,
-            details: vec![format!(
+            0,
+            None,
+            vec![format!(
                 "Skipped: manual intervention required ({})",
                 reasons.join(", ")
             )],
-        };
+        );
         log_run(&entry)?;
         return Ok(());
     }
@@ -426,30 +475,30 @@ pub fn scheduled_run() -> Result<()> {
 
     if packages_to_upgrade == 0 {
         eprintln!("No packages to upgrade after preparation");
-        let entry = LogEntry {
+        let entry = LogEntry::new(
             timestamp,
-            mode: mode.to_string(),
-            success: true,
+            mode,
+            "ok",
             packages_checked,
-            packages_upgraded: 0,
-            error: None,
-            details: vec!["No packages to upgrade after preparation".to_string()],
-        };
+            0,
+            None,
+            vec!["No packages to upgrade after preparation".to_string()],
+        );
         log_run(&entry)?;
         return Ok(());
     }
 
     // Final check before committing - this is the point of no return
     if let CheckResult::Cancelled | CheckResult::TimedOut(_) = check_cancel(&_timeout_guard) {
-        let entry = LogEntry {
+        let entry = LogEntry::new(
             timestamp,
-            mode: mode.to_string(),
-            success: false,
+            mode,
+            "failed",
             packages_checked,
-            packages_upgraded: 0,
-            error: Some("Operation cancelled or timed out before commit".to_string()),
+            0,
+            Some("Operation cancelled or timed out before commit".to_string()),
             details,
-        };
+        );
         log_run(&entry)?;
         anyhow::bail!("Operation cancelled or timed out");
     }
@@ -460,30 +509,48 @@ pub fn scheduled_run() -> Result<()> {
     );
 
     if let Err(e) = tx.commit() {
-        let entry = LogEntry {
+        let entry = LogEntry::new(
             timestamp,
-            mode: mode.to_string(),
-            success: false,
+            mode,
+            "failed",
             packages_checked,
-            packages_upgraded: 0,
-            error: Some(format!("Failed to commit upgrade: {}", e)),
+            0,
+            Some(format!("Failed to commit upgrade: {}", e)),
             details,
-        };
+        );
         log_run(&entry)?;
         return Err(e.into());
     }
 
     eprintln!("Upgrade completed successfully");
-    let entry = LogEntry {
+    let entry = LogEntry::new(
         timestamp,
-        mode: mode.to_string(),
-        success: true,
+        mode,
+        "ok",
         packages_checked,
-        packages_upgraded: packages_to_upgrade,
-        error: None,
+        packages_to_upgrade,
+        None,
         details,
-    };
+    );
     log_run(&entry)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::derive_status;
+
+    #[test]
+    fn derive_status_uses_explicit_value() {
+        assert_eq!(derive_status("skipped", true), "skipped");
+        assert_eq!(derive_status("failed", false), "failed");
+        assert_eq!(derive_status("ok", true), "ok");
+    }
+
+    #[test]
+    fn derive_status_falls_back_to_success_when_absent() {
+        assert_eq!(derive_status("", true), "ok");
+        assert_eq!(derive_status("", false), "failed");
+    }
 }

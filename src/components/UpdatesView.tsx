@@ -96,13 +96,16 @@ import {
   getPacnewStatus,
   getPacnewDismissal,
   markPacnewDismissed,
+  getScheduledRuns,
+  getScheduledDismissal,
+  markScheduledDismissed,
   addIgnoredPackage,
   getSignoffList,
   checkLock,
   removeStaleLock,
   BackendError,
 } from "../api";
-import type { KeyringCredentials, ErrorCode } from "../api";
+import type { KeyringCredentials, ErrorCode, ScheduledRunEntry } from "../api";
 import { NetworkErrorState } from "./NetworkErrorState";
 import { CompactPagination } from "./CompactPagination";
 
@@ -394,6 +397,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [dismissedRebootSignature, dismissReboot] = useDismissalSignature(getRebootDismissal, markRebootDismissed, "reboot");
   const [pacnewStatus, setPacnewStatus] = useState<PacnewStatus | null>(null);
   const [dismissedPacnewSignature, dismissPacnew] = useDismissalSignature(getPacnewDismissal, markPacnewDismissed, "pacnew");
+  const [latestScheduledRun, setLatestScheduledRun] = useState<ScheduledRunEntry | null>(null);
+  const [dismissedScheduledSignature, dismissScheduled] = useDismissalSignature(getScheduledDismissal, markScheduledDismissed, "scheduled");
   const [orphanCount, setOrphanCount] = useState<number | null>(null);
   const [cacheSize, setCacheSize] = useState<number | null>(null);
   const [keyringStatus, setKeyringStatus] = useState<KeyringStatusResponse | null>(null);
@@ -609,11 +614,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     setErrorCode(undefined);
     setWarnings([]);
     setLockRetryExhausted(false);
-    publishPageStatus({
-      type: null,
-      title: "Checking for package updates\u2026",
-      details: { pficon: "spinner", link: false },
-    });
+    // page_status is published by a dedicated effect (see publishPageStatus
+    // effect) so a failed/deferred scheduled run can take precedence.
     try {
       const response = await checkUpdates();
       autoResumedRef.current = false;
@@ -621,28 +623,58 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       setWarnings(response.warnings);
       setState(response.updates.length > 0 ? "available" : "uptodate");
       loadSecurityData();
-      const count = response.updates.length;
-      if (count === 0) {
+    } catch (ex) {
+      failWith("check", ex instanceof Error ? ex.message : String(ex), ex instanceof BackendError ? ex.code : undefined);
+    }
+  }, [loadSecurityData, failWith]);
+
+  const scheduledSignature = latestScheduledRun?.timestamp ?? "";
+  const scheduledNeedsAttention =
+    latestScheduledRun?.status === "failed" || latestScheduledRun?.status === "skipped";
+  const scheduledUnacked =
+    scheduledNeedsAttention &&
+    scheduledSignature !== "" &&
+    dismissedScheduledSignature !== undefined &&
+    dismissedScheduledSignature !== scheduledSignature;
+
+  // Single owner of page_status: a failed/deferred scheduled run takes
+  // precedence over the update-count, then the normal check states map through.
+  useEffect(() => {
+    if (scheduledUnacked) {
+      const failed = latestScheduledRun?.status === "failed";
+      publishPageStatus({
+        type: failed ? "error" : "warning",
+        title: failed ? "Last scheduled upgrade failed" : "Scheduled upgrade needs attention",
+      });
+      return;
+    }
+    switch (state) {
+      case "checking":
+        publishPageStatus({
+          type: null,
+          title: "Checking for package updates…",
+          details: { pficon: "spinner", link: false },
+        });
+        break;
+      case "uptodate":
         publishPageStatus({
           type: null,
           title: "System is up to date",
           details: { pficon: "check", link: false },
         });
-      } else {
+        break;
+      case "available":
         publishPageStatus({
           type: "info",
-          title: `${count} ${count === 1 ? "update" : "updates"} available`,
+          title: `${updates.length} ${updates.length === 1 ? "update" : "updates"} available`,
           details: { pficon: "enhancement" },
         });
-      }
-    } catch (ex) {
-      failWith("check", ex instanceof Error ? ex.message : String(ex), ex instanceof BackendError ? ex.code : undefined);
-      publishPageStatus({
-        type: "error",
-        title: "Failed to check for package updates",
-      });
+        break;
+      case "error":
+        publishPageStatus({ type: "error", title: "Failed to check for package updates" });
+        break;
     }
-  }, [loadSecurityData, failWith]);
+  }, [state, updates.length, scheduledUnacked, latestScheduledRun]);
 
   useEffect(() => {
     const { cancel } = syncDatabase({
@@ -681,11 +713,21 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     }
   }, []);
 
+  const loadLatestScheduledRun = useCallback(async () => {
+    try {
+      const { runs } = await getScheduledRuns({ limit: 1 });
+      setLatestScheduledRun(runs[0] ?? null);
+    } catch {
+      setLatestScheduledRun(null);
+    }
+  }, []);
+
   useEffect(() => {
     Promise.resolve().then(() => loadRebootStatus());
     Promise.resolve().then(() => loadServicesStatus());
     Promise.resolve().then(() => loadPacnewStatus());
-  }, [loadRebootStatus, loadServicesStatus, loadPacnewStatus]);
+    Promise.resolve().then(() => loadLatestScheduledRun());
+  }, [loadRebootStatus, loadServicesStatus, loadPacnewStatus, loadLatestScheduledRun]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1107,6 +1149,31 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     </Alert>
   ) : null;
 
+  const scheduledAlert = scheduledUnacked && latestScheduledRun ? (
+    <Alert
+      variant={latestScheduledRun.status === "failed" ? "danger" : "warning"}
+      title={
+        latestScheduledRun.status === "failed"
+          ? "Last scheduled upgrade failed"
+          : "Scheduled upgrade was deferred"
+      }
+      className="pf-v6-u-mb-md"
+      actionClose={
+        <AlertActionCloseButton onClose={() => dismissScheduled(scheduledSignature)} />
+      }
+    >
+      <Content component={ContentVariants.p}>
+        {latestScheduledRun.error
+          ? latestScheduledRun.error
+          : latestScheduledRun.details.join("; ") || "No further detail recorded."}
+      </Content>
+      <Content component={ContentVariants.small}>
+        See the Schedule history, or run{" "}
+        <code>journalctl -u cockpit-pacman-scheduled</code> for the full log.
+      </Content>
+    </Alert>
+  ) : null;
+
   const [isLocalCockpit] = useState(() =>
     ["localhost", "127.0.0.1", "::1", ""].includes(window.location.hostname),
   );
@@ -1364,6 +1431,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
           {rebootAlert}
           {servicesAlert}
           {pacnewAlert}
+          {scheduledAlert}
           <EmptyState  headingLevel="h2" icon={CheckCircleIcon}  titleText="System Updated">
             <EmptyStateBody>
               All packages have been updated successfully.
@@ -1388,6 +1456,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         {rebootAlert}
         {servicesAlert}
         {pacnewAlert}
+        {scheduledAlert}
         {warnings.length > 0 && (
           <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
             <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">
@@ -1484,6 +1553,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       {rebootAlert}
       {servicesAlert}
       {pacnewAlert}
+      {scheduledAlert}
       {warnings.length > 0 && (
         <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
           <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">

@@ -931,6 +931,12 @@ const pacnewDismissal = makeDismissalApi("pacnew");
 export const getPacnewDismissal = pacnewDismissal.get;
 export const markPacnewDismissed = pacnewDismissal.mark;
 
+const scheduledDismissal = makeDismissalApi("scheduled");
+export const getScheduledDismissal = scheduledDismissal.get;
+export const markScheduledDismissed = scheduledDismissal.mark;
+
+export type ScheduledRunStatus = "ok" | "skipped" | "failed";
+
 export type DependencyDirection = "forward" | "reverse" | "both";
 
 export interface DependencyTreeParams {

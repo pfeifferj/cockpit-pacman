@@ -178,6 +178,76 @@ describe("RepositoriesView", () => {
     expect(savedRepos[1].enabled).toBe(true);
   });
 
+  it("selecting SigLevel Never prompts and does not apply until confirmed", async () => {
+    render(<RepositoriesView />);
+    await waitFor(() => {
+      expect(screen.getByText("[extra]")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("SigLevel for extra"), {
+        target: { value: "Never" },
+      });
+    });
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    // The open modal makes the page inert, so query the (hidden) Save button.
+    expect(
+      screen.getByRole("button", { name: /Save Changes/i, hidden: true }),
+    ).toBeDisabled();
+  });
+
+  it("confirming SigLevel Never applies it and saves", async () => {
+    render(<RepositoriesView />);
+    await waitFor(() => {
+      expect(screen.getByText("[extra]")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("SigLevel for extra"), {
+        target: { value: "Never" },
+      });
+    });
+
+    const dialog = screen.getByRole("dialog");
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Use Never anyway" }));
+    });
+
+    const saveButton = screen.getByRole("button", { name: /Save Changes/i });
+    expect(saveButton).not.toBeDisabled();
+    await act(async () => {
+      fireEvent.click(saveButton);
+    });
+
+    await waitFor(() => {
+      expect(mockSaveRepos).toHaveBeenCalledTimes(1);
+    });
+    const savedRepos = mockSaveRepos.mock.calls[0][0];
+    expect(savedRepos.find((r) => r.name === "extra")?.sig_level).toBe("Never");
+  });
+
+  it("cancelling the SigLevel Never prompt leaves the prior value", async () => {
+    render(<RepositoriesView />);
+    await waitFor(() => {
+      expect(screen.getByText("[extra]")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("SigLevel for extra"), {
+        target: { value: "Never" },
+      });
+    });
+
+    const dialog = screen.getByRole("dialog");
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Save Changes/i })).toBeDisabled();
+  });
+
   it("typing in search with no unsaved changes applies filter immediately without a modal", async () => {
     render(<RepositoriesView />);
     await waitFor(() => {

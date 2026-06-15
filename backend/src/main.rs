@@ -534,6 +534,14 @@ fn main() {
             }
             mark_dismissed("pacnew", &args[2])
         }
+        "scheduled-dismissal-state" => read_dismissal("scheduled"),
+        "scheduled-mark-dismissed" => {
+            if args.len() < 3 {
+                eprintln!("Error: scheduled-mark-dismissed requires a SIGNATURE");
+                std::process::exit(1);
+            }
+            mark_dismissed("scheduled", &args[2])
+        }
         "signoff-list" => read_credentials_from_stdin().and_then(|creds| signoff_list(&creds)),
         "signoff-sign" => {
             if args.len() < 5 {

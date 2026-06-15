@@ -1368,6 +1368,7 @@ fn scheduled_run_entry_error_nullable() {
         timestamp: "2024-01-01T03:00:00+0000".into(),
         mode: "upgrade".into(),
         success: true,
+        status: "ok".into(),
         packages_checked: 100,
         packages_upgraded: 5,
         error: None,
@@ -1378,6 +1379,7 @@ fn scheduled_run_entry_error_nullable() {
     assert_string(&v, "timestamp");
     assert_string(&v, "mode");
     assert_bool(&v, "success");
+    assert_string(&v, "status");
     assert_number(&v, "packages_checked");
     assert_number(&v, "packages_upgraded");
     assert_null(&v, "error");

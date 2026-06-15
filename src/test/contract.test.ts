@@ -963,6 +963,7 @@ describe("getScheduledRuns contract", () => {
     expect(typeof successRun.timestamp).toBe("string");
     expect(typeof successRun.mode).toBe("string");
     expect(successRun.success).toBe(true);
+    expect(successRun.status).toBe("ok");
     expect(typeof successRun.packages_checked).toBe("number");
     expect(typeof successRun.packages_upgraded).toBe("number");
     expect(successRun.error).toBeNull();
@@ -975,6 +976,7 @@ describe("getScheduledRuns contract", () => {
 
     const failedRun: ScheduledRunEntry = result.runs[1];
     expect(failedRun.success).toBe(false);
+    expect(failedRun.status).toBe("failed");
     expect(typeof failedRun.error).toBe("string");
     expect(failedRun.packages_upgraded).toBe(0);
   });
