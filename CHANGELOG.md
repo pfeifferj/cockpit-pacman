@@ -1,21 +1,28 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.7] - 2026-06-15
 
 ### Added
+- Downgrade packages to any earlier version using the Arch Linux Archive
 - `pacman.conf` backup history with restore and delete in the Repositories tab
 - Pagination in the Updates and Mirrors lists
+- Clicking the Security tile filters the updates list to security upgrades
+- Notification when an upgrade leaves `.pacnew`/`.pacsave` config files that need merging
+- After clearing a stale database lock, the interrupted sync, upgrade, or downgrade resumes automatically, including upgrades waiting on a confirmation
 - Confirmation prompt before setting a repository SigLevel that disables signature verification
 - Failed or deferred scheduled upgrades now surface in the Updates view and the Cockpit overview health card
+- More tooltips and popovers explaining controls across the UI
 
 ### Changed
 - Cache info, downgrade listing, and mirror testing are much faster on large package caches and when testing many mirrors
+- Network failures are now detected and the affected views degrade gracefully instead of showing raw errors when offline
+- The plugin page loads faster on first open
 
 ### Fixed
 - Cancelling a sync or upgrade no longer risks interrupting a transaction mid-commit
 - Cancelling a downgrade no longer risks leaving the pacman database locked
 - An upgrade no longer hangs holding the package database lock if the Cockpit page stops reading its output
-- Removing a stale lock and retrying now resumes an upgrade that needs a confirmation, instead of silently stalling
+- Package details in the signoffs view now resolve against the package's own repository
 
 ## [0.3.6] - 2026-05-11
 
