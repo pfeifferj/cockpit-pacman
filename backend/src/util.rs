@@ -268,7 +268,6 @@ pub fn with_file_lock<F, R>(lock_path: &Path, f: F) -> Result<R>
 where
     F: FnOnce() -> Result<R>,
 {
-    use fs2::FileExt;
     use std::fs::OpenOptions;
 
     if let Some(parent) = lock_path.parent() {
@@ -284,7 +283,7 @@ where
         .with_context(|| format!("Failed to open lock file {:?}", lock_path))?;
 
     lock_file
-        .lock_exclusive()
+        .lock()
         .with_context(|| format!("Failed to acquire lock on {:?}", lock_path))?;
 
     // Lock is released when lock_file is dropped, including on early return.
