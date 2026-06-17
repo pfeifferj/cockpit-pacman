@@ -1090,25 +1090,23 @@ dependencies = [
 
 [[package]]
 name = "pacman-key"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de4bf4e9f0063026d20f40a8b1349876ab29468f71c24e7a8585415b78c0ca0b"
+checksum = "d89bbede6aad4792406ebeff29ce48fcd4ed3ed0fa66ca93bb948debd09e7bfc"
 dependencies = [
  "chrono",
  "thiserror",
  "tokio",
  "tokio-util",
- "tracing",
 ]
 
 [[package]]
 name = "pacman-log"
-version = "0.1.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "326525d7e4995e9cd3f0d48f55d465f0a969886df0592b24c3f6c1e4bd33a190"
+checksum = "fab424324a678604c65eaaca4070de1432ed053da8b9558581440cfd28066579"
 dependencies = [
  "chrono",
- "thiserror",
 ]
 
 [[package]]

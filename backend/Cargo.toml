@@ -16,8 +16,8 @@ anyhow = "1"
 ctrlc = { version = "3", features = ["termination"] }
 chrono = "0.4"
 libc = "0.2"
-pacman-key = "0.1.2"
-pacman-log = "0.1.0"
+pacman-key = "0.2.0"
+pacman-log = "0.2.1"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 rss = "2"
 html2text = "0.17"
