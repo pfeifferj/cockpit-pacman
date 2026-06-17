@@ -1,25 +1,15 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use ts_rs::TS;
 
-use fs2::FileExt;
-
 fn with_state_lock<R, F>(path: &Path, f: F) -> Result<R>
 where
     F: FnOnce() -> Result<R>,
 {
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory {:?}", parent))?;
-    }
-
     let file_name = path
         .file_name()
         .ok_or_else(|| anyhow::anyhow!("Invalid state path: {:?}", path))?;
@@ -28,18 +18,7 @@ where
     lock_name.push(".lock");
     let lock_path = path.with_file_name(lock_name);
 
-    let lock_file = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .with_context(|| format!("Failed to open lock file {:?}", lock_path))?;
-    lock_file
-        .lock_exclusive()
-        .with_context(|| format!("Failed to acquire lock on {:?}", lock_path))?;
-
-    f()
+    crate::util::with_file_lock(&lock_path, f)
 }
 
 use crate::models::{NewsItem, NewsResponse};

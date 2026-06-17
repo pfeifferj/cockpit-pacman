@@ -742,6 +742,39 @@ fn test_config_list_ignored_with_packages() {
     assert_eq!(response.packages.len(), 3);
 }
 
+#[test]
+fn test_config_preserves_unknown_fields_on_rewrite() {
+    use crate::config::AppConfig;
+
+    // A config written by a newer binary: fields this version doesn't model,
+    // at both the top level and nested inside `schedule`.
+    let original = r#"{
+        "ignored_packages": ["linux"],
+        "schedule": {
+            "enabled": true,
+            "mode": "check",
+            "schedule": "daily",
+            "max_packages": 5,
+            "future_schedule_field": 42
+        },
+        "future_top_field": {"nested": true}
+    }"#;
+
+    let mut config: AppConfig = serde_json::from_str(original).unwrap();
+    // Mutate a known field the way update() would.
+    config.add_ignored("glibc");
+
+    let rewritten = serde_json::to_value(&config).unwrap();
+    assert_eq!(rewritten["future_top_field"]["nested"], true);
+    assert_eq!(rewritten["schedule"]["future_schedule_field"], 42);
+    // Known fields still serialize normally, not swallowed into the catch-all.
+    assert_eq!(rewritten["schedule"]["enabled"], true);
+    assert_eq!(
+        rewritten["ignored_packages"],
+        serde_json::json!(["glibc", "linux"])
+    );
+}
+
 // --- handle_commit_error tests ---
 
 #[test]

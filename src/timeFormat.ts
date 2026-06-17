@@ -9,6 +9,15 @@ const THRESHOLDS: [number, Intl.RelativeTimeFormatUnit][] = [
   [Infinity, "year"],
 ];
 
+const DIVISORS: Record<string, number> = {
+  second: 1,
+  minute: 60,
+  hour: 3600,
+  day: 86400,
+  month: 2592000,
+  year: 31536000,
+};
+
 export function parseTimestamp(input: string | number | null | undefined): Date | null {
   if (input === null || input === undefined) return null;
 
@@ -40,13 +49,7 @@ export function formatRelativeTime(date: Date): string {
 
   for (const [threshold, unit] of THRESHOLDS) {
     if (absDiff < threshold) {
-      const divisor = unit === "second" ? 1
-        : unit === "minute" ? 60
-        : unit === "hour" ? 3600
-        : unit === "day" ? 86400
-        : unit === "month" ? 2592000
-        : 31536000;
-      const value = Math.round(diffSeconds / divisor);
+      const value = Math.round(diffSeconds / DIVISORS[unit]);
       return rtf.format(value, unit);
     }
   }

@@ -43,7 +43,7 @@ interface PackageActionModalProps {
   onSuccess?: () => void;
 }
 
-const PackageActionModal: React.FC<PackageActionModalProps & { config: ActionConfig }> = ({
+export const PackageActionModal: React.FC<PackageActionModalProps & { config: ActionConfig }> = ({
   packageName,
   packageVersion,
   isOpen,
@@ -231,7 +231,7 @@ const PackageActionModal: React.FC<PackageActionModalProps & { config: ActionCon
   );
 };
 
-const installConfig: ActionConfig = {
+export const installConfig: ActionConfig = {
   verb: "Install",
   confirmPrompt: (pkg) => <>Install <strong>{pkg}</strong>?</>,
   notice: (
@@ -247,7 +247,7 @@ const installConfig: ActionConfig = {
   run: installPackage,
 };
 
-const uninstallConfig: ActionConfig = {
+export const uninstallConfig: ActionConfig = {
   verb: "Uninstall",
   confirmPrompt: (pkg) => <>Are you sure you want to uninstall <strong>{pkg}</strong>?</>,
   notice: (
@@ -263,11 +263,3 @@ const uninstallConfig: ActionConfig = {
   successText: (pkg) => `${pkg} has been uninstalled.`,
   run: removePackage,
 };
-
-export const InstallModal: React.FC<PackageActionModalProps> = (props) => (
-  <PackageActionModal {...props} config={installConfig} />
-);
-
-export const UninstallModal: React.FC<PackageActionModalProps> = (props) => (
-  <PackageActionModal {...props} config={uninstallConfig} />
-);

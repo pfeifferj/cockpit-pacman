@@ -24,7 +24,7 @@ import { PackageDetails, SyncPackageDetails, formatSize, addIgnoredPackage, remo
 import { TimeAgo } from "./TimeAgo";
 import { sanitizeUrl, sanitizeErrorMessage } from "../utils";
 import { DowngradeModal } from "./DowngradeModal";
-import { InstallModal, UninstallModal } from "./PackageActionModal";
+import { PackageActionModal, installConfig, uninstallConfig } from "./PackageActionModal";
 import { useNavigation } from "../contexts/NavigationContext";
 
 type PackageInfo = PackageDetails | SyncPackageDetails;
@@ -575,7 +575,8 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
       />
     )}
     {uninstallTarget && (
-      <UninstallModal
+      <PackageActionModal
+        config={uninstallConfig}
         packageName={uninstallTarget.name}
         packageVersion={uninstallTarget.version}
         isOpen={true}
@@ -584,7 +585,8 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
       />
     )}
     {installTarget && (
-      <InstallModal
+      <PackageActionModal
+        config={installConfig}
         packageName={installTarget.name}
         packageVersion={installTarget.version}
         isOpen={true}

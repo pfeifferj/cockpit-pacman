@@ -30,7 +30,6 @@ import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import { SearchResult, searchPackages, InstalledFilterType } from "../api";
 import { sanitizeSearchInput } from "../utils";
 import { PackageDetailsModal } from "./PackageDetailsModal";
-import { TableLoadingOverlay } from "./TableLoadingOverlay";
 import { SEARCH_DEBOUNCE_MS } from "../constants";
 
 const MIN_SEARCH_LENGTH = 1;
@@ -384,7 +383,13 @@ export const SearchView: React.FC = () => {
                 )}
               </ToolbarContent>
             </Toolbar>
-            <TableLoadingOverlay loading={loading}>
+            <div style={{ position: "relative" }}>
+              {loading && (
+                <div style={{ position: "absolute", top: 0, right: 0, padding: "0.5rem", zIndex: 1 }}>
+                  <Spinner size="md" />
+                </div>
+              )}
+              <div style={{ opacity: loading ? 0.6 : 1, transition: "opacity 0.2s" }}>
               <Table aria-label="Search results" variant="compact">
                 <Thead>
                   <Tr>
@@ -425,7 +430,8 @@ export const SearchView: React.FC = () => {
                   ))}
                 </Tbody>
               </Table>
-            </TableLoadingOverlay>
+              </div>
+            </div>
             <Toolbar>
               <ToolbarContent>
                 {repoFilter === "all" && (

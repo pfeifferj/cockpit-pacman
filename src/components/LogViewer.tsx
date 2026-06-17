@@ -1,6 +1,5 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { CodeBlock, CodeBlockCode, ExpandableSection } from "@patternfly/react-core";
-import { useAutoScrollLog } from "../hooks/useAutoScrollLog";
 import { LOG_CONTAINER_HEIGHT } from "../constants";
 
 interface LogViewerProps {
@@ -11,7 +10,12 @@ interface LogViewerProps {
 
 /** Scrollable log output that follows the latest line. */
 export const LogViewer: React.FC<LogViewerProps> = ({ log, placeholder, className }) => {
-  const ref = useAutoScrollLog(log);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.scrollTop = ref.current.scrollHeight;
+    }
+  }, [log]);
   return (
     <div ref={ref} className={className} style={{ maxHeight: LOG_CONTAINER_HEIGHT, overflow: "auto" }}>
       <CodeBlock>
