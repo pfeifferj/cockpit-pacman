@@ -391,6 +391,7 @@ pub struct LogResponse {
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct LogGroup {
     pub id: String,
+    pub command: Option<String>,
     pub start_time: String,
     pub end_time: String,
     pub entries: Vec<LogEntry>,

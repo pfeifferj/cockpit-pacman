@@ -1,11 +1,10 @@
 use anyhow::Result;
-use chrono::NaiveDateTime;
-use pacman_log::{Action, LogReader};
+use pacman_log::{Action, LogReader, Transaction};
 
 use crate::models::{GroupedLogResponse, LogEntry, LogGroup, LogResponse};
 use crate::util::emit_json;
 
-const GROUP_THRESHOLD_SECS: i64 = 60;
+const TS_FMT: &str = "%Y-%m-%dT%H:%M:%S%z";
 
 struct LogStats {
     entries: Vec<LogEntry>,
@@ -106,44 +105,95 @@ pub fn get_history(
     emit_json(&response)
 }
 
-fn parse_timestamp(ts: &str) -> Option<NaiveDateTime> {
-    NaiveDateTime::parse_from_str(ts, "%Y-%m-%dT%H:%M:%S%z").ok()
-}
-
-fn count_actions(entries: &[LogEntry]) -> (usize, usize, usize, usize, usize) {
-    entries.iter().fold(
-        (0, 0, 0, 0, 0),
-        |(up, ins, rem, down, re), entry| match entry.action.as_str() {
-            "upgraded" => (up + 1, ins, rem, down, re),
-            "installed" => (up, ins + 1, rem, down, re),
-            "removed" => (up, ins, rem + 1, down, re),
-            "downgraded" => (up, ins, rem, down + 1, re),
-            "reinstalled" => (up, ins, rem, down, re + 1),
-            _ => (up, ins, rem, down, re),
-        },
-    )
-}
-
-fn finalize_group(entries: Vec<LogEntry>, group_index: usize) -> LogGroup {
-    let (upgraded, installed, removed, downgraded, reinstalled) = count_actions(&entries);
-    let start_time = entries
-        .last()
-        .map_or(String::new(), |e| e.timestamp.clone());
-    let end_time = entries
-        .first()
-        .map_or(String::new(), |e| e.timestamp.clone());
-
-    LogGroup {
-        id: format!("group-{}", group_index),
-        start_time,
-        end_time,
-        entries,
-        upgraded_count: upgraded,
-        installed_count: installed,
-        removed_count: removed,
-        downgraded_count: downgraded,
-        reinstalled_count: reinstalled,
+fn map_entry(op: pacman_log::LogEntry) -> LogEntry {
+    LogEntry {
+        timestamp: op.timestamp.format(TS_FMT).to_string(),
+        action: op.action.to_string(),
+        package: op.package,
+        old_version: op.old_version,
+        new_version: op.new_version,
     }
+}
+
+struct GroupTotals {
+    upgraded: usize,
+    installed: usize,
+    removed: usize,
+    other: usize,
+}
+
+/// Build log groups from real pacman transactions. Totals count every
+/// search-matched operation regardless of the action filter; group entries are
+/// additionally narrowed to the filtered action. Empty groups are dropped.
+fn build_groups(
+    txs: impl IntoIterator<Item = Transaction>,
+    filter_action: Option<Action>,
+    search_lower: Option<&str>,
+) -> (Vec<LogGroup>, GroupTotals) {
+    let mut totals = GroupTotals {
+        upgraded: 0,
+        installed: 0,
+        removed: 0,
+        other: 0,
+    };
+    let mut groups: Vec<LogGroup> = Vec::new();
+
+    for tx in txs {
+        let mut entries: Vec<LogEntry> = Vec::new();
+        let (mut up, mut ins, mut rem, mut down, mut re) = (0, 0, 0, 0, 0);
+
+        for op in tx.operations {
+            if let Some(needle) = search_lower
+                && !op.package.to_lowercase().contains(needle)
+            {
+                continue;
+            }
+
+            match op.action {
+                Action::Upgraded => totals.upgraded += 1,
+                Action::Installed => totals.installed += 1,
+                Action::Removed => totals.removed += 1,
+                Action::Downgraded | Action::Reinstalled => totals.other += 1,
+            }
+
+            if filter_action.is_some_and(|a| a != op.action) {
+                continue;
+            }
+
+            match op.action {
+                Action::Upgraded => up += 1,
+                Action::Installed => ins += 1,
+                Action::Removed => rem += 1,
+                Action::Downgraded => down += 1,
+                Action::Reinstalled => re += 1,
+            }
+            entries.push(map_entry(op));
+        }
+
+        if entries.is_empty() {
+            continue;
+        }
+        entries.reverse();
+
+        groups.push(LogGroup {
+            id: String::new(),
+            command: tx.command,
+            start_time: tx.started.format(TS_FMT).to_string(),
+            end_time: tx
+                .completed
+                .unwrap_or(tx.started)
+                .format(TS_FMT)
+                .to_string(),
+            entries,
+            upgraded_count: up,
+            installed_count: ins,
+            removed_count: rem,
+            downgraded_count: down,
+            reinstalled_count: re,
+        });
+    }
+
+    (groups, totals)
 }
 
 pub fn get_grouped_history(
@@ -152,35 +202,22 @@ pub fn get_grouped_history(
     filter: Option<&str>,
     search: Option<&str>,
 ) -> Result<()> {
-    let stats = collect_log_entries(filter, search);
+    let filter_action = parse_filter(filter);
+    let search_lower = search.map(|s| s.to_lowercase());
 
-    let mut groups: Vec<LogGroup> = Vec::new();
-    let mut current_group_entries: Vec<LogEntry> = Vec::new();
-    let mut last_timestamp: Option<NaiveDateTime> = None;
-
-    for entry in stats.entries {
-        let current_ts = parse_timestamp(&entry.timestamp);
-
-        let should_start_new_group = match (last_timestamp, current_ts) {
-            (Some(last), Some(current)) => {
-                let diff = (last - current).num_seconds().abs();
-                diff > GROUP_THRESHOLD_SECS
-            }
-            (None, _) => false,
-            (Some(_), None) => true,
-        };
-
-        if should_start_new_group && !current_group_entries.is_empty() {
-            groups.push(finalize_group(current_group_entries, groups.len()));
-            current_group_entries = Vec::new();
+    let txs = LogReader::system().transactions().filter_map(|r| match r {
+        Ok(tx) => Some(tx),
+        Err(e) => {
+            eprintln!("Warning: Failed to parse transaction: {}", e);
+            None
         }
+    });
 
-        last_timestamp = current_ts;
-        current_group_entries.push(entry);
-    }
+    let (mut groups, totals) = build_groups(txs, filter_action, search_lower.as_deref());
 
-    if !current_group_entries.is_empty() {
-        groups.push(finalize_group(current_group_entries, groups.len()));
+    groups.reverse();
+    for (i, group) in groups.iter_mut().enumerate() {
+        group.id = format!("group-{}", i);
     }
 
     let total_groups = groups.len();
@@ -189,10 +226,10 @@ pub fn get_grouped_history(
     let response = GroupedLogResponse {
         groups: paginated_groups,
         total_groups,
-        total_upgraded: stats.total_upgraded,
-        total_installed: stats.total_installed,
-        total_removed: stats.total_removed,
-        total_other: stats.total_other,
+        total_upgraded: totals.upgraded,
+        total_installed: totals.installed,
+        total_removed: totals.removed,
+        total_other: totals.other,
     };
 
     emit_json(&response)
@@ -201,111 +238,79 @@ pub fn get_grouped_history(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::DateTime;
 
-    #[test]
-    fn test_parse_timestamp_with_positive_offset() {
-        let ts = "2026-01-21T23:14:45+0100";
-        let result = parse_timestamp(ts);
-        assert!(result.is_some());
-        let dt = result.unwrap();
-        assert_eq!(dt.format("%Y-%m-%d").to_string(), "2026-01-21");
+    fn ts(s: &str) -> DateTime<chrono::FixedOffset> {
+        DateTime::parse_from_str(s, TS_FMT).unwrap()
+    }
+
+    fn op(action: Action, pkg: &str) -> pacman_log::LogEntry {
+        pacman_log::LogEntry {
+            timestamp: ts("2026-01-21T10:00:00+0000"),
+            action,
+            package: pkg.to_string(),
+            old_version: None,
+            new_version: None,
+        }
     }
 
     #[test]
-    fn test_parse_timestamp_with_utc() {
-        let ts = "2026-01-21T23:14:45+0000";
-        let result = parse_timestamp(ts);
-        assert!(result.is_some());
+    fn build_groups_tallies_and_labels() {
+        let tx = Transaction {
+            command: Some("pacman -Syu".to_string()),
+            started: ts("2026-01-21T10:00:00+0000"),
+            completed: Some(ts("2026-01-21T10:00:05+0000")),
+            operations: vec![
+                op(Action::Upgraded, "pkg1"),
+                op(Action::Installed, "pkg2"),
+                op(Action::Removed, "pkg3"),
+            ],
+        };
+
+        let (groups, totals) = build_groups(vec![tx], None, None);
+        assert_eq!(groups.len(), 1);
+        let g = &groups[0];
+        assert_eq!(g.command.as_deref(), Some("pacman -Syu"));
+        assert_eq!(g.start_time, "2026-01-21T10:00:00+0000");
+        assert_eq!(g.end_time, "2026-01-21T10:00:05+0000");
+        assert_eq!(
+            (g.upgraded_count, g.installed_count, g.removed_count),
+            (1, 1, 1)
+        );
+        assert_eq!(
+            (totals.upgraded, totals.installed, totals.removed),
+            (1, 1, 1)
+        );
     }
 
     #[test]
-    fn test_parse_timestamp_with_negative_offset() {
-        let ts = "2026-01-21T23:14:45-0500";
-        let result = parse_timestamp(ts);
-        assert!(result.is_some());
+    fn build_groups_action_filter_keeps_totals() {
+        let tx = Transaction {
+            command: None,
+            started: ts("2026-01-21T10:00:00+0000"),
+            completed: Some(ts("2026-01-21T10:00:05+0000")),
+            operations: vec![op(Action::Upgraded, "a"), op(Action::Installed, "b")],
+        };
+
+        let (groups, totals) = build_groups(vec![tx], Some(Action::Installed), None);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].entries.len(), 1);
+        assert_eq!(groups[0].installed_count, 1);
+        assert_eq!(groups[0].upgraded_count, 0);
+        assert_eq!(totals.upgraded, 1);
+        assert_eq!(totals.installed, 1);
     }
 
     #[test]
-    fn test_count_actions() {
-        let entries = vec![
-            LogEntry {
-                timestamp: "2026-01-21T10:00:00+0000".to_string(),
-                action: "upgraded".to_string(),
-                package: "pkg1".to_string(),
-                old_version: Some("1.0".to_string()),
-                new_version: Some("2.0".to_string()),
-            },
-            LogEntry {
-                timestamp: "2026-01-21T10:00:01+0000".to_string(),
-                action: "upgraded".to_string(),
-                package: "pkg2".to_string(),
-                old_version: Some("1.0".to_string()),
-                new_version: Some("2.0".to_string()),
-            },
-            LogEntry {
-                timestamp: "2026-01-21T10:00:02+0000".to_string(),
-                action: "installed".to_string(),
-                package: "pkg3".to_string(),
-                old_version: None,
-                new_version: Some("1.0".to_string()),
-            },
-            LogEntry {
-                timestamp: "2026-01-21T10:00:03+0000".to_string(),
-                action: "removed".to_string(),
-                package: "pkg4".to_string(),
-                old_version: Some("1.0".to_string()),
-                new_version: None,
-            },
-        ];
+    fn build_groups_search_drops_empty_group() {
+        let tx = Transaction {
+            command: None,
+            started: ts("2026-01-21T10:00:00+0000"),
+            completed: None,
+            operations: vec![op(Action::Upgraded, "firefox")],
+        };
 
-        let (up, ins, rem, down, re) = count_actions(&entries);
-        assert_eq!(up, 2);
-        assert_eq!(ins, 1);
-        assert_eq!(rem, 1);
-        assert_eq!(down, 0);
-        assert_eq!(re, 0);
-    }
-
-    #[test]
-    fn test_finalize_group() {
-        let entries = vec![
-            LogEntry {
-                timestamp: "2026-01-21T10:00:05+0000".to_string(),
-                action: "upgraded".to_string(),
-                package: "pkg1".to_string(),
-                old_version: Some("1.0".to_string()),
-                new_version: Some("2.0".to_string()),
-            },
-            LogEntry {
-                timestamp: "2026-01-21T10:00:00+0000".to_string(),
-                action: "installed".to_string(),
-                package: "pkg2".to_string(),
-                old_version: None,
-                new_version: Some("1.0".to_string()),
-            },
-        ];
-
-        let group = finalize_group(entries, 0);
-        assert_eq!(group.id, "group-0");
-        assert_eq!(group.start_time, "2026-01-21T10:00:00+0000");
-        assert_eq!(group.end_time, "2026-01-21T10:00:05+0000");
-        assert_eq!(group.upgraded_count, 1);
-        assert_eq!(group.installed_count, 1);
-        assert_eq!(group.entries.len(), 2);
-    }
-
-    #[test]
-    fn test_grouping_threshold() {
-        let ts1 = parse_timestamp("2026-01-21T10:00:00+0000").unwrap();
-        let ts2 = parse_timestamp("2026-01-21T10:00:59+0000").unwrap();
-        let ts3 = parse_timestamp("2026-01-21T10:01:01+0000").unwrap();
-
-        // 59 seconds apart - should be same group
-        let diff1 = (ts2 - ts1).num_seconds().abs();
-        assert!(diff1 <= GROUP_THRESHOLD_SECS);
-
-        // 61 seconds apart - should be different groups
-        let diff2 = (ts3 - ts1).num_seconds().abs();
-        assert!(diff2 > GROUP_THRESHOLD_SECS);
+        let (groups, _) = build_groups(vec![tx], None, Some("chromium"));
+        assert!(groups.is_empty());
     }
 }

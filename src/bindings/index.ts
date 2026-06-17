@@ -36,7 +36,7 @@ export type LockStatus = { locked: boolean, stale: boolean, lock_path: string, b
 
 export type LogEntry = { timestamp: string, action: string, package: string, old_version: string | null, new_version: string | null, };
 
-export type LogGroup = { id: string, start_time: string, end_time: string, entries: Array<LogEntry>, upgraded_count: number, installed_count: number, removed_count: number, downgraded_count: number, reinstalled_count: number, };
+export type LogGroup = { id: string, command: string | null, start_time: string, end_time: string, entries: Array<LogEntry>, upgraded_count: number, installed_count: number, removed_count: number, downgraded_count: number, reinstalled_count: number, };
 
 export type LogResponse = { entries: Array<LogEntry>, total: number, total_upgraded: number, total_installed: number, total_removed: number, total_other: number, };
 
