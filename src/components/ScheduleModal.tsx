@@ -43,7 +43,6 @@ import {
   getScheduleConfig,
   setScheduleConfig,
   getScheduledRuns,
-  formatNumber,
 } from "../api";
 import { TimeAgo } from "./TimeAgo";
 import { sanitizeErrorMessage } from "../utils";
@@ -375,8 +374,8 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                         </Td>
                         <Td dataLabel="Packages">
                           {run.packages_upgraded > 0
-                            ? `${formatNumber(run.packages_upgraded)} upgraded`
-                            : `${formatNumber(run.packages_checked)} checked`}
+                            ? `${(run.packages_upgraded).toLocaleString()} upgraded`
+                            : `${(run.packages_checked).toLocaleString()} checked`}
                         </Td>
                       </Tr>
                     ))}

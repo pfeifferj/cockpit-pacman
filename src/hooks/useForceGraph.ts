@@ -1,10 +1,17 @@
 import React, { useEffect, useRef, useCallback } from "react";
-import * as d3 from "d3";
+import {
+  forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide,
+  type Simulation, type SimulationNodeDatum, type SimulationLinkDatum,
+} from "d3-force";
+import { select } from "d3-selection";
+import "d3-transition";
+import { zoom, zoomIdentity, type ZoomBehavior } from "d3-zoom";
+import { drag } from "d3-drag";
 import { DependencyNode, DependencyEdge } from "../api";
 
 /* global SVGSVGElement, SVGGElement */
 
-export interface ForceGraphNode extends d3.SimulationNodeDatum {
+export interface ForceGraphNode extends SimulationNodeDatum {
   id: string;
   name: string;
   version: string;
@@ -15,7 +22,7 @@ export interface ForceGraphNode extends d3.SimulationNodeDatum {
   isRoot?: boolean;
 }
 
-export interface ForceGraphEdge extends d3.SimulationLinkDatum<ForceGraphNode> {
+export interface ForceGraphEdge extends SimulationLinkDatum<ForceGraphNode> {
   source: string | ForceGraphNode;
   target: string | ForceGraphNode;
   edge_type: "depends" | "optdepends" | "required_by" | "optional_for";
@@ -47,22 +54,22 @@ export function useForceGraph(
   options: ForceGraphOptions
 ): ForceGraphResult {
   const svgRef = useRef<SVGSVGElement>(null!);
-  const simulationRef = useRef<d3.Simulation<ForceGraphNode, ForceGraphEdge> | null>(null);
-  const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const simulationRef = useRef<Simulation<ForceGraphNode, ForceGraphEdge> | null>(null);
+  const zoomRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
 
   const resetView = useCallback(() => {
     if (!svgRef.current || !zoomRef.current) return;
-    const svg = d3.select(svgRef.current);
+    const svg = select(svgRef.current);
     svg.transition().duration(750).call(
       zoomRef.current.transform,
-      d3.zoomIdentity.translate(options.width / 2, options.height / 2)
+      zoomIdentity.translate(options.width / 2, options.height / 2)
     );
   }, [options.width, options.height]);
 
   useEffect(() => {
     if (!svgRef.current || nodes.length === 0) return;
 
-    const svg = d3.select(svgRef.current);
+    const svg = select(svgRef.current);
     svg.selectAll("*").remove();
 
     // The backend only emits the documented reason/edge_type literals; the
@@ -81,24 +88,24 @@ export function useForceGraph(
 
     const container = svg.append("g");
 
-    const zoom = d3.zoom<SVGSVGElement, unknown>()
+    const zoomBehavior = zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.1, 4])
       .on("zoom", (event) => {
         container.attr("transform", event.transform);
       });
 
-    zoomRef.current = zoom;
-    svg.call(zoom);
+    zoomRef.current = zoomBehavior;
+    svg.call(zoomBehavior);
     svg.on("dblclick.zoom", null);
-    svg.call(zoom.transform, d3.zoomIdentity.translate(options.width / 2, options.height / 2));
+    svg.call(zoomBehavior.transform, zoomIdentity.translate(options.width / 2, options.height / 2));
 
-    const simulation = d3.forceSimulation<ForceGraphNode>(graphNodes)
-      .force("link", d3.forceLink<ForceGraphNode, ForceGraphEdge>(graphEdges)
+    const simulation = forceSimulation<ForceGraphNode>(graphNodes)
+      .force("link", forceLink<ForceGraphNode, ForceGraphEdge>(graphEdges)
         .id((d) => d.id)
         .distance(80))
-      .force("charge", d3.forceManyBody().strength(-300))
-      .force("center", d3.forceCenter(0, 0))
-      .force("collision", d3.forceCollide().radius(30));
+      .force("charge", forceManyBody().strength(-300))
+      .force("center", forceCenter(0, 0))
+      .force("collision", forceCollide().radius(30));
 
     simulationRef.current = simulation;
 
@@ -128,7 +135,7 @@ export function useForceGraph(
       )
       .attr("marker-end", "url(#arrowhead)");
 
-    const drag = d3.drag<SVGGElement, ForceGraphNode>()
+    const dragBehavior = drag<SVGGElement, ForceGraphNode>()
       .on("start", (event, d) => {
         if (!event.active) simulation.alphaTarget(0.3).restart();
         d.fx = d.x;
@@ -149,7 +156,7 @@ export function useForceGraph(
       .selectAll<SVGGElement, ForceGraphNode>("g")
       .data(graphNodes)
       .join("g")
-      .call(drag);
+      .call(dragBehavior);
 
     node.append("circle")
       .attr("r", (d) => d.isRoot ? 12 : 8)

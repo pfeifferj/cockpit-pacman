@@ -615,10 +615,6 @@ export function formatSize(bytes: number): string {
   return `${sign}${(abs / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
 }
 
-export function formatNumber(n: number): string {
-  return n.toLocaleString();
-}
-
 export async function getKeyringStatus(): Promise<KeyringStatusResponse> {
   return runBackend<KeyringStatusResponse>("keyring-status");
 }
@@ -919,21 +915,10 @@ function makeDismissalApi(prefix: string) {
   };
 }
 
-const servicesDismissal = makeDismissalApi("services");
-export const getServicesDismissal = servicesDismissal.get;
-export const markServicesDismissed = servicesDismissal.mark;
-
-const rebootDismissal = makeDismissalApi("reboot");
-export const getRebootDismissal = rebootDismissal.get;
-export const markRebootDismissed = rebootDismissal.mark;
-
-const pacnewDismissal = makeDismissalApi("pacnew");
-export const getPacnewDismissal = pacnewDismissal.get;
-export const markPacnewDismissed = pacnewDismissal.mark;
-
-const scheduledDismissal = makeDismissalApi("scheduled");
-export const getScheduledDismissal = scheduledDismissal.get;
-export const markScheduledDismissed = scheduledDismissal.mark;
+export const servicesDismissal = makeDismissalApi("services");
+export const rebootDismissal = makeDismissalApi("reboot");
+export const pacnewDismissal = makeDismissalApi("pacnew");
+export const scheduledDismissal = makeDismissalApi("scheduled");
 
 export type ScheduledRunStatus = "ok" | "skipped" | "failed";
 

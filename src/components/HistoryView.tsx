@@ -38,7 +38,6 @@ import {
   GroupedLogResponse,
   HistoryFilterType,
   getGroupedHistory,
-  formatNumber,
 } from "../api";
 import { TimeAgo } from "./TimeAgo";
 import { sanitizeErrorMessage, sanitizeSearchInput } from "../utils";
@@ -291,21 +290,21 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
               <FlexItem>
                 <StatBox
                   label="Upgraded"
-                  value={formatNumber(groupedData?.total_upgraded || 0)}
+                  value={(groupedData?.total_upgraded || 0).toLocaleString()}
                   color="info"
                 />
               </FlexItem>
               <FlexItem>
                 <StatBox
                   label="Installed"
-                  value={formatNumber(groupedData?.total_installed || 0)}
+                  value={(groupedData?.total_installed || 0).toLocaleString()}
                   color="success"
                 />
               </FlexItem>
               <FlexItem>
                 <StatBox
                   label="Removed"
-                  value={formatNumber(groupedData?.total_removed || 0)}
+                  value={(groupedData?.total_removed || 0).toLocaleString()}
                   color="danger"
                 />
               </FlexItem>
@@ -313,7 +312,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
                 <FlexItem>
                   <StatBox
                     label="Other"
-                    value={formatNumber(groupedData?.total_other || 0)}
+                    value={(groupedData?.total_other || 0).toLocaleString()}
                     color="warning"
                   />
                 </FlexItem>

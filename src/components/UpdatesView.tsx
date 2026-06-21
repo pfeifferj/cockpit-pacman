@@ -78,7 +78,6 @@ import {
   syncDatabase,
   preflightUpgrade,
   formatSize,
-  formatNumber,
   getRebootStatus,
   rebootSystem,
   getServicesStatus,
@@ -89,16 +88,12 @@ import {
   fetchNews,
   getNewsReadState,
   markNewsRead,
-  getServicesDismissal,
-  markServicesDismissed,
-  getRebootDismissal,
-  markRebootDismissed,
+  servicesDismissal,
+  rebootDismissal,
   getPacnewStatus,
-  getPacnewDismissal,
-  markPacnewDismissed,
+  pacnewDismissal,
   getScheduledRuns,
-  getScheduledDismissal,
-  markScheduledDismissed,
+  scheduledDismissal,
   addIgnoredPackage,
   getSignoffList,
   checkLock,
@@ -193,7 +188,7 @@ const SystemOverviewCard: React.FC<{
         <FlexItem>
           <StatBox
             label="Updates"
-            value={formatNumber(updates.length)}
+            value={(updates.length).toLocaleString()}
             color={updates.length > 0 ? "danger" : "success"}
           />
         </FlexItem>
@@ -202,10 +197,10 @@ const SystemOverviewCard: React.FC<{
             label={securityFilterActive ? "Show all" : "Security"}
             value={
               securityFilterActive
-                ? formatNumber(updates.length)
+                ? (updates.length).toLocaleString()
                 : securityLoading || securityUnavailable
                   ? "-"
-                  : formatNumber(securityCount)
+                  : (securityCount).toLocaleString()
             }
             color={!securityFilterActive && !securityUnavailable && securityCount > 0 ? "danger" : "default"}
             isLoading={securityLoading}
@@ -219,7 +214,7 @@ const SystemOverviewCard: React.FC<{
             <div>
               <StatBox
                 label="Orphans"
-                value={orphanCount !== null ? formatNumber(orphanCount) : "-"}
+                value={orphanCount !== null ? (orphanCount).toLocaleString() : "-"}
                 color={orphanCount && orphanCount > 0 ? "warning" : "default"}
                 isLoading={summaryLoading}
                 onClick={onViewOrphans}
@@ -253,7 +248,7 @@ const SystemOverviewCard: React.FC<{
               <div>
                 <StatBox
                   label="Signoffs"
-                  value={formatNumber(pendingSignoffs)}
+                  value={(pendingSignoffs).toLocaleString()}
                   color={pendingSignoffs > 0 ? "info" : "default"}
                   onClick={onViewSignoffs}
                   ariaLabel="View package signoffs"
@@ -406,12 +401,12 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [rebootOnComplete, setRebootOnComplete] = useState(false);
   const [servicesStatus, setServicesStatus] = useState<ServicesStatus | null>(null);
   const [restartServicesOnComplete, setRestartServicesOnComplete] = useState(false);
-  const [dismissedServicesSignature, dismissServices] = useDismissalSignature(getServicesDismissal, markServicesDismissed, "services");
-  const [dismissedRebootSignature, dismissReboot] = useDismissalSignature(getRebootDismissal, markRebootDismissed, "reboot");
+  const [dismissedServicesSignature, dismissServices] = useDismissalSignature(servicesDismissal.get, servicesDismissal.mark, "services");
+  const [dismissedRebootSignature, dismissReboot] = useDismissalSignature(rebootDismissal.get, rebootDismissal.mark, "reboot");
   const [pacnewStatus, setPacnewStatus] = useState<PacnewStatus | null>(null);
-  const [dismissedPacnewSignature, dismissPacnew] = useDismissalSignature(getPacnewDismissal, markPacnewDismissed, "pacnew");
+  const [dismissedPacnewSignature, dismissPacnew] = useDismissalSignature(pacnewDismissal.get, pacnewDismissal.mark, "pacnew");
   const [latestScheduledRun, setLatestScheduledRun] = useState<ScheduledRunEntry | null>(null);
-  const [dismissedScheduledSignature, dismissScheduled] = useDismissalSignature(getScheduledDismissal, markScheduledDismissed, "scheduled");
+  const [dismissedScheduledSignature, dismissScheduled] = useDismissalSignature(scheduledDismissal.get, scheduledDismissal.mark, "scheduled");
   const [orphanCount, setOrphanCount] = useState<number | null>(null);
   const [cacheSize, setCacheSize] = useState<number | null>(null);
   const [keyringStatus, setKeyringStatus] = useState<KeyringStatusResponse | null>(null);
@@ -1617,8 +1612,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       <Card>
         <CardBody>
           <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">
-            {formatNumber(selectedPackages.size)} of {formatNumber(updates.length)} update{updates.length !== 1 ? "s" : ""} selected
-            {filteredUpdates.length !== updates.length && ` (${formatNumber(filteredUpdates.length)} shown)`}
+            {(selectedPackages.size).toLocaleString()} of {(updates.length).toLocaleString()} update{updates.length !== 1 ? "s" : ""} selected
+            {filteredUpdates.length !== updates.length && ` (${(filteredUpdates.length).toLocaleString()} shown)`}
           </CardTitle>
           <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
             <FlexItem>
@@ -1723,7 +1718,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
                   isLoading={preflightLoading}
                   isDisabled={preflightLoading || selectedPackages.size === 0}
                 >
-                  {preflightLoading ? "Checking..." : `Apply ${formatNumber(selectedPackages.size)} Update${selectedPackages.size !== 1 ? "s" : ""}`}
+                  {preflightLoading ? "Checking..." : `Apply ${(selectedPackages.size).toLocaleString()} Update${selectedPackages.size !== 1 ? "s" : ""}`}
                 </Button>
               </ToolbarItem>
             </ToolbarContent>

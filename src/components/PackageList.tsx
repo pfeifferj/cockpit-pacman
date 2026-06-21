@@ -36,7 +36,6 @@ import {
   FilterType,
   listInstalled,
   formatSize,
-  formatNumber,
 } from "../api";
 import { sanitizeSearchInput } from "../utils";
 import { PackageDetailsModal } from "./PackageDetailsModal";
@@ -275,22 +274,22 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, initialF
             <ToolbarItem>
               <ToggleGroup aria-label="Package filter">
                 <ToggleGroupItem
-                  text={<>All <Badge isRead>{formatNumber(totalExplicit + totalDependency)}</Badge></>}
+                  text={<>All <Badge isRead>{(totalExplicit + totalDependency).toLocaleString()}</Badge></>}
                   isSelected={filter === "all"}
                   onChange={() => handleFilterChange("all")}
                 />
                 <ToggleGroupItem
-                  text={<>Explicit <Tooltip content="Packages whose install reason is explicit. Includes anything installed directly with `pacman -S`, `pacman -U` (local .pkg.tar.zst files from makepkg or AUR helpers), and packages later marked explicit via `pacman -D --asexplicit`."><OutlinedQuestionCircleIcon style={{ cursor: "pointer" }} /></Tooltip> <Badge isRead>{formatNumber(totalExplicit)}</Badge></>}
+                  text={<>Explicit <Tooltip content="Packages whose install reason is explicit. Includes anything installed directly with `pacman -S`, `pacman -U` (local .pkg.tar.zst files from makepkg or AUR helpers), and packages later marked explicit via `pacman -D --asexplicit`."><OutlinedQuestionCircleIcon style={{ cursor: "pointer" }} /></Tooltip> <Badge isRead>{(totalExplicit).toLocaleString()}</Badge></>}
                   isSelected={filter === "explicit"}
                   onChange={() => handleFilterChange("explicit")}
                 />
                 <ToggleGroupItem
-                  text={<>Dependencies <Tooltip content="Packages installed automatically to satisfy another package's requirements."><OutlinedQuestionCircleIcon style={{ cursor: "pointer" }} /></Tooltip> <Badge isRead>{formatNumber(totalDependency)}</Badge></>}
+                  text={<>Dependencies <Tooltip content="Packages installed automatically to satisfy another package's requirements."><OutlinedQuestionCircleIcon style={{ cursor: "pointer" }} /></Tooltip> <Badge isRead>{(totalDependency).toLocaleString()}</Badge></>}
                   isSelected={filter === "dependency"}
                   onChange={() => handleFilterChange("dependency")}
                 />
                 <ToggleGroupItem
-                  text={<>Orphans <Tooltip content="Packages installed as dependencies that are no longer required by any other package."><OutlinedQuestionCircleIcon style={{ cursor: "pointer" }} /></Tooltip> <Badge isRead>{formatNumber(orphanCount)}</Badge></>}
+                  text={<>Orphans <Tooltip content="Packages installed as dependencies that are no longer required by any other package."><OutlinedQuestionCircleIcon style={{ cursor: "pointer" }} /></Tooltip> <Badge isRead>{(orphanCount).toLocaleString()}</Badge></>}
                   isSelected={filter === "orphan"}
                   onChange={() => handleFilterChange("orphan")}
                 />

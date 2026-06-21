@@ -58,7 +58,6 @@ import {
   listRepoBackups,
   restoreRepoBackup,
   deleteRepoBackup,
-  formatNumber,
   formatSize,
 } from "../api";
 import { sanitizeErrorMessage } from "../utils";
@@ -433,10 +432,10 @@ export const RepositoriesView: React.FC = () => {
             <CardTitle className="pf-v6-u-m-0">Pacman Repositories</CardTitle>
             <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md pf-v6-u-mt-sm">
               <FlexItem>
-                <StatBox label="Total" value={formatNumber(visibleRepos.length)} />
+                <StatBox label="Total" value={(visibleRepos.length).toLocaleString()} />
               </FlexItem>
               <FlexItem>
-                <StatBox label="Enabled" value={formatNumber(enabledCount)} color="success" />
+                <StatBox label="Enabled" value={(enabledCount).toLocaleString()} color="success" />
               </FlexItem>
             </Flex>
           </FlexItem>

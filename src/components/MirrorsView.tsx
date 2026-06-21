@@ -77,7 +77,6 @@ import {
   listMirrorBackups,
   restoreMirrorBackup,
   deleteMirrorBackup,
-  formatNumber,
   formatSize,
   BackendError,
 } from "../api";
@@ -728,10 +727,10 @@ export const MirrorsView: React.FC = () => {
             <CardTitle className="pf-v6-u-m-0">Pacman Mirrors</CardTitle>
             <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md pf-v6-u-mt-sm">
               <FlexItem>
-                <StatBox label="Total" value={formatNumber(mirrors.length)} />
+                <StatBox label="Total" value={(mirrors.length).toLocaleString()} />
               </FlexItem>
               <FlexItem>
-                <StatBox label="Enabled" value={formatNumber(mirrors.filter(m => m.enabled).length)} color="success" />
+                <StatBox label="Enabled" value={(mirrors.filter(m => m.enabled).length).toLocaleString()} color="success" />
               </FlexItem>
               {mirrorData?.last_modified && (
                 <FlexItem>

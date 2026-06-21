@@ -36,13 +36,10 @@ vi.mock("../api", async () => {
     checkSecurity: vi.fn(),
     getNewsReadState: vi.fn(),
     markNewsRead: vi.fn(),
-    getServicesDismissal: vi.fn(),
-    markServicesDismissed: vi.fn(),
-    getRebootDismissal: vi.fn(),
-    markRebootDismissed: vi.fn(),
+    servicesDismissal: { get: vi.fn(), mark: vi.fn() },
+    rebootDismissal: { get: vi.fn(), mark: vi.fn() },
+    scheduledDismissal: { get: vi.fn(), mark: vi.fn() },
     getScheduledRuns: vi.fn(),
-    getScheduledDismissal: vi.fn(),
-    markScheduledDismissed: vi.fn(),
     checkLock: vi.fn(),
     removeStaleLock: vi.fn(),
     addIgnoredPackage: vi.fn(),
@@ -68,13 +65,13 @@ const mockRemoveStaleLock = vi.mocked(api.removeStaleLock);
 const mockAddIgnoredPackage = vi.mocked(api.addIgnoredPackage);
 const mockGetNewsReadState = vi.mocked(api.getNewsReadState);
 const mockMarkNewsRead = vi.mocked(api.markNewsRead);
-const mockGetServicesDismissal = vi.mocked(api.getServicesDismissal);
-const mockMarkServicesDismissed = vi.mocked(api.markServicesDismissed);
-const mockGetRebootDismissal = vi.mocked(api.getRebootDismissal);
-const mockMarkRebootDismissed = vi.mocked(api.markRebootDismissed);
+const mockGetServicesDismissal = vi.mocked(api.servicesDismissal.get);
+const mockMarkServicesDismissed = vi.mocked(api.servicesDismissal.mark);
+const mockGetRebootDismissal = vi.mocked(api.rebootDismissal.get);
+const mockMarkRebootDismissed = vi.mocked(api.rebootDismissal.mark);
 const mockGetScheduledRuns = vi.mocked(api.getScheduledRuns);
-const mockGetScheduledDismissal = vi.mocked(api.getScheduledDismissal);
-const mockMarkScheduledDismissed = vi.mocked(api.markScheduledDismissed);
+const mockGetScheduledDismissal = vi.mocked(api.scheduledDismissal.get);
+const mockMarkScheduledDismissed = vi.mocked(api.scheduledDismissal.mark);
 
 describe("UpdatesView", () => {
   beforeEach(() => {

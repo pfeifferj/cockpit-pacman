@@ -45,7 +45,6 @@ import {
   getCacheInfo,
   cleanCache,
   formatSize,
-  formatNumber,
 } from "../api";
 import { appendCapped, sanitizeErrorMessage } from "../utils";
 
@@ -386,19 +385,19 @@ export const CacheView: React.FC = () => {
               <FlexItem>
                 <StatBox
                   label="Cached Files"
-                  value={formatNumber(cacheData.package_count)}
+                  value={(cacheData.package_count).toLocaleString()}
                 />
               </FlexItem>
               <FlexItem>
                 <StatBox
                   label="Unique Packages"
-                  value={formatNumber(uniquePackageCount)}
+                  value={(uniquePackageCount).toLocaleString()}
                 />
               </FlexItem>
               <FlexItem>
                 <StatBox
                   label="Multi-Version"
-                  value={formatNumber(multiVersionPackages)}
+                  value={(multiVersionPackages).toLocaleString()}
                   color={multiVersionPackages > 0 ? "info" : "default"}
                 />
               </FlexItem>
