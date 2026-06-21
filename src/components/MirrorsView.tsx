@@ -183,7 +183,7 @@ function normalizeMirrorUrl(url: string): string {
     .replace(/\$repo\/?$/, "");
 
   // Clean up any resulting double slashes (except in protocol)
-  normalized = normalized.replace(/(https?:\/\/)|\/+/g, (match, protocol) =>
+  normalized = normalized.replace(/(https?:\/\/)|\/+/g, (_match, protocol) =>
     protocol ? protocol : "/"
   );
 

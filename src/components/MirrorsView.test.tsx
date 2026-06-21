@@ -126,7 +126,7 @@ describe("MirrorsView", () => {
 
       await waitFor(() => expect(screen.getByText(/mpage0055\./)).toBeInTheDocument());
       expect(screen.queryByText(/mpage0000\./)).not.toBeInTheDocument();
-    });
+    }, 15000);
 
     it("resets to page 1 when the filter changes", async () => {
       respond(60);

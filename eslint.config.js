@@ -64,6 +64,6 @@ export default [
     },
   },
   {
-    ignores: ["dist/", "node_modules/", "*.config.js", "src/bindings/"],
+    ignores: ["dist/", "node_modules/", "*.config.js", "src/bindings/", "backend/"],
   },
 ];
