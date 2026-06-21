@@ -259,10 +259,8 @@ impl AppConfig {
             // Disable timer (ignore errors - timer might not exist)
             let _ = run_systemctl(&["disable", "--now", "cockpit-pacman-scheduled.timer"]);
 
-            // Remove drop-in file
             let _ = fs::remove_file(TIMER_DROP_IN_PATH);
 
-            // Reload systemd
             match run_systemctl(&["daemon-reload"]) {
                 Ok(o) if o.status.success() => {}
                 Ok(o) => {

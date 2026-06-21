@@ -230,6 +230,7 @@ export const mockSyncPackageDetails: SyncPackageDetails = {
 export const mockLogGroups: LogGroup[] = [
   {
     id: "group-0",
+    command: "pacman -Syu",
     start_time: "2026-01-22T10:30:00+0000",
     end_time: "2026-01-22T10:30:45+0000",
     entries: [
@@ -263,6 +264,7 @@ export const mockLogGroups: LogGroup[] = [
   },
   {
     id: "group-1",
+    command: "pacman -S firefox",
     start_time: "2026-01-21T14:15:00+0000",
     end_time: "2026-01-21T14:15:30+0000",
     entries: [
@@ -289,6 +291,7 @@ export const mockLogGroups: LogGroup[] = [
   },
   {
     id: "group-2",
+    command: null,
     start_time: "2026-01-20T09:00:00+0000",
     end_time: "2026-01-20T09:00:00+0000",
     entries: [

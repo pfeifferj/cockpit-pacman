@@ -1,8 +1,4 @@
-//! Failing tests for the repos parser/serializer.
-//!
-//! These tests import from cockpit_pacman_backend::handlers::repos, which does not
-//! exist yet. They will produce an 'unresolved import' compile error until the
-//! implementation is added.
+//! Tests for the pacman.conf parser/serializer in handlers::repos.
 //!
 //! Run with: cargo test --test repos_tests
 

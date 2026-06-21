@@ -150,7 +150,6 @@ export const SearchView: React.FC = () => {
     return results.filter((r: SearchResult) => r.repository === repoFilter);
   }, [results, repoFilter]);
 
-  // Map column index to backend sort field
   const getSortField = (index: number | null): string => {
     if (index === null) return "";
     switch (index) {

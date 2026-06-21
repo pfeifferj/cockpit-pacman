@@ -110,7 +110,6 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ initialPackage }
   const isMountedRef = useRef(true);
   const initialLoadRef = useRef<string | null>(null);
 
-  // Typeahead state
   const [typeaheadOpen, setTypeaheadOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<SearchResult[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);

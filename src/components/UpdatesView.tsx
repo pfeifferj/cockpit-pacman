@@ -518,12 +518,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     [sortedUpdates, offset, perPage]
   );
 
-  // Calculate ignored packages (unselected ones)
   const ignoredPackages = useMemo(() => {
     return updates.filter((u) => !selectedPackages.has(u.name)).map((u) => u.name);
   }, [updates, selectedPackages]);
 
-  // Calculate selected updates for summary
   const selectedUpdates = useMemo(() => {
     return updates.filter((u) => selectedPackages.has(u.name));
   }, [updates, selectedPackages]);

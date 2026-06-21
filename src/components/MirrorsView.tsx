@@ -527,7 +527,6 @@ export const MirrorsView: React.FC = () => {
       .sort((a, b) => a[1].localeCompare(b[1]));
   }, [statusData]);
 
-  // O(1) lookup map for mirror indices
   const mirrorIndexMap = useMemo(() => {
     const map = new Map<string, number>();
     mirrors.forEach((m, i) => map.set(m.url, i));

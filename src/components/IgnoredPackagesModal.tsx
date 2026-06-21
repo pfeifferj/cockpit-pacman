@@ -67,7 +67,6 @@ export const IgnoredPackagesModal: React.FC<IgnoredPackagesModalProps> = ({
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
 
-  // Typeahead state
   const [typeaheadOpen, setTypeaheadOpen] = useState(false);
   const [typeaheadValue, setTypeaheadValue] = useState("");
   const [suggestions, setSuggestions] = useState<SearchResult[]>([]);
