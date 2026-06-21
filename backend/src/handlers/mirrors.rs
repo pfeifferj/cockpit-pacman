@@ -1,5 +1,4 @@
 use anyhow::Result;
-use serde::Deserialize;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -16,8 +15,8 @@ use crate::validation::validate_mirror_url;
 
 const MIRRORLIST_PATH: &str = "/etc/pacman.d/mirrorlist";
 const LOCK_PATH: &str = "/etc/pacman.d/.mirrorlist.lock";
-const MIRROR_STATUS_URL: &str = "https://archlinux.org/mirrors/status/json/";
 const TEST_FILE: &str = "core.db";
+const MIN_COMPLETION: f64 = 0.9;
 // core.db should be at least 100KB (100,000 bytes) to be valid
 const MIN_CONTENT_LENGTH: u64 = 100_000;
 
@@ -103,40 +102,20 @@ fn parse_server_line(line: &str) -> Option<String> {
     }
 }
 
-#[derive(Deserialize)]
-struct ApiMirrorStatus {
-    urls: Vec<ApiMirror>,
-    last_check: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct ApiMirror {
-    url: String,
-    country: Option<String>,
-    country_code: Option<String>,
-    last_sync: Option<String>,
-    delay: Option<i64>,
-    score: Option<f64>,
-    completion_pct: Option<f64>,
-    active: Option<bool>,
-    ipv4: Option<bool>,
-    ipv6: Option<bool>,
-}
-
-pub fn fetch_mirror_status() -> Result<()> {
-    let agent = ureq::Agent::new_with_config(
+fn status_agent() -> ureq::Agent {
+    ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(30)))
             .ip_family(crate::util::detected_ip_family())
             .build(),
-    );
+    )
+}
 
-    let response = agent.get(MIRROR_STATUS_URL).call()?;
-    let body = response.into_body().read_to_string()?;
-    let api_status: ApiMirrorStatus = serde_json::from_str(&body)?;
+pub fn fetch_mirror_status() -> Result<()> {
+    let status = arch_mirror_client::fetch(&status_agent())?;
 
-    let mirrors: Vec<MirrorStatus> = api_status
-        .urls
+    let mirrors: Vec<MirrorStatus> = status
+        .mirrors
         .into_iter()
         .map(|m| MirrorStatus {
             url: m.url,
@@ -152,13 +131,11 @@ pub fn fetch_mirror_status() -> Result<()> {
         })
         .collect();
 
-    let response = MirrorStatusResponse {
+    emit_json(&MirrorStatusResponse {
         total: mirrors.len(),
         mirrors,
-        last_check: api_status.last_check,
-    };
-
-    emit_json(&response)
+        last_check: status.last_check,
+    })
 }
 
 pub fn refresh_mirrors(
@@ -167,82 +144,35 @@ pub fn refresh_mirrors(
     protocol: &str,
     sort_by: &str,
 ) -> Result<()> {
-    let agent = ureq::Agent::new_with_config(
-        ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(30)))
-            .ip_family(crate::util::detected_ip_family())
-            .build(),
+    let status = arch_mirror_client::fetch(&status_agent())?;
+
+    let candidates = arch_mirror_client::rank(
+        status.mirrors,
+        arch_mirror_client::Protocol::parse(protocol),
+        country,
+        MIN_COMPLETION,
+        arch_mirror_client::SortBy::parse(sort_by),
+        count,
     );
-
-    let response = agent.get(MIRROR_STATUS_URL).call()?;
-    let body = response.into_body().read_to_string()?;
-    let api_status: ApiMirrorStatus = serde_json::from_str(&body)?;
-
-    let mut candidates: Vec<ApiMirror> = api_status
-        .urls
-        .into_iter()
-        .filter(|m| m.active.unwrap_or(false))
-        .filter(|m| m.completion_pct.unwrap_or(0.0) >= 0.9)
-        .filter(|m| match protocol {
-            "https" => m.url.starts_with("https://"),
-            "http" => m.url.starts_with("http://") && !m.url.starts_with("https://"),
-            _ => true,
-        })
-        .filter(|m| {
-            country
-                .map(|c| {
-                    m.country_code
-                        .as_deref()
-                        .is_some_and(|cc| cc.eq_ignore_ascii_case(c))
-                        || m.country
-                            .as_deref()
-                            .is_some_and(|cn| cn.eq_ignore_ascii_case(c))
-                })
-                .unwrap_or(true)
-        })
-        .collect();
-
-    match sort_by {
-        "delay" => candidates.sort_by(|a, b| {
-            a.delay
-                .unwrap_or(i64::MAX)
-                .cmp(&b.delay.unwrap_or(i64::MAX))
-        }),
-        "age" => candidates.sort_by(|a, b| {
-            // Newer last_sync = better, so reverse: b before a
-            b.last_sync.cmp(&a.last_sync)
-        }),
-        _ => candidates.sort_by(|a, b| {
-            a.score
-                .unwrap_or(f64::MAX)
-                .partial_cmp(&b.score.unwrap_or(f64::MAX))
-                .unwrap_or(std::cmp::Ordering::Equal)
-        }),
-    }
-
-    candidates.truncate(count);
 
     let mirrors: Vec<MirrorEntry> = candidates
         .into_iter()
         .map(|m| {
-            let comment = m.country.clone();
+            let comment = m.country;
             let base = m.url.trim_end_matches('/');
-            let url = format!("{base}/$repo/os/$arch");
             MirrorEntry {
-                url,
+                url: format!("{base}/$repo/os/$arch"),
                 enabled: true,
                 comment,
             }
         })
         .collect();
 
-    let response = RefreshMirrorsResponse {
+    emit_json(&RefreshMirrorsResponse {
         total: mirrors.len(),
         mirrors,
-        last_check: api_status.last_check,
-    };
-
-    emit_json(&response)
+        last_check: status.last_check,
+    })
 }
 
 const MIRROR_TEST_CONCURRENCY: usize = 8;
