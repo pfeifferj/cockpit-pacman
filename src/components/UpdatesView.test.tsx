@@ -25,6 +25,7 @@ vi.mock("../api", async () => {
     runUpgrade: vi.fn(),
     syncDatabase: vi.fn(),
     getSyncPackageInfo: vi.fn(),
+    getPackageInfo: vi.fn(),
     listIgnoredPackages: vi.fn(),
     getRebootStatus: vi.fn(),
     getServicesStatus: vi.fn(),
@@ -51,6 +52,7 @@ const mockPreflightUpgrade = vi.mocked(api.preflightUpgrade);
 const mockRunUpgrade = vi.mocked(api.runUpgrade);
 const mockSyncDatabase = vi.mocked(api.syncDatabase);
 const mockGetSyncPackageInfo = vi.mocked(api.getSyncPackageInfo);
+const mockGetPackageInfo = vi.mocked(api.getPackageInfo);
 const mockListIgnoredPackages = vi.mocked(api.listIgnoredPackages);
 const mockGetRebootStatus = vi.mocked(api.getRebootStatus);
 const mockGetServicesStatus = vi.mocked(api.getServicesStatus);
@@ -1559,6 +1561,48 @@ describe("UpdatesView", () => {
       expect(
         screen.queryByRole("button", { name: "Filter to security updates" })
       ).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Advisory popover", () => {
+    const advisory = {
+      package: "zzz-package",
+      severity: "High",
+      advisory_type: "security",
+      avg_name: "AVG-1",
+      cve_ids: ["CVE-1"],
+      fixed_version: null,
+      status: "Vulnerable",
+    };
+
+    const onePackage = {
+      updates: [
+        { name: "zzz-package", current_version: "2.0-1", new_version: "2.1-1", download_size: 5000, current_size: 3000, new_size: 3500, ignored: false, repository: "core" },
+      ],
+      warnings: [],
+    };
+
+    it("does not open the package modal when an advisory link in the popover is clicked", async () => {
+      mockCheckUpdates.mockResolvedValue(onePackage);
+      mockCheckSecurity.mockResolvedValue({ advisories: [advisory] });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("zzz-package")).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("High"));
+      });
+
+      const link = await screen.findByRole("link", { name: "AVG-1" });
+      await act(async () => {
+        fireEvent.click(link);
+      });
+
+      // The row's onRowClick (which opens the details modal via getPackageInfo)
+      // must not fire when a link inside the portaled popover is clicked.
+      expect(mockGetPackageInfo).not.toHaveBeenCalled();
     });
   });
 

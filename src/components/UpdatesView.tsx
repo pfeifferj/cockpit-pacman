@@ -1798,7 +1798,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
                       <Popover
                         headerContent={<>{advisories.length} securit{advisories.length === 1 ? "y advisory" : "y advisories"}</>}
                         bodyContent={
-                          <div>
+                          <div onClick={(e) => e.stopPropagation()}>
                             {advisories.map((a) => (
                               <div key={a.avg_name} style={{ marginBottom: "0.5rem" }}>
                                 <a
