@@ -8,6 +8,7 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::alpm::get_handle;
+use crate::inhibit::ShutdownInhibitor;
 use crate::models::{CachedVersion, DowngradeResponse, StreamEvent};
 use crate::util::{
     DEFAULT_MUTATION_TIMEOUT_SECS, emit_event, emit_json, get_cache_dir, is_cancelled,
@@ -105,6 +106,8 @@ pub(crate) fn run_pacman_upgrade(
             target, timeout_secs
         ),
     });
+
+    let _inhibitor = ShutdownInhibitor::take("Downgrading package");
 
     let mut child = Command::new("pacman")
         .args(["-U", "--noconfirm"])

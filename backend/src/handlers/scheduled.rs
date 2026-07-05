@@ -12,6 +12,7 @@ use crate::alpm::{
     TransactionGuard, find_available_updates, get_handle, setup_dl_cb, setup_log_cb,
 };
 use crate::config::{AppConfig, ScheduleConfigResponse, ScheduleMode, ScheduleSetResponse};
+use crate::inhibit::ShutdownInhibitor;
 use crate::models::{ScheduledRunEntry, ScheduledRunsResponse};
 use crate::util::{
     CheckResult, TimeoutGuard, check_cancel, emit_json, setup_signal_handler, with_file_lock,
@@ -503,6 +504,8 @@ pub fn scheduled_run() -> Result<()> {
         "Committing upgrade of {} package(s)...",
         packages_to_upgrade
     );
+
+    let _inhibitor = ShutdownInhibitor::take("Applying scheduled package upgrade");
 
     if let Err(e) = tx.commit() {
         let entry = LogEntry::new(

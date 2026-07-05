@@ -9,6 +9,7 @@ use crate::alpm::{
 };
 use crate::check_cancel_early;
 use crate::db::invalidate_repo_map_cache;
+use crate::inhibit::ShutdownInhibitor;
 use crate::models::{
     ConflictInfo, KeyInfo, PreflightResponse, PreflightState, PreflightWarning, ProviderChoice,
     ReplacementInfo, StreamEvent, WarningSeverity,
@@ -216,6 +217,7 @@ fn commit_and_complete(
     interrupt_msg: &str,
     success_msg: Option<String>,
 ) -> Result<()> {
+    let _inhibitor = ShutdownInhibitor::take("Applying package changes");
     match tx.commit().err().map(|e| e.to_string()) {
         Some(err_msg) => {
             handle_commit_error(&err_msg, is_cancelled(), timeout, interrupt_msg).map(|_| ())
