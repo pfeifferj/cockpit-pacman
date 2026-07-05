@@ -9,7 +9,12 @@ Type=oneshot
 ExecStart=/usr/libexec/cockpit-pacman/cockpit-pacman-backend scheduled-run
 Nice=19
 IOSchedulingClass=idle
-TimeoutStartSec=1800
+# A commit must never be SIGKILLed (no rollback). SendSIGKILL=no forbids it;
+# TimeoutStartSec is only a stall backstop above the backend's cooperative
+# guard (test-enforced); TimeoutStopSec is stop/shutdown grace.
+TimeoutStartSec=10800
+TimeoutStopSec=900
+SendSIGKILL=no
 
 # Security hardening
 ProtectKernelTunables=yes

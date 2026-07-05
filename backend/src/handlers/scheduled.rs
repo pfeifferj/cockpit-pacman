@@ -23,7 +23,7 @@ const LOG_PATH: &str = "/var/log/cockpit-pacman/scheduled.jsonl";
 const LOG_LOCK_PATH: &str = "/var/log/cockpit-pacman/.scheduled.jsonl.lock";
 const MAX_LOG_SIZE_BYTES: u64 = 1024 * 1024; // 1MB max log size
 const MAX_LOG_ENTRIES: usize = 1000;
-const SCHEDULED_TIMEOUT_SECS: u64 = 1800; // 30 minutes
+const SCHEDULED_TIMEOUT_SECS: u64 = 1800;
 
 #[derive(Serialize, Deserialize)]
 struct LogEntry {
@@ -105,10 +105,6 @@ fn log_run(entry: &LogEntry) -> Result<()> {
     })
 }
 
-/// Trim the log when it exceeds either the size or the entry-count cap, keeping
-/// the most recent half. Rewrites via a temp file + rename so an unlocked
-/// reader (get_scheduled_runs) never observes a partially-rewritten file.
-/// Callers must hold the log lock.
 fn rotate_if_needed() -> Result<()> {
     let path = Path::new(LOG_PATH);
 
@@ -552,5 +548,45 @@ mod tests {
     fn derive_status_falls_back_to_success_when_absent() {
         assert_eq!(derive_status("", true), "ok");
         assert_eq!(derive_status("", false), "failed");
+    }
+
+    #[test]
+    fn service_unit_never_sigkills_and_outlives_internal_guard() {
+        const UNIT_PATH: &str = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../systemd/cockpit-pacman-scheduled.service"
+        );
+        let unit =
+            std::fs::read_to_string(UNIT_PATH).unwrap_or_else(|e| panic!("read {UNIT_PATH}: {e}"));
+
+        // systemd honors the last occurrence of a directive.
+        let last_value = |key: &str| unit.lines().rev().find_map(|l| l.trim().strip_prefix(key));
+
+        assert_eq!(
+            last_value("SendSIGKILL="),
+            Some("no"),
+            "unit must set SendSIGKILL=no"
+        );
+
+        let stop_timeout: u64 = last_value("TimeoutStopSec=")
+            .expect("unit must set TimeoutStopSec")
+            .parse()
+            .expect("TimeoutStopSec must be plain seconds");
+        assert!(
+            stop_timeout >= 300,
+            "TimeoutStopSec ({stop_timeout}s) must give a commit real shutdown grace"
+        );
+
+        // Absent TimeoutStartSec is safe: Type=oneshot defaults it to infinity.
+        if let Some(value) = last_value("TimeoutStartSec=") {
+            let start_timeout: u64 = value
+                .parse()
+                .expect("TimeoutStartSec must be plain seconds");
+            assert!(
+                start_timeout >= 2 * super::SCHEDULED_TIMEOUT_SECS,
+                "TimeoutStartSec ({start_timeout}s) must be at least 2x SCHEDULED_TIMEOUT_SECS ({}s)",
+                super::SCHEDULED_TIMEOUT_SECS
+            );
+        }
     }
 }
