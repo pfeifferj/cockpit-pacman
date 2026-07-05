@@ -397,16 +397,12 @@ pub fn prune_old_backups(parent: &Path, name_prefix: &str, keep: usize) {
     }
 }
 
-/// Ask a child process to stop, the way an interactive Ctrl-C would. SIGINT is
-/// what pacman traps: it aborts promptly during a download but defers until a
-/// safe point during a commit, and it removes its own db lock on exit. We wait
-/// up to `grace` for the child to leave on its own and only escalate to SIGKILL
-/// for a process that ignores the signal entirely, since a hard kill mid-commit
-/// is what leaves a stale lock and a half-applied transaction. Returns the
-/// reaped exit status.
+/// SIGINT a child (pacman traps it and defers to a safe point). `Some(grace)`
+/// escalates to SIGKILL after the grace; a pacman child passes `None` because
+/// a hard kill mid-commit corrupts the db and hooks have no safe upper bound.
 pub(crate) fn terminate_child(
     child: &mut std::process::Child,
-    grace: Duration,
+    grace: Option<Duration>,
 ) -> std::process::ExitStatus {
     use std::os::unix::process::ExitStatusExt;
 
@@ -415,12 +411,12 @@ pub(crate) fn terminate_child(
         libc::kill(child.id() as libc::pid_t, libc::SIGINT);
     }
 
-    let deadline = Instant::now() + grace;
+    let deadline = grace.map(|g| Instant::now() + g);
     loop {
         match child.try_wait() {
             Ok(Some(status)) => return status,
             Ok(None) => {
-                if Instant::now() >= deadline {
+                if deadline.is_some_and(|d| Instant::now() >= d) {
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(50));
@@ -981,9 +977,24 @@ mod tests {
             .spawn()
             .unwrap();
         let start = std::time::Instant::now();
-        let status = terminate_child(&mut child, Duration::from_secs(5));
+        let status = terminate_child(&mut child, Some(Duration::from_secs(5)));
         // SIGINT ended it well before the grace window, no SIGKILL escalation.
         assert!(start.elapsed() < Duration::from_secs(5));
+        assert_eq!(status.signal(), Some(libc::SIGINT));
+    }
+
+    // The wait-forever branch (child ignoring SIGINT) is left untested: it
+    // would hang the suite.
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn terminate_child_without_grace_waits_for_exit() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let status = terminate_child(&mut child, None);
         assert_eq!(status.signal(), Some(libc::SIGINT));
     }
 
@@ -1001,7 +1012,7 @@ mod tests {
         // Let the shell install the trap before signalling, else SIGINT hits the
         // default disposition during startup and kills it before the loop.
         std::thread::sleep(Duration::from_millis(300));
-        let status = terminate_child(&mut child, Duration::from_millis(300));
+        let status = terminate_child(&mut child, Some(Duration::from_millis(300)));
         assert_eq!(status.signal(), Some(libc::SIGKILL));
     }
 

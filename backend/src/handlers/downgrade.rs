@@ -14,11 +14,6 @@ use crate::util::{
     list_cache_packages, parse_package_filename, setup_signal_handler, terminate_child,
 };
 
-/// Grace period before escalating a cancelled/timed-out `pacman -U` from SIGINT
-/// to SIGKILL. Must comfortably exceed a single-package commit (including hooks
-/// like mkinitcpio) so a hard kill only ever ends a genuinely stuck process,
-/// never a healthy commit.
-const GRACE_BEFORE_KILL: Duration = Duration::from_secs(120);
 use crate::validation::{validate_package_name, validate_version};
 
 pub fn list_downgrades(package_name: Option<&str>) -> Result<()> {
@@ -165,20 +160,20 @@ pub(crate) fn run_pacman_upgrade(
     });
 
     enum Outcome {
-        Cancelled,
-        TimedOut,
+        // pacman may defer the SIGINT and still finish; carry the real status.
+        Cancelled(ExitStatus),
+        TimedOut(ExitStatus),
         Exited(ExitStatus),
     }
 
     let outcome = loop {
+        // Never SIGKILL pacman: a hard kill mid-commit corrupts the local db.
         if is_cancelled() {
-            terminate_child(&mut child, GRACE_BEFORE_KILL);
-            break Outcome::Cancelled;
+            break Outcome::Cancelled(terminate_child(&mut child, None));
         }
 
         if start_time.elapsed() > timeout_duration {
-            terminate_child(&mut child, GRACE_BEFORE_KILL);
-            break Outcome::TimedOut;
+            break Outcome::TimedOut(terminate_child(&mut child, None));
         }
 
         match child.try_wait() {
@@ -202,11 +197,20 @@ pub(crate) fn run_pacman_upgrade(
     join_readers(stdout_handle, stderr_handle);
 
     let complete = match outcome {
-        Outcome::Cancelled => StreamEvent::Complete {
+        Outcome::Cancelled(status) | Outcome::TimedOut(status) if status.success() => {
+            StreamEvent::Complete {
+                success: true,
+                message: Some(format!(
+                    "Downgrade of {} to {} finished before the cancel took effect",
+                    name, version
+                )),
+            }
+        }
+        Outcome::Cancelled(_) => StreamEvent::Complete {
             success: false,
             message: Some("Operation cancelled by user".to_string()),
         },
-        Outcome::TimedOut => StreamEvent::Complete {
+        Outcome::TimedOut(_) => StreamEvent::Complete {
             success: false,
             message: Some(format!(
                 "Operation timed out after {} seconds",
