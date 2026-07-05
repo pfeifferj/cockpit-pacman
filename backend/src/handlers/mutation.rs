@@ -216,17 +216,10 @@ fn commit_and_complete(
     interrupt_msg: &str,
     success_msg: Option<String>,
 ) -> Result<()> {
-    let was_cancelled_before = is_cancelled();
-    let was_timed_out_before = timeout.is_timed_out();
     match tx.commit().err().map(|e| e.to_string()) {
-        Some(err_msg) => handle_commit_error(
-            &err_msg,
-            was_cancelled_before,
-            was_timed_out_before,
-            timeout,
-            interrupt_msg,
-        )
-        .map(|_| ()),
+        Some(err_msg) => {
+            handle_commit_error(&err_msg, is_cancelled(), timeout, interrupt_msg).map(|_| ())
+        }
         None => {
             // Invariant: enqueue the success signal immediately after commit()
             // returns Ok, before anything else. emit_event hands it to the async

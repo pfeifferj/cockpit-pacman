@@ -778,59 +778,26 @@ fn test_config_preserves_unknown_fields_on_rewrite() {
 // --- handle_commit_error tests ---
 
 #[test]
-fn test_handle_commit_error_cancelled_during() {
-    use crate::util::{TimeoutGuard, handle_commit_error, reset_cancelled};
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    // Reset any previous cancellation state
-    reset_cancelled();
+fn test_handle_commit_error_cancelled() {
+    use crate::util::{TimeoutGuard, handle_commit_error};
 
     let timeout = TimeoutGuard::new(300);
 
-    // Simulate cancellation happening during the operation
-    // We set the cancelled state before calling
-    static TEST_CANCELLED: AtomicBool = AtomicBool::new(true);
-    TEST_CANCELLED.store(true, Ordering::SeqCst);
-
-    // When cancelled_during is true (cancellation happened after operation started)
-    // the function should return Ok(false)
-    let result = handle_commit_error(
-        "some error",
-        false, // was_cancelled_before = false
-        false, // was_timed_out_before = false
-        &timeout,
-        "Operation cancelled",
-    );
-
-    // Reset for other tests
-    reset_cancelled();
-
-    // The actual test depends on is_cancelled() state which we can't easily control
-    // So we test the error path instead
-    assert!(result.is_ok() || result.is_err());
+    // The cancel flag, not the error text, drives the interrupted outcome.
+    let result = handle_commit_error("transaction aborted", true, &timeout, "Operation cancelled");
+    assert!(result.is_ok());
+    assert!(!result.unwrap());
 }
 
 #[test]
-fn test_handle_commit_error_interrupt_keywords() {
-    use crate::util::{TimeoutGuard, handle_commit_error, reset_cancelled};
+fn test_handle_commit_error_timed_out() {
+    use crate::util::{TimeoutGuard, handle_commit_error};
 
-    reset_cancelled();
-    let timeout = TimeoutGuard::new(300);
-
-    // Test that error messages containing interrupt keywords return Ok(false)
+    // A zero-second guard is already timed out; an uncancelled commit failure
+    // is then reported as a timeout, not a generic error.
+    let timeout = TimeoutGuard::new(0);
     let result = handle_commit_error(
-        "operation interrupted by signal",
-        false,
-        false,
-        &timeout,
-        "Operation interrupted",
-    );
-    assert!(result.is_ok());
-    assert!(!result.unwrap()); // Should be false for interruption
-
-    let result = handle_commit_error(
-        "user cancelled the transaction",
-        false,
+        "transaction aborted",
         false,
         &timeout,
         "Operation cancelled",
@@ -840,16 +807,30 @@ fn test_handle_commit_error_interrupt_keywords() {
 }
 
 #[test]
-fn test_handle_commit_error_actual_failure() {
-    use crate::util::{TimeoutGuard, handle_commit_error, reset_cancelled};
+fn test_handle_commit_error_keywords_are_not_interrupts() {
+    use crate::util::{TimeoutGuard, handle_commit_error};
 
-    reset_cancelled();
     let timeout = TimeoutGuard::new(300);
 
-    // Test that non-interrupt errors return Err
+    // A real failure whose text mentions "signal"/"timeout" must not be masked
+    // as a user interrupt: without the flag set, it is an error.
+    for msg in ["download timeout on mirror", "scriptlet killed by signal 9"] {
+        let result = handle_commit_error(msg, false, &timeout, "Operation interrupted");
+        assert!(
+            result.is_err(),
+            "{msg:?} should be a failure, not an interrupt"
+        );
+    }
+}
+
+#[test]
+fn test_handle_commit_error_actual_failure() {
+    use crate::util::{TimeoutGuard, handle_commit_error};
+
+    let timeout = TimeoutGuard::new(300);
+
     let result = handle_commit_error(
         "conflicting files exist",
-        false,
         false,
         &timeout,
         "Operation failed",

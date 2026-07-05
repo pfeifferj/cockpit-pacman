@@ -744,30 +744,22 @@ pub(crate) fn parse_package_filename(filename: &str) -> Option<(String, String, 
     }
 }
 
-/// Handle transaction commit errors with proper cancellation/timeout detection.
-/// Returns Ok(true) if commit succeeded, Ok(false) if it was cancelled/timed out, Err on actual failure.
+/// Classify a failed commit: Ok(false) on cancel/timeout, Err on a real
+/// failure. `cancelled` decides it, not the error text, since the abort
+/// carries no reliable keyword and sniffing would mask real failures.
 pub fn handle_commit_error(
     err_msg: &str,
-    was_cancelled_before: bool,
-    was_timed_out_before: bool,
+    cancelled: bool,
     timeout: &TimeoutGuard,
     interrupted_message: &str,
 ) -> Result<bool> {
-    let cancelled_during = !was_cancelled_before && is_cancelled();
-    let timed_out_during = !was_timed_out_before && timeout.is_timed_out();
-    let err_lower = err_msg.to_lowercase();
-    let error_indicates_interrupt = err_lower.contains("interrupt")
-        || err_lower.contains("cancel")
-        || err_lower.contains("signal")
-        || err_lower.contains("timeout");
-
-    if cancelled_during || error_indicates_interrupt {
+    if cancelled {
         emit_event(&StreamEvent::Complete {
             success: false,
             message: Some(interrupted_message.to_string()),
         });
         return Ok(false);
-    } else if timed_out_during {
+    } else if timeout.is_timed_out() {
         emit_event(&StreamEvent::Complete {
             success: false,
             message: Some(format!(
