@@ -238,6 +238,10 @@ fn commit_and_complete(
 }
 
 pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
+    // Before the lock: a timeout SIGTERM must set the flag, not kill the
+    // process with db.lck held.
+    setup_signal_handler();
+
     let mut handle = get_handle()?;
 
     for pkg_name in ignore_pkgs {
@@ -294,6 +298,10 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
         },
     );
 
+    if is_cancelled() {
+        anyhow::bail!("Operation cancelled");
+    }
+
     let mut tx = match TransactionGuard::new(&mut handle, TransFlag::NONE) {
         Ok(tx) => tx,
         Err(e) => {
@@ -311,6 +319,10 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
             ..Default::default()
         };
         return emit_json(&response);
+    }
+
+    if is_cancelled() {
+        anyhow::bail!("Operation cancelled");
     }
 
     let prepare_success = tx.prepare().is_ok();

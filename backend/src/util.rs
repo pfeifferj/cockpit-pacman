@@ -897,6 +897,26 @@ mod tests {
         assert_eq!(v["success"], true);
     }
 
+    /// Every transaction-holding handler relies on this to survive cockpit's
+    /// SIGTERM with db.lck held; losing ctrlc's "termination" feature would
+    /// silently revert them all to die-with-stale-lock.
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn signal_handler_traps_sigterm() {
+        super::setup_signal_handler();
+        let status = std::fs::read_to_string("/proc/self/status").unwrap();
+        let caught = status
+            .lines()
+            .find_map(|l| l.strip_prefix("SigCgt:"))
+            .unwrap();
+        let mask = u64::from_str_radix(caught.trim(), 16).unwrap();
+        assert_ne!(
+            mask & (1 << (libc::SIGTERM - 1)),
+            0,
+            "SIGTERM not in SigCgt; ctrlc 'termination' feature missing?"
+        );
+    }
+
     #[test]
     #[allow(clippy::unwrap_used)]
     fn terminate_child_graceful_exit() {
