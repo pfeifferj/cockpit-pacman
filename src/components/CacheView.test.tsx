@@ -206,7 +206,7 @@ describe("CacheView", () => {
 
   it("starts cleanup when confirming", async () => {
     const mockProcess = createMockStreamingProcess();
-    mockCleanCache.mockReturnValue({ cancel: mockProcess.close });
+    mockCleanCache.mockReturnValue({ cancel: mockProcess.close, forceStop: mockProcess.close });
 
     render(<CacheView />);
 
@@ -236,7 +236,7 @@ describe("CacheView", () => {
     let capturedCallbacks: api.UpgradeCallbacks | null = null;
     mockCleanCache.mockImplementation((callbacks) => {
       capturedCallbacks = callbacks;
-      return { cancel: vi.fn() };
+      return { cancel: vi.fn(), forceStop: vi.fn() };
     });
 
     render(<CacheView />);
@@ -271,7 +271,7 @@ describe("CacheView", () => {
     let capturedCallbacks: api.UpgradeCallbacks | null = null;
     mockCleanCache.mockImplementation((callbacks) => {
       capturedCallbacks = callbacks;
-      return { cancel: vi.fn() };
+      return { cancel: vi.fn(), forceStop: vi.fn() };
     });
 
     render(<CacheView />);
@@ -304,7 +304,7 @@ describe("CacheView", () => {
     let capturedCallbacks: api.UpgradeCallbacks | null = null;
     mockCleanCache.mockImplementation((callbacks) => {
       capturedCallbacks = callbacks;
-      return { cancel: vi.fn() };
+      return { cancel: vi.fn(), forceStop: vi.fn() };
     });
 
     render(<CacheView />);
@@ -336,7 +336,7 @@ describe("CacheView", () => {
   it("cancels cleanup when clicking Cancel during operation", async () => {
     const mockCancel = vi.fn();
     mockCleanCache.mockImplementation(() => {
-      return { cancel: mockCancel };
+      return { cancel: mockCancel, forceStop: mockCancel };
     });
 
     render(<CacheView />);

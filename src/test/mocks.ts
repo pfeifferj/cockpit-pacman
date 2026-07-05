@@ -129,6 +129,7 @@ interface StreamingMockProcess {
   then: (callback: () => void) => StreamingMockProcess;
   catch: (callback: (error: unknown) => void) => StreamingMockProcess;
   close: (reason?: string) => void;
+  input: (data: string, stream?: boolean) => void;
   _streamCallback?: (data: string) => void;
   _thenCallback?: () => void;
   _catchCallback?: (error: unknown) => void;
@@ -155,6 +156,7 @@ export function createMockStreamingProcess(): StreamingMockProcess {
       return this;
     },
     close() {},
+    input() {},
     _emit(data: string) {
       if (this._streamCallback) {
         this._streamCallback(data);

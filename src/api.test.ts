@@ -468,9 +468,10 @@ describe("runUpgrade", () => {
     );
   });
 
-  it("returns cancel function", () => {
+  it("cancel sends the stdin control line and keeps the channel open", () => {
     const mockProc = createMockStreamingProcess();
     mockProc.close = vi.fn();
+    mockProc.input = vi.fn();
     mockSpawn.mockReturnValue(mockProc);
 
     const callbacks = {
@@ -481,7 +482,37 @@ describe("runUpgrade", () => {
     const { cancel } = runUpgrade(callbacks);
     cancel();
 
+    expect(mockProc.input).toHaveBeenCalledWith("cancel\n", true);
+    expect(mockProc.close).not.toHaveBeenCalled();
+  });
+
+  it("forceStop closes the channel", () => {
+    const mockProc = createMockStreamingProcess();
+    mockProc.close = vi.fn();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+    };
+
+    const { forceStop } = runUpgrade(callbacks);
+    forceStop();
+
     expect(mockProc.close).toHaveBeenCalledWith("cancelled");
+  });
+
+  it("cancel on non-graceful streams still closes the channel", () => {
+    const mockProc = createMockStreamingProcess();
+    mockProc.close = vi.fn();
+    mockProc.input = vi.fn();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const { cancel } = syncDatabase({ onComplete: vi.fn(), onError: vi.fn() });
+    cancel();
+
+    expect(mockProc.close).toHaveBeenCalledWith("cancelled");
+    expect(mockProc.input).not.toHaveBeenCalled();
   });
 
   it("handles complete event in buffer when process ends", () => {

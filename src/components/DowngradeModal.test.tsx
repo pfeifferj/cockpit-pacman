@@ -42,8 +42,8 @@ describe("DowngradeModal", () => {
     vi.clearAllMocks();
     mockListDowngrades.mockResolvedValue({ packages: [cacheVersion], total: 1 });
     mockListArchiveVersions.mockResolvedValue({ packages: [archiveVersion], total: 1 });
-    mockDowngradePackage.mockReturnValue({ cancel: vi.fn() });
-    mockDowngradeFromArchive.mockReturnValue({ cancel: vi.fn() });
+    mockDowngradePackage.mockReturnValue({ cancel: vi.fn(), forceStop: vi.fn() });
+    mockDowngradeFromArchive.mockReturnValue({ cancel: vi.fn(), forceStop: vi.fn() });
   });
 
   afterEach(() => {

@@ -100,7 +100,7 @@ import {
   removeStaleLock,
   BackendError,
 } from "../api";
-import type { KeyringCredentials, ErrorCode, ScheduledRunEntry } from "../api";
+import type { KeyringCredentials, ErrorCode, ScheduledRunEntry, StreamingHandle } from "../api";
 import { NetworkErrorState } from "./NetworkErrorState";
 import { CompactPagination } from "./CompactPagination";
 
@@ -353,7 +353,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
   const [warnings, setWarnings] = useState<string[]>([]);
-  const cancelRef = useRef<(() => void) | null>(null);
+  const cancelRef = useRef<StreamingHandle | null>(null);
   const [errorOrigin, setErrorOrigin] = useState<ErrorOrigin>("check");
   const autoResumedRef = useRef(false);
   const [lockRetryExhausted, setLockRetryExhausted] = useState(false);
@@ -390,6 +390,13 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   useBackdropClose(cancelModalOpen, () => setCancelModalOpen(false));
   const [isCancelling, setIsCancelling] = useState(false);
+  // Ref mirror for the upgrade callbacks, which close over stale state.
+  const isCancellingRef = useRef(false);
+  const [cancelOutcome, setCancelOutcome] = useState<"stopped" | "finished" | null>(null);
+  const setCancelling = (value: boolean) => {
+    isCancellingRef.current = value;
+    setIsCancelling(value);
+  };
   const [ignoredModalOpen, setIgnoredModalOpen] = useState(false);
   const [openKebab, setOpenKebab] = useState<string | null>(null);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
@@ -818,27 +825,24 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
   useEffect(() => {
     return () => {
-      if (cancelRef.current) {
-        cancelRef.current();
-      }
+      // Hard close: an unmounted view must not keep a stream subscribed.
+      cancelRef.current?.forceStop();
     };
   }, []);
 
 
   const handleRefresh = async () => {
-    if (cancelRef.current) {
-      cancelRef.current();
-    }
+    // Hard close so the old op releases db.lck before the new spawn takes it.
+    cancelRef.current?.forceStop();
     setState("checking");
     setLog("");
     setSelectedPackages(new Set());
     setLockRetryExhausted(false);
-    const { cancel } = syncDatabase({
+    cancelRef.current = syncDatabase({
       onData: (data) => setLog((prev) => appendCapped(prev, data)),
       onComplete: () => loadUpdates(),
       onError: (err, code) => failWith("sync", err, code),
     });
-    cancelRef.current = cancel;
   };
 
   const handleApplyUpdates = async () => {
@@ -893,6 +897,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     setState("applying");
     setLog("");
     setLockRetryExhausted(false);
+    setCancelling(false);
+    setCancelOutcome(null);
     setUpgradeProgress({
       phase: "preparing",
       current: 0,
@@ -932,11 +938,15 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       }
     };
 
-    const { cancel } = runUpgrade({
+    cancelRef.current = runUpgrade({
       onEvent: handleEvent,
       onData: (data) => setLog((prev) => appendCapped(prev, data)),
       onComplete: () => {
         autoResumedRef.current = false;
+        if (isCancellingRef.current) {
+          setCancelling(false);
+          setCancelOutcome("finished");
+        }
         setState("success");
         setUpdates([]);
         cancelRef.current = null;
@@ -958,11 +968,20 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         });
       },
       onError: (err, code) => {
-        failWith("upgrade", err, code);
         cancelRef.current = null;
+        if (isCancellingRef.current) {
+          // The abort we requested: show stopped and refetch (partial upgrade).
+          setCancelling(false);
+          setCancelOutcome("stopped");
+          setLog("");
+          loadUpdates();
+          loadRebootStatus();
+          loadPacnewStatus();
+          return;
+        }
+        failWith("upgrade", err, code);
       },
     }, ignoredPackages);
-    cancelRef.current = cancel;
   };
 
   const resumeRef = useRef({ apply: handleApplyUpdates, refresh: handleRefresh });
@@ -1004,17 +1023,15 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     setCancelModalOpen(true);
   };
 
+  // Cancellation is a request: stay in "applying" until the backend's terminal
+  // event confirms. cancelRef is kept for Force stop.
   const confirmCancel = () => {
-    if (isCancelling) return;
-    setIsCancelling(true);
+    if (isCancellingRef.current) return;
     setCancelModalOpen(false);
     if (cancelRef.current) {
-      cancelRef.current();
-      cancelRef.current = null;
-      setState("available");
-      setLog("");
+      setCancelling(true);
+      cancelRef.current.cancel();
     }
-    setIsCancelling(false);
   };
 
   const handlePackageClick = (pkgName: string) => {
@@ -1128,6 +1145,23 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
           Critical system packages were updated since boot: {rebootStatus.updated_packages.join(", ")}.
           A reboot is recommended to apply these changes.
         </>
+      )}
+    </Alert>
+  ) : null;
+
+  const cancelAlert = cancelOutcome ? (
+    <Alert
+      variant={cancelOutcome === "stopped" ? "info" : "success"}
+      title={cancelOutcome === "stopped"
+        ? "Upgrade stopped at a safe point"
+        : "Upgrade finished before the cancel took effect"}
+      className="pf-v6-u-mb-md"
+      actionClose={<AlertActionCloseButton onClose={() => setCancelOutcome(null)} />}
+    >
+      {cancelOutcome === "stopped" && (
+        upgradeProgress.current > 0
+          ? `${upgradeProgress.current} of ${upgradeProgress.total} packages were updated before stopping; the rest remain pending.`
+          : "No packages were installed."
       )}
     </Alert>
   ) : null;
@@ -1351,11 +1385,30 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
               <CardTitle className="pf-v6-u-m-0">Applying Updates</CardTitle>
             </FlexItem>
             <FlexItem>
-              <Button variant="danger" onClick={handleCancelClick}>
-                Cancel
+              <Button variant="danger" onClick={handleCancelClick} isDisabled={isCancelling}>
+                {isCancelling ? "Cancelling..." : "Cancel"}
               </Button>
             </FlexItem>
           </Flex>
+
+          {isCancelling && (
+            <Alert
+              variant="info"
+              isInline
+              className="pf-v6-u-mt-md"
+              title={upgradeProgress.phase === "installing" || upgradeProgress.phase === "hooks"
+                ? "Cancelling: waiting for the in-flight package to finish safely"
+                : "Cancelling: stopping before any package is installed"}
+              actionLinks={
+                <Button variant="link" isInline isDanger onClick={() => cancelRef.current?.forceStop()}>
+                  Force stop
+                </Button>
+              }
+            >
+              Completed packages stay installed. Force stop abandons the backend
+              process mid-transaction and may leave a stale database lock.
+            </Alert>
+          )}
 
           <Content className="pf-v6-u-mt-md pf-v6-u-mb-sm">
             <strong>{phaseLabels[upgradeProgress.phase]}</strong>
@@ -1445,6 +1498,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     return (
       <Card>
         <CardBody>
+          {cancelAlert}
           {rebootAlert}
           {servicesAlert}
           {pacnewAlert}
@@ -1470,6 +1524,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   if (state === "uptodate") {
     return (
       <>
+        {cancelAlert}
         {rebootAlert}
         {servicesAlert}
         {pacnewAlert}
@@ -1567,6 +1622,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
   return (
     <>
+      {cancelAlert}
       {rebootAlert}
       {servicesAlert}
       {pacnewAlert}

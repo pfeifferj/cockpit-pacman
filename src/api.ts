@@ -461,11 +461,20 @@ function extractErrorMessage(ex: unknown): string {
   return "Operation failed with unknown error";
 }
 
+export interface StreamingHandle {
+  /** With gracefulCancel, asks the backend to stop and keeps the stream open
+   * until onComplete/onError; otherwise closes the channel. */
+  cancel: () => void;
+  /** Hard abort: close the channel. Same as cancel() unless gracefulCancel. */
+  forceStop: () => void;
+}
+
 function runStreamingBackend(
   command: string,
   args: string[],
-  callbacks: UpgradeCallbacks
-): { cancel: () => void } {
+  callbacks: UpgradeCallbacks,
+  options?: { gracefulCancel?: boolean }
+): StreamingHandle {
   let buffer = "";
   let completionHandled = false;
 
@@ -584,21 +593,23 @@ function runStreamingBackend(
     markComplete(false, extractErrorMessage(ex));
   });
 
+  const forceStop = () => proc.close("cancelled");
   return {
-    cancel: () => proc.close("cancelled"),
+    cancel: options?.gracefulCancel ? () => proc.input("cancel\n", true) : forceStop,
+    forceStop,
   };
 }
 
-export function runUpgrade(callbacks: UpgradeCallbacks, ignore?: string[]): { cancel: () => void } {
+export function runUpgrade(callbacks: UpgradeCallbacks, ignore?: string[]): StreamingHandle {
   const args: string[] = [];
   args.push(ignore && ignore.length > 0 ? ignore.map(pkg => sanitizeSearchInput(pkg)).join(",") : "");
   if (callbacks.timeout !== undefined) {
     args.push(String(callbacks.timeout));
   }
-  return runStreamingBackend("upgrade", args, callbacks);
+  return runStreamingBackend("upgrade", args, callbacks, { gracefulCancel: true });
 }
 
-export function syncDatabase(callbacks: UpgradeCallbacks): { cancel: () => void } {
+export function syncDatabase(callbacks: UpgradeCallbacks): StreamingHandle {
   const args = ["true"];
   if (callbacks.timeout !== undefined) {
     args.push(String(callbacks.timeout));
@@ -619,11 +630,11 @@ export async function getKeyringStatus(): Promise<KeyringStatusResponse> {
   return runBackend<KeyringStatusResponse>("keyring-status");
 }
 
-export function refreshKeyring(callbacks: UpgradeCallbacks): { cancel: () => void } {
+export function refreshKeyring(callbacks: UpgradeCallbacks): StreamingHandle {
   return runStreamingBackend("refresh-keyring", [], callbacks);
 }
 
-export function initKeyring(callbacks: UpgradeCallbacks): { cancel: () => void } {
+export function initKeyring(callbacks: UpgradeCallbacks): StreamingHandle {
   return runStreamingBackend("init-keyring", [], callbacks);
 }
 
@@ -634,7 +645,7 @@ export async function listOrphans(): Promise<OrphanResponse> {
 export function installPackage(
   callbacks: UpgradeCallbacks,
   name: string
-): { cancel: () => void } {
+): StreamingHandle {
   const args = [sanitizeSearchInput(name)];
   if (callbacks.timeout !== undefined) {
     args.push(String(callbacks.timeout));
@@ -645,7 +656,7 @@ export function installPackage(
 export function removePackage(
   callbacks: UpgradeCallbacks,
   name: string
-): { cancel: () => void } {
+): StreamingHandle {
   const args = [sanitizeSearchInput(name)];
   if (callbacks.timeout !== undefined) {
     args.push(String(callbacks.timeout));
@@ -653,7 +664,7 @@ export function removePackage(
   return runStreamingBackend("remove-package", args, callbacks);
 }
 
-export function removeOrphans(callbacks: UpgradeCallbacks): { cancel: () => void } {
+export function removeOrphans(callbacks: UpgradeCallbacks): StreamingHandle {
   const args: string[] = [];
   if (callbacks.timeout !== undefined) {
     args.push(String(callbacks.timeout));
@@ -677,7 +688,7 @@ export async function getCacheInfo(): Promise<CacheInfo> {
   return runBackend<CacheInfo>("cache-info");
 }
 
-export function cleanCache(callbacks: UpgradeCallbacks, keepVersions: number = 3, packages?: string[]): { cancel: () => void } {
+export function cleanCache(callbacks: UpgradeCallbacks, keepVersions: number = 3, packages?: string[]): StreamingHandle {
   const pkgArg = packages && packages.length > 0 ? packages.map(pkg => sanitizeSearchInput(pkg)).join(",") : "";
   return runStreamingBackend("clean-cache", [String(keepVersions), pkgArg], callbacks);
 }
@@ -710,7 +721,7 @@ export function downgradePackage(
   callbacks: UpgradeCallbacks,
   name: string,
   version: string
-): { cancel: () => void } {
+): StreamingHandle {
   return runStreamingBackend("downgrade", [sanitizeSearchInput(name), sanitizeSearchInput(version)], callbacks);
 }
 
@@ -726,7 +737,7 @@ export function downgradeFromArchive(
   callbacks: UpgradeCallbacks,
   name: string,
   filename: string
-): { cancel: () => void } {
+): StreamingHandle {
   return runStreamingBackend("downgrade-archive", [sanitizeSearchInput(name), filename], callbacks);
 }
 
@@ -832,7 +843,7 @@ export async function fetchMirrorStatus(): Promise<MirrorStatusResponse> {
 export function testMirrors(
   callbacks: MirrorTestCallbacks,
   urls?: string[]
-): { cancel: () => void } {
+): StreamingHandle {
   const args: string[] = [];
   args.push(urls && urls.length > 0 ? urls.join(",") : "");
   if (callbacks.timeout !== undefined) {

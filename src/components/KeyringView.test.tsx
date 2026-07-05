@@ -201,7 +201,7 @@ describe("KeyringView", () => {
     let capturedCallbacks: api.UpgradeCallbacks | null = null;
     mockRefreshKeyring.mockImplementation((callbacks) => {
       capturedCallbacks = callbacks;
-      return { cancel: vi.fn() };
+      return { cancel: vi.fn(), forceStop: vi.fn() };
     });
 
     render(<KeyringView />);
@@ -232,7 +232,7 @@ describe("KeyringView", () => {
     let capturedCallbacks: api.UpgradeCallbacks | null = null;
     mockRefreshKeyring.mockImplementation((callbacks) => {
       capturedCallbacks = callbacks;
-      return { cancel: vi.fn() };
+      return { cancel: vi.fn(), forceStop: vi.fn() };
     });
 
     render(<KeyringView />);
@@ -258,7 +258,7 @@ describe("KeyringView", () => {
   it("cancels refresh when clicking Cancel", async () => {
     const mockCancel = vi.fn();
     mockRefreshKeyring.mockImplementation(() => {
-      return { cancel: mockCancel };
+      return { cancel: mockCancel, forceStop: mockCancel };
     });
 
     render(<KeyringView />);
@@ -301,7 +301,7 @@ describe("KeyringView", () => {
     let capturedCallbacks: api.UpgradeCallbacks | null = null;
     mockInitKeyring.mockImplementation((callbacks) => {
       capturedCallbacks = callbacks;
-      return { cancel: vi.fn() };
+      return { cancel: vi.fn(), forceStop: vi.fn() };
     });
 
     render(<KeyringView />);
@@ -424,7 +424,7 @@ describe("KeyringView", () => {
     let capturedCallbacks: api.UpgradeCallbacks | null = null;
     mockRefreshKeyring.mockImplementation((callbacks) => {
       capturedCallbacks = callbacks;
-      return { cancel: vi.fn() };
+      return { cancel: vi.fn(), forceStop: vi.fn() };
     });
 
     render(<KeyringView />);

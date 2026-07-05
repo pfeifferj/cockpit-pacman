@@ -120,7 +120,7 @@ describe("OrphansView", () => {
   });
 
   it("starts removal when confirming", async () => {
-    mockRemoveOrphans.mockReturnValue({ cancel: vi.fn() });
+    mockRemoveOrphans.mockReturnValue({ cancel: vi.fn(), forceStop: vi.fn() });
     render(<OrphansView {...defaultProps} />);
 
     await waitFor(() => {
@@ -142,7 +142,7 @@ describe("OrphansView", () => {
     let capturedCallbacks: api.UpgradeCallbacks | null = null;
     mockRemoveOrphans.mockImplementation((callbacks) => {
       capturedCallbacks = callbacks;
-      return { cancel: vi.fn() };
+      return { cancel: vi.fn(), forceStop: vi.fn() };
     });
 
     render(<OrphansView {...defaultProps} />);

@@ -54,7 +54,7 @@ describe("MirrorsView", () => {
     });
     mockTestMirrors.mockImplementation((callbacks) => {
       setTimeout(() => callbacks.onComplete?.(), 0);
-      return { cancel: vi.fn() };
+      return { cancel: vi.fn(), forceStop: vi.fn() };
     });
     // Pre-populate status cache so the auto-fetch effect uses the cache path
     const cached = {
@@ -461,7 +461,7 @@ describe("MirrorsView", () => {
     let capturedCallbacks: Parameters<typeof api.testMirrors>[0] | null = null;
     mockTestMirrors.mockImplementation((callbacks) => {
       capturedCallbacks = callbacks;
-      return { cancel: vi.fn() };
+      return { cancel: vi.fn(), forceStop: vi.fn() };
     });
 
     render(<MirrorsView />);
@@ -505,7 +505,7 @@ describe("MirrorsView", () => {
     mockListMirrors.mockResolvedValue(mockMirrorResponse);
     mockTestMirrors.mockImplementation((callbacks) => {
       setTimeout(() => callbacks.onComplete?.(), 0);
-      return { cancel: vi.fn() };
+      return { cancel: vi.fn(), forceStop: vi.fn() };
     });
 
     fireEvent.click(screen.getByRole("button", { name: /Retry/i }));

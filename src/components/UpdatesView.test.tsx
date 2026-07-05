@@ -120,10 +120,10 @@ describe("UpdatesView", () => {
     mockGetScheduledRuns.mockResolvedValue({ runs: [], total: 0 });
     mockGetScheduledDismissal.mockResolvedValue({ signature: null });
     mockMarkScheduledDismissed.mockResolvedValue(undefined);
-    mockRunUpgrade.mockReturnValue({ cancel: vi.fn() });
+    mockRunUpgrade.mockReturnValue({ cancel: vi.fn(), forceStop: vi.fn() });
     mockSyncDatabase.mockImplementation((callbacks) => {
       setTimeout(() => callbacks.onComplete(), 0);
-      return { cancel: vi.fn() };
+      return { cancel: vi.fn(), forceStop: vi.fn() };
     });
   });
 
@@ -419,7 +419,7 @@ describe("UpdatesView", () => {
           callbacks.onEvent?.({ type: "complete", success: true });
           callbacks.onComplete();
         }, 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
 
       render(<UpdatesView />);
@@ -491,7 +491,7 @@ describe("UpdatesView", () => {
         setTimeout(() => {
           callbacks.onComplete();
         }, 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
 
       render(<UpdatesView />);
@@ -545,7 +545,7 @@ describe("UpdatesView", () => {
             total: 150000000,
           });
         }, 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
 
       render(<UpdatesView />);
@@ -581,7 +581,7 @@ describe("UpdatesView", () => {
             total: 1,
           });
         }, 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
 
       render(<UpdatesView />);
@@ -608,7 +608,7 @@ describe("UpdatesView", () => {
 
   describe("Cancel Upgrade", () => {
     it("shows cancel confirmation modal", async () => {
-      mockRunUpgrade.mockReturnValue({ cancel: vi.fn() });
+      mockRunUpgrade.mockReturnValue({ cancel: vi.fn(), forceStop: vi.fn() });
 
       render(<UpdatesView />);
       await waitFor(() => {
@@ -637,7 +637,7 @@ describe("UpdatesView", () => {
 
     it("calls cancel function when confirmed", async () => {
       const cancelFn = vi.fn();
-      mockRunUpgrade.mockReturnValue({ cancel: cancelFn });
+      mockRunUpgrade.mockReturnValue({ cancel: cancelFn, forceStop: cancelFn });
 
       render(<UpdatesView />);
       await waitFor(() => {
@@ -667,6 +667,109 @@ describe("UpdatesView", () => {
       });
 
       expect(cancelFn).toHaveBeenCalled();
+    });
+
+    it("stays in applying with a cancelling banner until the backend confirms", async () => {
+      const cancelFn = vi.fn();
+      mockRunUpgrade.mockReturnValue({ cancel: cancelFn, forceStop: vi.fn() });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Apply 1 Update/i }));
+      });
+      await waitFor(() => {
+        expect(screen.getByText("Applying Updates")).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Cancel Upgrade/i }));
+      });
+
+      expect(cancelFn).toHaveBeenCalled();
+      expect(screen.getByText("Applying Updates")).toBeInTheDocument();
+      expect(screen.getByText(/Cancelling:/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Force stop" })).toBeInTheDocument();
+    });
+
+    it("shows the stopped outcome and refetches when the cancelled upgrade aborts", async () => {
+      let upgradeCallbacks: api.UpgradeCallbacks | undefined;
+      mockRunUpgrade.mockImplementation((callbacks) => {
+        upgradeCallbacks = callbacks;
+        return { cancel: vi.fn(), forceStop: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
+      const checksBeforeCancel = mockCheckUpdates.mock.calls.length;
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Apply 1 Update/i }));
+      });
+      await waitFor(() => {
+        expect(screen.getByText("Applying Updates")).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Cancel Upgrade/i }));
+      });
+
+      await act(async () => {
+        upgradeCallbacks?.onError("Operation interrupted", "internal_error");
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("Upgrade stopped at a safe point")).toBeInTheDocument();
+      });
+      expect(mockCheckUpdates.mock.calls.length).toBeGreaterThan(checksBeforeCancel);
+      expect(screen.queryByText(/Failed to/)).not.toBeInTheDocument();
+    });
+
+    it("shows the finished outcome when the upgrade completes despite the cancel", async () => {
+      let upgradeCallbacks: api.UpgradeCallbacks | undefined;
+      mockRunUpgrade.mockImplementation((callbacks) => {
+        upgradeCallbacks = callbacks;
+        return { cancel: vi.fn(), forceStop: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Apply 1 Update/i }));
+      });
+      await waitFor(() => {
+        expect(screen.getByText("Applying Updates")).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Cancel Upgrade/i }));
+      });
+
+      await act(async () => {
+        upgradeCallbacks?.onComplete();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("System Updated")).toBeInTheDocument();
+      });
+      expect(screen.getByText("Upgrade finished before the cancel took effect")).toBeInTheDocument();
     });
   });
 
@@ -765,7 +868,7 @@ describe("UpdatesView", () => {
     it("re-runs preflight before restarting an upgrade interrupted by a lock", async () => {
       mockRunUpgrade.mockImplementationOnce((callbacks) => {
         setTimeout(() => callbacks.onError("Failed to initialize transaction: unable to lock database"), 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
 
       render(<UpdatesView />);
@@ -796,7 +899,7 @@ describe("UpdatesView", () => {
       // so this fails if the resume doesn't leave "error".
       mockRunUpgrade.mockImplementationOnce((callbacks) => {
         setTimeout(() => callbacks.onError("Failed to initialize transaction: unable to lock database"), 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
       mockPreflightUpgrade.mockResolvedValueOnce(mockPreflightResponse);
       mockPreflightUpgrade.mockResolvedValueOnce(mockPreflightWithKeys);
@@ -824,7 +927,7 @@ describe("UpdatesView", () => {
     it("re-runs the database sync after removing a stale lock", async () => {
       mockSyncDatabase.mockImplementationOnce((callbacks) => {
         setTimeout(() => callbacks.onError?.("unable to lock database"), 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
 
       render(<UpdatesView />);
@@ -870,7 +973,7 @@ describe("UpdatesView", () => {
       });
       mockSyncDatabase.mockImplementationOnce((callbacks) => {
         setTimeout(() => callbacks.onError?.("unable to lock database"), 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
       await act(async () => {
         fireEvent.click(screen.getByRole("button", { name: /Refresh/i }));
@@ -895,7 +998,7 @@ describe("UpdatesView", () => {
       });
       mockRunUpgrade.mockImplementation((callbacks) => {
         setTimeout(() => callbacks.onError("Failed to initialize transaction: invalid or corrupted database"), 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
 
       render(<UpdatesView />);
@@ -1050,7 +1153,7 @@ describe("UpdatesView", () => {
           callbacks.onEvent?.({ type: "complete", success: true });
           callbacks.onComplete();
         }, 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
 
       render(<UpdatesView />);
@@ -1077,7 +1180,7 @@ describe("UpdatesView", () => {
         setTimeout(() => {
           callbacks.onComplete();
         }, 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
 
       render(<UpdatesView />);
@@ -1180,7 +1283,7 @@ describe("UpdatesView", () => {
             total: 3,
           });
         }, 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
 
       render(<UpdatesView />);
@@ -1217,7 +1320,7 @@ describe("UpdatesView", () => {
           });
           callbacks.onError("Failed to download linux-6.7.1-arch1-1.pkg.tar.zst: Connection timed out");
         }, 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
 
       render(<UpdatesView />);
@@ -1251,7 +1354,7 @@ describe("UpdatesView", () => {
           });
           callbacks.onError("Failed to commit transaction: conflicting files");
         }, 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
 
       render(<UpdatesView />);
@@ -1282,7 +1385,7 @@ describe("UpdatesView", () => {
           });
           callbacks.onError("Hook failed: mkinitcpio returned non-zero exit code");
         }, 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
 
       render(<UpdatesView />);
@@ -1310,7 +1413,7 @@ describe("UpdatesView", () => {
         setTimeout(() => {
           callbacks.onError("Operation timed out after 300s");
         }, 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
 
       render(<UpdatesView />);
@@ -1342,7 +1445,7 @@ describe("UpdatesView", () => {
             callbacks.onComplete();
           }
         }, 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
 
       render(<UpdatesView />);
@@ -2192,7 +2295,7 @@ describe("UpdatesView", () => {
           callbacks.onEvent?.({ type: "complete", success: true });
           callbacks.onComplete();
         }, 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
 
       render(<UpdatesView />);
@@ -2222,7 +2325,7 @@ describe("UpdatesView", () => {
           callbacks.onEvent?.({ type: "complete", success: true });
           callbacks.onComplete();
         }, 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
 
       render(<UpdatesView />);
@@ -2247,7 +2350,7 @@ describe("UpdatesView", () => {
           callbacks.onEvent?.({ type: "complete", success: true });
           callbacks.onComplete();
         }, 0);
-        return { cancel: vi.fn() };
+        return { cancel: vi.fn(), forceStop: vi.fn() };
       });
 
       render(<UpdatesView />);
