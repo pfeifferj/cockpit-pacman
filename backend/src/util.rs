@@ -3,8 +3,9 @@ use serde::Serialize;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{self, Write};
+use std::io::{self, BufRead, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::os::fd::FromRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::sync::{Arc, Condvar, LazyLock, Mutex, OnceLock};
@@ -44,6 +45,53 @@ pub fn reset_cancelled() {
     CANCELLED.store(false, AtomicOrdering::SeqCst);
 }
 
+/// Only sets the flag; the alpm callbacks re-issue the interrupt on the commit
+/// thread, so a cancel never reaches libalpm from another thread.
+pub fn request_cancel() {
+    CANCELLED.store(true, AtomicOrdering::SeqCst);
+}
+
+/// Watch stdin for a "cancel" line; EOF or read error also cancels (the
+/// channel is gone). Runs until process exit.
+pub fn spawn_cancel_listener() {
+    // Off fd 0 so a libalpm scriptlet inheriting stdin can't steal the cancel
+    // line; scriptlets get /dev/null, we keep a private close-on-exec dup.
+    let control_fd = unsafe {
+        let dup = libc::dup(0);
+        if dup < 0 {
+            return;
+        }
+        libc::fcntl(dup, libc::F_SETFD, libc::FD_CLOEXEC);
+        let devnull = libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY);
+        if devnull >= 0 {
+            libc::dup2(devnull, 0);
+            libc::close(devnull);
+        }
+        dup
+    };
+
+    std::thread::spawn(move || {
+        // SAFETY: control_fd is a fresh dup owned solely by this thread.
+        let file = unsafe { std::fs::File::from_raw_fd(control_fd) };
+        let mut reader = io::BufReader::new(file);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) | Err(_) => {
+                    request_cancel();
+                    return;
+                }
+                Ok(_) => {
+                    if line.trim() == "cancel" {
+                        request_cancel();
+                    }
+                }
+            }
+        }
+    });
+}
+
 pub const DEFAULT_MUTATION_TIMEOUT_SECS: u64 = 300;
 
 pub struct TimeoutGuard {
@@ -72,12 +120,8 @@ impl TimeoutGuard {
     }
 }
 
-/// Install the cooperative-cancellation handler. ctrlc's `termination` feature
-/// makes this catch SIGTERM (and SIGHUP) too, not just SIGINT, so cockpit's
-/// `proc.close()` sets the CANCELLED flag instead of hard-killing the process.
-/// Handlers poll `is_cancelled()` at safe points; a cancel arriving during an
-/// alpm commit is therefore deferred until the commit finishes rather than
-/// tearing the transaction apart mid-write.
+/// ctrlc's `termination` feature catches SIGTERM/SIGHUP too, so cockpit's
+/// `proc.close()` requests a cancel instead of killing the process mid-commit.
 pub fn setup_signal_handler() {
     static HANDLER_SET: AtomicBool = AtomicBool::new(false);
 
@@ -90,9 +134,7 @@ pub fn setup_signal_handler() {
         return;
     }
 
-    if let Err(e) = ctrlc::set_handler(move || {
-        CANCELLED.store(true, AtomicOrdering::SeqCst);
-    }) {
+    if let Err(e) = ctrlc::set_handler(request_cancel) {
         eprintln!("Warning: Failed to set signal handler: {}", e);
         HANDLER_SET.store(false, AtomicOrdering::SeqCst);
     }
@@ -897,9 +939,21 @@ mod tests {
         assert_eq!(v["success"], true);
     }
 
-    /// Every transaction-holding handler relies on this to survive cockpit's
-    /// SIGTERM with db.lck held; losing ctrlc's "termination" feature would
-    /// silently revert them all to die-with-stale-lock.
+    #[test]
+    fn request_cancel_sets_the_flag() {
+        super::reset_cancelled();
+        super::request_cancel();
+        assert!(super::is_cancelled());
+        super::reset_cancelled();
+    }
+
+    #[test]
+    fn try_interrupt_without_transaction_is_noop() {
+        crate::alpm::try_interrupt();
+    }
+
+    /// Losing ctrlc's "termination" feature would silently break SIGTERM
+    /// survival for every transaction handler.
     #[test]
     #[allow(clippy::unwrap_used)]
     fn signal_handler_traps_sigterm() {

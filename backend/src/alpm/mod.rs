@@ -1,8 +1,8 @@
 mod callbacks;
 mod transaction;
 
-pub use callbacks::{setup_dl_cb, setup_log_cb};
-pub use transaction::TransactionGuard;
+pub use callbacks::{interrupt_if_cancelled, setup_dl_cb, setup_log_cb};
+pub use transaction::{TransactionGuard, try_interrupt};
 
 use alpm::{Alpm, LogLevel, Progress};
 use alpm_utils::alpm_with_conf;

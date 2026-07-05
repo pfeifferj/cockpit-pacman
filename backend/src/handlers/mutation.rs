@@ -3,7 +3,10 @@ use anyhow::Result;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::alpm::{TransactionGuard, get_handle, progress_to_string, setup_dl_cb, setup_log_cb};
+use crate::alpm::{
+    TransactionGuard, get_handle, interrupt_if_cancelled, progress_to_string, setup_dl_cb,
+    setup_log_cb, try_interrupt,
+};
 use crate::check_cancel_early;
 use crate::db::invalidate_repo_map_cache;
 use crate::models::{
@@ -13,7 +16,7 @@ use crate::models::{
 use crate::util::{
     CheckResult, DEFAULT_MUTATION_TIMEOUT_SECS, TimeoutGuard, check_cancel,
     emit_cancellation_complete, emit_event, emit_json, handle_commit_error, is_cancelled,
-    setup_signal_handler,
+    setup_signal_handler, spawn_cancel_listener,
 };
 
 const KERNEL_PACKAGES: &[&str] = &[
@@ -60,6 +63,7 @@ fn setup_progress_cb(handle: &mut Alpm) {
          current: usize,
          _: &mut ()| {
             if is_cancelled() {
+                try_interrupt();
                 return;
             }
             emit_event(&StreamEvent::Progress {
@@ -75,6 +79,7 @@ fn setup_progress_cb(handle: &mut Alpm) {
 
 fn setup_event_cb(handle: &mut Alpm, scope: EventScope) {
     handle.set_event_cb((), move |event: AnyEvent, _: &mut ()| {
+        interrupt_if_cancelled();
         let (event_str, pkg_name) = match event.event() {
             Event::PackageOperationStart(op) | Event::PackageOperationDone(op) => {
                 let (op_name, pkg_name) = match op.operation() {
@@ -441,6 +446,7 @@ pub fn sync_database(force: bool, timeout_secs: Option<u64>) -> Result<()> {
 
 pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<()> {
     setup_signal_handler();
+    spawn_cancel_listener();
     let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
 
     let mut handle = get_handle()?;
@@ -487,6 +493,8 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
         });
         return Ok(());
     }
+
+    check_cancel_early!(&timeout);
 
     commit_and_complete(
         &mut tx,
