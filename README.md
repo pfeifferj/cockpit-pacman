@@ -1,6 +1,7 @@
 # cockpit-pacman
 
 [![AUR package](https://img.shields.io/aur/version/cockpit-pacman)](https://aur.archlinux.org/packages/cockpit-pacman)
+[![AUR package](https://img.shields.io/aur/version/cockpit-pacman-git)](https://aur.archlinux.org/packages/cockpit-pacman-git)
 
 A Cockpit plugin for Arch Linux package management using direct alpm.rs integration.
 
