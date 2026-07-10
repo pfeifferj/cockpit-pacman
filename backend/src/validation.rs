@@ -112,31 +112,6 @@ pub fn validate_schedule(schedule: &str) -> Result<()> {
     if schedule.contains('=') {
         anyhow::bail!("Schedule contains invalid characters");
     }
-    // Brackets are permitted only as balanced digit-range groups (e.g. `[1-3]`).
-    let mut inside = false;
-    for c in schedule.chars() {
-        match c {
-            '[' => {
-                if inside {
-                    anyhow::bail!("Schedule has nested brackets");
-                }
-                inside = true;
-            }
-            ']' => {
-                if !inside {
-                    anyhow::bail!("Schedule has unmatched ]");
-                }
-                inside = false;
-            }
-            _ if inside && !c.is_ascii_digit() && c != '-' && c != ',' => {
-                anyhow::bail!("Schedule has invalid bracket content");
-            }
-            _ => {}
-        }
-    }
-    if inside {
-        anyhow::bail!("Schedule has unmatched [");
-    }
     // Only allow known safe presets or valid OnCalendar-like patterns
     let safe_presets = [
         "hourly",
@@ -161,13 +136,31 @@ pub fn validate_schedule(schedule: &str) -> Result<()> {
             || c == '/'
             || c == '.'
             || c == '~'
-            || c == '['
-            || c == ']'
     };
     if !schedule.chars().all(valid_chars) {
         anyhow::bail!("Schedule contains invalid characters for OnCalendar format");
     }
-    Ok(())
+    // The char allowlist accepts nonsense like "9999-99-99 99:99:99"; let systemd
+    // itself judge the grammar.
+    validate_oncalendar_grammar(schedule)
+}
+
+/// Reject a custom OnCalendar expression systemd can't parse. If systemd-analyze
+/// is missing or times out, fall back to the syntactic checks above rather than
+/// blocking a valid schedule.
+fn validate_oncalendar_grammar(schedule: &str) -> Result<()> {
+    let mut cmd = std::process::Command::new("systemd-analyze");
+    // `--` stops a schedule like "-h" being read as an option (which exits 0
+    // and would wrongly validate).
+    cmd.args(["calendar", "--", schedule]);
+    match crate::util::output_with_timeout(cmd, std::time::Duration::from_secs(5)) {
+        Ok(out) if out.status.success() => Ok(()),
+        Ok(out) => {
+            let msg = String::from_utf8_lossy(&out.stderr);
+            anyhow::bail!("Invalid OnCalendar schedule: {}", msg.trim());
+        }
+        Err(_) => Ok(()),
+    }
 }
 
 pub fn validate_max_packages(max: usize) -> Result<()> {

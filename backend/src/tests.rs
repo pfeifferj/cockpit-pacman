@@ -516,9 +516,31 @@ fn test_validate_schedule_invalid_chars() {
     assert!(validate_schedule("weekly$(whoami)").is_err());
 }
 
+fn systemd_analyze_available() -> bool {
+    std::process::Command::new("systemd-analyze")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 #[test]
-fn test_validate_schedule_bracket_range_accepted() {
-    assert!(validate_schedule("2026[1-3]-01 12:00:00").is_ok());
+fn test_validate_schedule_rejects_brackets() {
+    // Brackets are not OnCalendar syntax; the char allowlist rejects them.
+    assert!(validate_schedule("2026[1-3]-01 12:00:00").is_err());
+}
+
+#[test]
+fn test_validate_schedule_rejects_malformed_calendar() {
+    // Char-valid but nonsensical; only systemd-analyze can catch these.
+    if !systemd_analyze_available() {
+        return;
+    }
+    assert!(validate_schedule("9999-99-99 99:99:99").is_err());
+    assert!(validate_schedule("Frouday *-*-* 00:00").is_err());
+    // an option-like schedule must not slip through as a systemd-analyze flag
+    assert!(validate_schedule("-h").is_err());
+    assert!(validate_schedule("--version").is_err());
 }
 
 #[test]
@@ -1175,6 +1197,7 @@ fn test_mirror_backup_serialization() {
     assert!(json.contains("\"enabled_count\":3"));
     assert!(json.contains("\"total_count\":10"));
     assert!(json.contains("\"size\":2048"));
+    assert!(json.contains("\"source\":\"manual\""));
 }
 
 #[test]
