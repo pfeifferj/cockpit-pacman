@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useBackdropClose } from "../hooks/useBackdropClose";
 import {
 	Spinner,
@@ -6,6 +6,7 @@ import {
 	DescriptionListGroup,
 	DescriptionListTerm,
 	DescriptionListDescription,
+	ExpandableSection,
 	Label,
 	LabelGroup,
 	Popover,
@@ -20,7 +21,8 @@ import {
 	EmptyStateBody,
 } from '@patternfly/react-core';
 import { OutlinedQuestionCircleIcon, ArrowDownIcon, ExclamationCircleIcon, TopologyIcon, TrashIcon, PlusCircleIcon, HistoryIcon, BanIcon } from "@patternfly/react-icons";
-import { PackageDetails, SyncPackageDetails, formatSize, addIgnoredPackage, removeIgnoredPackage } from "../api";
+import { PackageDetails, SyncPackageDetails, SecurityInfoResponse, formatSize, addIgnoredPackage, removeIgnoredPackage, getSecurityInfo } from "../api";
+import { severityColor } from "../severity";
 import { TimeAgo } from "./TimeAgo";
 import { sanitizeUrl, sanitizeErrorMessage } from "../utils";
 import { DowngradeModal } from "./DowngradeModal";
@@ -32,6 +34,81 @@ type PackageInfo = PackageDetails | SyncPackageDetails;
 function isInstalledPackage(pkg: PackageInfo): pkg is PackageDetails {
   return "install_date" in pkg && "reason" in pkg && "validation" in pkg;
 }
+
+// Per-package advisory history from the Arch Security Tracker, fetched lazily
+// when the section is first expanded.
+const PackageSecuritySection: React.FC<{ name: string }> = ({ name }) => {
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [info, setInfo] = useState<SecurityInfoResponse | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getSecurityInfo(name)
+      .then((r) => { if (!cancelled) { setInfo(r); setState("ready"); } })
+      .catch((e) => {
+        if (!cancelled) { setErr(e instanceof Error ? e.message : String(e)); setState("error"); }
+      });
+    return () => { cancelled = true; };
+  }, [name]);
+
+  if (state === "loading") {
+    return <Spinner size="md" aria-label="Loading advisories" />;
+  }
+  if (state === "error") {
+    return <span className="pf-v6-u-color-200">{sanitizeErrorMessage(err)}</span>;
+  }
+  if (!info || (!info.advisories.length && !info.groups.length && !info.issues.length)) {
+    return <span className="pf-v6-u-color-200">No advisories for this package.</span>;
+  }
+
+  return (
+    <DescriptionList isCompact>
+      {info.advisories.length > 0 && (
+        <DescriptionListGroup>
+          <DescriptionListTerm>Advisories</DescriptionListTerm>
+          <DescriptionListDescription>
+            <LabelGroup numLabels={10}>
+              {info.advisories.map((a) => (
+                <Label key={a.name} isCompact color={severityColor(a.severity)}>
+                  {a.name} ({a.severity}, {a.date})
+                </Label>
+              ))}
+            </LabelGroup>
+          </DescriptionListDescription>
+        </DescriptionListGroup>
+      )}
+      {info.groups.length > 0 && (
+        <DescriptionListGroup>
+          <DescriptionListTerm>Groups</DescriptionListTerm>
+          <DescriptionListDescription>
+            <LabelGroup numLabels={10}>
+              {info.groups.map((g) => (
+                <Label key={g.name} isCompact color={severityColor(g.severity)}>
+                  {g.name} ({g.status})
+                </Label>
+              ))}
+            </LabelGroup>
+          </DescriptionListDescription>
+        </DescriptionListGroup>
+      )}
+      {info.issues.length > 0 && (
+        <DescriptionListGroup>
+          <DescriptionListTerm>Issues</DescriptionListTerm>
+          <DescriptionListDescription>
+            <LabelGroup numLabels={10}>
+              {info.issues.map((i) => (
+                <Label key={i.name} isCompact color={severityColor(i.severity)}>
+                  {i.name} ({i.issue_type}, {i.status})
+                </Label>
+              ))}
+            </LabelGroup>
+          </DescriptionListDescription>
+        </DescriptionListGroup>
+      )}
+    </DescriptionList>
+  );
+};
 
 interface PackageDetailsModalProps {
   packageDetails: PackageInfo | null;
@@ -64,6 +141,7 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
   const [downgradeModalOpen, setDowngradeModalOpen] = useState(false);
   const [uninstallTarget, setUninstallTarget] = useState<{ name: string; version: string } | null>(null);
   const [installTarget, setInstallTarget] = useState<{ name: string; version: string } | null>(null);
+  const [securityExpanded, setSecurityExpanded] = useState(false);
   const isOpen = packageDetails !== null || isLoading || !!error;
   const isInstalled = packageDetails && isInstalledPackage(packageDetails);
   useBackdropClose(isOpen, onClose);
@@ -123,6 +201,7 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
             </EmptyStateBody>
           </EmptyState>
         ) : packageDetails ? (
+          <>
           <DescriptionList>
 
           {/* Overview */}
@@ -490,6 +569,14 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
           )}
 
           </DescriptionList>
+          <ExpandableSection
+            toggleText="Security advisories"
+            isExpanded={securityExpanded}
+            onToggle={(_e, expanded) => setSecurityExpanded(expanded)}
+          >
+            {securityExpanded && <PackageSecuritySection name={packageDetails.name} />}
+          </ExpandableSection>
+          </>
         ) : null}
       </ModalBody>
       {packageDetails && (

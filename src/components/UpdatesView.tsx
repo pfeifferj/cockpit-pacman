@@ -105,6 +105,7 @@ import { NetworkErrorState } from "./NetworkErrorState";
 import { CompactPagination } from "./CompactPagination";
 
 import { appendCapped, isDbLockError, sanitizeUrl } from "../utils";
+import { severityColor } from "../severity";
 import { TimeAgo } from "./TimeAgo";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { StatBox } from "./StatBox";
@@ -119,18 +120,6 @@ const SEVERITY_ORDER: Record<string, number> = {
   Low: 1,
   Unknown: 0,
 };
-
-type SeverityColor = "red" | "orange" | "yellow" | "blue" | "grey";
-
-function severityColor(severity: string): SeverityColor {
-  switch (severity) {
-    case "Critical": return "red";
-    case "High": return "orange";
-    case "Medium": return "yellow";
-    case "Low": return "blue";
-    default: return "grey";
-  }
-}
 
 type PageStatus = {
   type?: "info" | "warning" | "error" | null;

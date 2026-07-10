@@ -9,15 +9,23 @@ vi.mock("../api", async () => {
   return {
     ...actual,
     addIgnoredPackage: vi.fn(),
+    getSecurityInfo: vi.fn(),
   };
 });
 
 const mockAddIgnoredPackage = vi.mocked(api.addIgnoredPackage);
+const mockGetSecurityInfo = vi.mocked(api.getSecurityInfo);
 
 describe("PackageDetailsModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAddIgnoredPackage.mockResolvedValue({ success: true, package: "linux", message: "Package ignored" });
+    mockGetSecurityInfo.mockResolvedValue({
+      name: "linux",
+      advisories: [{ name: "AVG-2024-1", date: "2024-01-01", severity: "High", advisory_type: "specific" }],
+      groups: [],
+      issues: [],
+    });
   });
 
   afterEach(() => {
@@ -75,5 +83,26 @@ describe("PackageDetailsModal", () => {
     });
     expect(onIgnored).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("lazily fetches per-package advisories when the section is expanded", async () => {
+    render(
+      <PackageDetailsModal
+        packageDetails={mockPackageDetails}
+        isLoading={false}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(mockGetSecurityInfo).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText("Security advisories"));
+
+    await waitFor(() => {
+      expect(mockGetSecurityInfo).toHaveBeenCalledWith("linux");
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/AVG-2024-1/)).toBeInTheDocument();
+    });
   });
 });

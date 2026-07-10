@@ -408,6 +408,10 @@ export async function checkSecurity(): Promise<SecurityResponse> {
   return runBackend<SecurityResponse>("check-security", [], { superuser: "none" });
 }
 
+export async function getSecurityInfo(name: string): Promise<SecurityInfoResponse> {
+  return runBackend<SecurityInfoResponse>("security-info", [name], { superuser: "none" });
+}
+
 export async function getPackageInfo(name: string): Promise<PackageDetails> {
   return runBackend<PackageDetails>("local-package-info", [name]);
 }
