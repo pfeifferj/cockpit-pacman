@@ -11,8 +11,6 @@ use crate::validation::{
     validate_version,
 };
 
-// --- Serialization tests ---
-
 #[test]
 fn test_package_serialization() {
     let pkg = Package {
@@ -135,8 +133,6 @@ fn test_package_null_fields() {
     assert!(json.contains("\"install_date\":null"));
     assert!(json.contains("\"repository\":null"));
 }
-
-// --- Validation tests ---
 
 #[test]
 fn test_validate_package_name_valid() {
@@ -323,8 +319,6 @@ fn test_validate_mirror_timeout_invalid() {
     assert!(validate_mirror_timeout(1000).is_err());
 }
 
-// --- Package filename parsing tests ---
-
 #[test]
 fn test_parse_package_filename_simple() {
     let result = parse_package_filename("ada-1.0.0-1-x86_64.pkg.tar.zst");
@@ -415,8 +409,6 @@ fn test_parse_package_filename_any_arch() {
     );
 }
 
-// --- validate_version tests ---
-
 #[test]
 fn test_validate_version_valid() {
     assert!(validate_version("1.0.0-1").is_ok());
@@ -455,8 +447,6 @@ fn test_validate_version_control_chars() {
     assert!(validate_version("1.0\r-1").is_err()); // carriage return
     assert!(validate_version("1.0\t-1").is_err()); // tab
 }
-
-// --- validate_schedule tests ---
 
 #[test]
 fn test_validate_schedule_empty() {
@@ -553,8 +543,6 @@ fn test_validate_schedule_equals_rejected() {
     assert!(validate_schedule("key=val").is_err());
 }
 
-// --- validate_json_payload_size tests ---
-
 #[test]
 fn test_validate_json_payload_size_valid() {
     let small_payload = r#"{"mirrors": []}"#;
@@ -574,8 +562,6 @@ fn test_validate_json_payload_size_too_large() {
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("too large"));
 }
-
-// --- validate_depth tests ---
 
 #[test]
 fn test_validate_depth_valid() {
@@ -613,8 +599,6 @@ fn test_validate_depth_too_large() {
     assert!(validate_depth(u32::MAX).is_err());
 }
 
-// --- validate_direction tests ---
-
 #[test]
 fn test_validate_direction_valid_values() {
     assert!(validate_direction("forward").is_ok());
@@ -633,8 +617,6 @@ fn test_validate_direction_invalid() {
     assert!(validate_direction("up").is_err());
     assert!(validate_direction("down").is_err());
 }
-
-// --- validate_max_packages tests ---
 
 #[test]
 fn test_validate_max_packages_valid() {
@@ -659,8 +641,6 @@ fn test_validate_max_packages_too_large() {
     assert!(validate_max_packages(5000).is_err());
     assert!(validate_max_packages(usize::MAX).is_err());
 }
-
-// --- Config in-memory operation tests ---
 
 #[test]
 fn test_config_add_ignored_new_package() {
@@ -798,8 +778,6 @@ fn test_config_preserves_unknown_fields_on_rewrite() {
     );
 }
 
-// --- handle_commit_error tests ---
-
 #[test]
 fn test_handle_commit_error_cancelled() {
     use crate::util::{TimeoutGuard, handle_commit_error};
@@ -909,8 +887,6 @@ fn test_check_result_variants() {
     assert!(matches!(result, CheckResult::Continue));
 }
 
-// --- News serialization tests ---
-
 #[test]
 fn test_news_item_serialization() {
     let item = NewsItem {
@@ -994,8 +970,6 @@ fn test_news_response_serialization_with_items() {
     assert!(json.contains("\"title\":\"Title A\""));
     assert!(json.contains("\"title\":\"Title B\""));
 }
-
-// --- strip_html_and_truncate tests ---
 
 #[test]
 fn test_strip_html_basic() {
@@ -1102,8 +1076,6 @@ fn test_parse_rss_body_decodes_hex_entity_en_dash() {
     assert!(result.contains('\u{2013}'), "en-dash decoded from &#x2013;");
 }
 
-// --- Integration tests (require live pacman system) ---
-
 #[cfg(feature = "integration-tests")]
 mod integration {
     use crate::alpm::get_handle;
@@ -1177,8 +1149,6 @@ mod integration {
         assert!(pkg.isize() >= 0, "Package size should be non-negative");
     }
 }
-
-// --- Mirror backup serialization tests ---
 
 #[test]
 fn test_mirror_backup_serialization() {

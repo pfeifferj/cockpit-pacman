@@ -135,6 +135,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
     }
   }, [offset, perPage, filter, searchQuery, fetchHistory, applyResponse]);
 
+  // Auto-load on input/mode change. setState stays inside .then/.catch (the
+  // set-state-in-effect lint rejects it factored through a helper).
   useEffect(() => {
     let cancelled = false;
     fetchHistory({ offset, limit: perPage, filter, search: searchQuery })

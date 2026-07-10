@@ -217,8 +217,8 @@ export const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   "internal_error",
 ]);
 
-// Any envelope-shaped payload is an error; an unrecognized code maps to
-// internal_error so it surfaces instead of being read back as a success value.
+// An unrecognized envelope code maps to internal_error, so a code the frontend
+// doesn't know still surfaces as an error rather than a value.
 function asErrorCode(code: string): ErrorCode {
   return KNOWN_ERROR_CODES.has(code) ? (code as ErrorCode) : "internal_error";
 }

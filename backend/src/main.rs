@@ -771,8 +771,8 @@ fn main() {
         // unit result to reflect reality.
         let emit_envelope = args[1] != "scheduled-run";
         if emit_envelope {
-            // Always emit a structured envelope so an unclassifiable error still
-            // reaches the frontend with its real message, not an empty stdout.
+            // Every frontend-consumed command reports failure as an envelope, so
+            // an unclassifiable error still carries its real message.
             let code = classify_error(&e).unwrap_or("internal_error");
             let _ = emit_json(&StructuredError {
                 code: code.to_string(),

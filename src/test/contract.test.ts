@@ -8,14 +8,14 @@
  * Documented drifts (existing mismatches between Rust and TypeScript):
  *  1. PackageDetails.build_date: Rust always emits i64 (never null), TS types it as number|null.
  *  2. PackageSecurityAdvisory.fixed_version: Rust uses skip_serializing_if, so the field is
- *     ABSENT when no fix exists. TS types it as string|null — it should be string|null|undefined
+ *     ABSENT when no fix exists. TS types it as string|null; it should be string|null|undefined
  *     or use the optional `?:` marker. Accessing .fixed_version on an unfixed advisory yields
  *     undefined, not null.
  *  3. StreamEventEvent.package: Rust serializes Option<String> WITHOUT skip_serializing_if, so
- *     the field is always present in JSON — null when the event has no package. TypeScript types
+ *     the field is always present in JSON: null when the event has no package. TypeScript types
  *     it as `package?: string` (optional, possibly absent), but it will never be absent from
  *     backend output. Code that checks `event.package === undefined` will always be false.
- *  4. StreamEventComplete.message: Same pattern — Rust always emits the field as null when there
+ *  4. StreamEventComplete.message: Same pattern: Rust always emits the field as null when there
  *     is no message. TypeScript types it as `message?: string`, but it is always present as null,
  *     never absent. Code that checks `complete.message === undefined` will always be false.
  */
@@ -205,8 +205,8 @@ describe("getPackageInfo contract", () => {
   });
 
   it("DRIFT: build_date is always a number from backend, never null", async () => {
-    // Rust: pub build_date: i64 — always serialized as integer
-    // TypeScript: build_date: number | null — unnecessarily allows null
+    // Rust: pub build_date: i64, always serialized as integer
+    // TypeScript: build_date: number | null, unnecessarily allows null
     // Practical impact: code that null-checks build_date before using it is dead code;
     // code that skips the null-check is safe and correct.
     spawnReturns(packageDetailFixture);
@@ -319,7 +319,7 @@ describe("preflightUpgrade contract", () => {
 
   it("absent optional arrays become undefined (not null) in parsed result", async () => {
     // Rust uses skip_serializing_if = "Vec::is_empty", so empty arrays are ABSENT.
-    // TS interface uses ?:, so they are undefined when absent — correct.
+    // TS interface uses ?:, so they are undefined when absent (correct).
     spawnReturns(preflightFixture);
     const result = await preflightUpgrade();
 
@@ -486,7 +486,7 @@ describe("checkSecurity contract", () => {
   it("DRIFT: fixed_version is undefined (not null) when backend omits it via skip_serializing_if", async () => {
     // Rust: #[serde(skip_serializing_if = "Option::is_none")] on fixed_version
     // Result: field is ABSENT in JSON when no fix exists
-    // TypeScript: types it as `string | null` — but accessing it yields `undefined`
+    // TypeScript: types it as `string | null`, but accessing it yields `undefined`
     // Fix needed: TS interface should use `fixed_version?: string | null`
     spawnReturns(securityFixture);
     const result = await checkSecurity();
@@ -722,7 +722,7 @@ describe("getDependencyTree contract", () => {
 });
 
 describe("stream-events fixture shape", () => {
-  // These tests verify the fixture file — the actual streaming path is tested in api.test.ts.
+  // These tests verify the fixture file; the actual streaming path is tested in api.test.ts.
   // Here we confirm the fixture events have the correct shape for each discriminated type.
 
   const events = streamEventsFixture as StreamEvent[];
@@ -1221,11 +1221,14 @@ describe("CLI argv contract", () => {
 describe("error-code contract", () => {
   it("KNOWN_ERROR_CODES matches the shared fixture", () => {
     expect([...KNOWN_ERROR_CODES].sort()).toEqual([...errorCodesFixture.codes].sort());
+    // Set membership hides a duplicate in the fixture array; pin the count too.
+    expect(KNOWN_ERROR_CODES.size).toBe(errorCodesFixture.codes.length);
   });
 
   it("NETWORK_ERROR_KEYWORDS matches the shared fixture", () => {
     expect([...NETWORK_ERROR_KEYWORDS].sort()).toEqual(
       [...errorCodesFixture.networkKeywords].sort()
     );
+    expect(new Set(NETWORK_ERROR_KEYWORDS).size).toBe(NETWORK_ERROR_KEYWORDS.length);
   });
 });

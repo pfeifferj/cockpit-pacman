@@ -105,4 +105,21 @@ describe("PackageDetailsModal", () => {
       expect(screen.getByText(/AVG-2024-1/)).toBeInTheDocument();
     });
   });
+
+  it("shows an empty state when a package has no advisories", async () => {
+    mockGetSecurityInfo.mockResolvedValue({ name: "linux", advisories: [], groups: [], issues: [] });
+    render(
+      <PackageDetailsModal
+        packageDetails={mockPackageDetails}
+        isLoading={false}
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByText("Security advisories"));
+
+    await waitFor(() => {
+      expect(screen.getByText(/No advisories for this package/i)).toBeInTheDocument();
+    });
+  });
 });

@@ -955,7 +955,7 @@ fn mirror_status_fixture_matches_struct_shape() {
 fn security_advisory_fixed_version_absent_when_none() {
     // DRIFT: fixed_version uses skip_serializing_if = "Option::is_none"
     // Rust: absent from JSON when no fix exists
-    // TypeScript: `fixed_version: string | null` — should be `fixed_version?: string | null`
+    // TypeScript: `fixed_version: string | null`; should be `fixed_version?: string | null`
     // Result: advisory.fixed_version is `undefined`, not `null`, when unfixed
     let advisory = PackageSecurityAdvisory {
         package: "openssl".into(),
@@ -2013,5 +2013,14 @@ fn error_codes_match_shared_fixture() {
     assert_eq!(
         rust_set(NETWORK_ERROR_KEYWORDS),
         fixture_set("networkKeywords")
+    );
+    // Set equality alone would hide a duplicate entry in the slice or fixture.
+    assert_eq!(
+        ERROR_CODES.len(),
+        fixture["codes"].as_array().unwrap().len()
+    );
+    assert_eq!(
+        NETWORK_ERROR_KEYWORDS.len(),
+        fixture["networkKeywords"].as_array().unwrap().len()
     );
 }

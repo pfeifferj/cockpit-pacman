@@ -205,7 +205,12 @@ describe("HistoryView", () => {
     await waitFor(() => {
       expect(mockGetHistory).toHaveBeenCalled();
     });
-    // Expand/Collapse-all button is grouped-only
+    // Flat mode renders one flat table: one row per entry plus the header row,
+    // with no grouped accordion tables.
+    await waitFor(() => {
+      expect(screen.getAllByRole("row")).toHaveLength(mockLogResponse.entries.length + 1);
+    });
+    // Expand/Collapse-all button is grouped-only.
     expect(screen.queryByRole("button", { name: /Expand all|Collapse all/i })).not.toBeInTheDocument();
   });
 });

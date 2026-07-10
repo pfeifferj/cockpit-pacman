@@ -635,9 +635,8 @@ pub const ERROR_CODES: &[&str] = &[
     "internal_error",
 ];
 
-/// Canonical network-error keyword list. Kept in sync with NETWORK_ERROR_KEYWORDS
-/// / parseErrorCode in src/api.ts; the two can't share code across the process
-/// boundary, so the list is mirrored and pinned via test/fixtures/error-codes.json.
+/// Substrings that mark an error message as a network failure. Mirrored by
+/// parseErrorCode in src/api.ts and pinned alongside ERROR_CODES.
 pub const NETWORK_ERROR_KEYWORDS: &[&str] = &[
     "network",
     "connection",
@@ -1095,11 +1094,10 @@ mod tests {
 
     #[test]
     fn classify_returns_none_for_unclassifiable_error() {
-        // main.rs falls back to "internal_error" when classification returns None,
-        // so an unclassifiable error still reaches the frontend as an envelope.
         assert_eq!(classify_message("something entirely unexpected"), None);
         assert_eq!(classify_error(&anyhow::anyhow!("weird failure")), None);
         assert!(classify_message("connection refused").is_some());
+        // main.rs's unwrap_or fallback is only valid if internal_error is in the set.
         assert!(ERROR_CODES.contains(&"internal_error"));
     }
 
