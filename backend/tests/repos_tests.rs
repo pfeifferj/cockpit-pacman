@@ -132,3 +132,36 @@ fn commented_siglevel_is_not_preserved_on_roundtrip() {
     assert!(output.contains("SigLevel = Optional TrustAll"));
     assert!(!output.contains("#SigLevel"));
 }
+
+const FIXTURE_EXTRAS: &str = r#"[core]
+SigLevel = Required DatabaseOptional
+Include = /etc/pacman.d/mirrorlist
+Usage = Sync Search
+CacheServer = https://cache.example.com/$repo
+# keep this note
+"#;
+
+#[test]
+fn unknown_directives_and_comments_round_trip_verbatim() {
+    let parsed: PacmanConf = parse_conf(FIXTURE_EXTRAS);
+    assert_eq!(
+        parsed.repos[0].passthrough,
+        vec![
+            "Usage = Sync Search".to_string(),
+            "CacheServer = https://cache.example.com/$repo".to_string(),
+            "# keep this note".to_string(),
+        ]
+    );
+    assert_eq!(serialize_conf(&parsed), FIXTURE_EXTRAS);
+}
+
+#[test]
+fn disabling_section_comments_passthrough_directives() {
+    let mut parsed: PacmanConf = parse_conf(FIXTURE_EXTRAS);
+    parsed.repos[0].enabled = false;
+    let output = serialize_conf(&parsed);
+    assert!(output.contains("#Usage = Sync Search"));
+    assert!(output.contains("#CacheServer = https://cache.example.com/$repo"));
+    assert!(output.contains("# keep this note"));
+    assert!(!output.contains("## keep this note"));
+}

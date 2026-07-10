@@ -38,6 +38,10 @@ pub struct RepoSection {
     pub enabled: bool,
     pub sig_level: Option<String>,
     pub directives: Vec<Directive>,
+    /// Lines pacman understands but this tool does not model (Usage,
+    /// CacheServer, in-section comments), kept verbatim so a round-trip does
+    /// not silently drop them.
+    pub passthrough: Vec<String>,
     pub trailing_blank_lines: usize,
 }
 
@@ -70,6 +74,7 @@ pub fn parse_conf(input: &str) -> PacmanConf {
                 enabled: !is_commented_section,
                 sig_level: None,
                 directives: Vec::new(),
+                passthrough: Vec::new(),
                 trailing_blank_lines: 0,
             });
             continue;
@@ -110,6 +115,8 @@ pub fn parse_conf(input: &str) -> PacmanConf {
                 value: val.to_string(),
                 enabled: !commented,
             });
+        } else {
+            repo.passthrough.push(trimmed.to_string());
         }
     }
 
@@ -172,6 +179,18 @@ pub fn serialize_conf(conf: &PacmanConf) -> String {
             }
         }
 
+        for raw in &repo.passthrough {
+            // A disabled section's header is commented, so any live directive
+            // under it would bind to the wrong section; comment passthrough too.
+            if repo.enabled || raw.starts_with('#') {
+                output.push_str(raw);
+            } else {
+                output.push('#');
+                output.push_str(raw);
+            }
+            output.push('\n');
+        }
+
         for _ in 0..repo.trailing_blank_lines {
             output.push('\n');
         }
@@ -218,6 +237,7 @@ fn entry_to_repo_section(entry: &RepoEntry) -> RepoSection {
                 enabled: d.enabled,
             })
             .collect(),
+        passthrough: Vec::new(),
         trailing_blank_lines: 1,
     }
 }
@@ -263,7 +283,20 @@ pub fn save_repos(repos: &[RepoEntry]) -> Result<()> {
         let original = fs::read_to_string(path)?;
         let mut conf = parse_conf(&original);
 
+        // Passthrough isn't in RepoEntry, so recover it from the on-disk
+        // section by name before the rewrite drops it.
+        let mut preserved: std::collections::HashMap<String, Vec<String>> = conf
+            .repos
+            .drain(..)
+            .map(|r| (r.name, r.passthrough))
+            .collect();
+
         conf.repos = repos.iter().map(entry_to_repo_section).collect();
+        for section in &mut conf.repos {
+            if let Some(p) = preserved.remove(&section.name) {
+                section.passthrough = p;
+            }
+        }
 
         let new_content = serialize_conf(&conf);
 
