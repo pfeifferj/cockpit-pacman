@@ -20,7 +20,20 @@ const SYSTEMCTL_TIMEOUT: Duration = Duration::from_secs(30);
 fn run_systemctl(args: &[&str]) -> Result<std::process::Output> {
     let mut cmd = Command::new("systemctl");
     cmd.args(args);
+    // Pin the locale so stderr stays parseable (timer_absent matches it) and
+    // errors read the same regardless of the host language.
+    cmd.env("LC_ALL", "C");
     crate::util::output_with_timeout(cmd, SYSTEMCTL_TIMEOUT)
+}
+
+/// Whether a systemctl failure just means the timer isn't installed/loaded,
+/// which is a no-op when disabling rather than an error to surface.
+fn timer_absent(stderr: &str) -> bool {
+    let s = stderr.to_lowercase();
+    s.contains("does not exist")
+        || s.contains("not loaded")
+        || s.contains("no such file")
+        || s.contains("not found")
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq, TS)]
@@ -256,8 +269,19 @@ impl AppConfig {
                 }
             }
         } else {
-            // Disable timer (ignore errors - timer might not exist)
-            let _ = run_systemctl(&["disable", "--now", "cockpit-pacman-scheduled.timer"]);
+            // A not-enabled or absent timer is fine to "disable", but a real
+            // systemctl failure must surface or the timer keeps firing while
+            // config claims it's off.
+            match run_systemctl(&["disable", "--now", "cockpit-pacman-scheduled.timer"]) {
+                Ok(o) if o.status.success() => {}
+                Ok(o) => {
+                    let stderr = String::from_utf8_lossy(&o.stderr);
+                    if !timer_absent(&stderr) {
+                        bail!("Failed to disable timer: {}", stderr);
+                    }
+                }
+                Err(e) => return Err(e).context("Failed to disable timer"),
+            }
 
             let _ = fs::remove_file(TIMER_DROP_IN_PATH);
 
@@ -366,4 +390,25 @@ fn get_timer_status() -> (bool, Option<String>) {
 pub struct ScheduleSetResponse {
     pub success: bool,
     pub message: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::timer_absent;
+
+    #[test]
+    fn timer_absent_matches_missing_unit_but_not_real_failures() {
+        assert!(timer_absent(
+            "Failed to disable unit: Unit file cockpit-pacman-scheduled.timer does not exist."
+        ));
+        assert!(timer_absent(
+            "Unit cockpit-pacman-scheduled.timer not loaded."
+        ));
+        assert!(timer_absent("No such file or directory"));
+        assert!(timer_absent(
+            "Unit cockpit-pacman-scheduled.timer not found."
+        ));
+        assert!(!timer_absent("Failed to disable unit: Access denied"));
+        assert!(!timer_absent(""));
+    }
 }

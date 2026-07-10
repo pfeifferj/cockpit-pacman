@@ -193,10 +193,12 @@ pub fn set_schedule_config(
         if let Some(mp) = max_packages {
             config.schedule.max_packages = mp;
         }
+        // Must run before update() writes: on failure the closure returns Err
+        // and config.json is left untouched, never claiming a timer state that
+        // didn't take.
+        config.apply_schedule_to_systemd()?;
         Ok(config.clone())
     })?;
-
-    config.apply_schedule_to_systemd()?;
 
     let response = ScheduleSetResponse {
         success: true,
