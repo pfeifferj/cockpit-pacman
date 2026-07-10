@@ -522,6 +522,37 @@ fn write_json_atomic_inner<T: Serialize>(path: &Path, state: &T, mode: Option<u3
     write_result
 }
 
+/// Write `bytes` to `path` via a temp file in the same directory, fsync, then
+/// atomic rename, so a crash mid-restore can't leave a truncated target. Callers
+/// hold the relevant file lock.
+pub fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("Invalid path: {:?}", path))?;
+    let tmp_path = parent.join(format!(
+        ".{}.tmp.{}",
+        file_name.to_string_lossy(),
+        std::process::id()
+    ));
+
+    let write_result = (|| -> Result<()> {
+        let mut tmp = File::create(&tmp_path)
+            .with_context(|| format!("Failed to create temp file {:?}", tmp_path))?;
+        tmp.write_all(bytes)
+            .with_context(|| format!("Failed to write temp file {:?}", tmp_path))?;
+        let _ = tmp.sync_all();
+        std::fs::rename(&tmp_path, path)
+            .with_context(|| format!("Failed to rename {:?} to {:?}", tmp_path, path))?;
+        Ok(())
+    })();
+
+    if write_result.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+    write_result
+}
+
 /// Classify an error message into a frontend ErrorCode by keyword. Returns None
 /// when nothing matches confidently. Mirrors parseErrorCode in api.ts so both
 /// ends agree on the same buckets.
@@ -792,7 +823,7 @@ macro_rules! check_cancel_early {
 mod tests {
     use super::{
         backups_to_prune, config_path, enqueue_capped, list_cache_packages, output_with_timeout,
-        terminate_child, write_event_flushed, write_json_atomic_with_mode,
+        terminate_child, write_bytes_atomic, write_event_flushed, write_json_atomic_with_mode,
     };
     use crate::models::StreamEvent;
     use std::collections::VecDeque;
@@ -925,6 +956,27 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
         assert_eq!(v["type"], "complete");
         assert_eq!(v["success"], true);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn write_bytes_atomic_replaces_and_leaves_no_temp() {
+        let dir = std::env::temp_dir().join(format!("cpac-atomic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("mirrorlist");
+        std::fs::write(&target, b"old contents").unwrap();
+
+        write_bytes_atomic(&target, b"new contents").unwrap();
+
+        assert_eq!(std::fs::read(&target).unwrap(), b"new contents");
+        let stray: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp."))
+            .collect();
+        assert!(stray.is_empty(), "temp file left behind: {stray:?}");
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

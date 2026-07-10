@@ -460,6 +460,16 @@ pub fn restore_mirror_backup(timestamp: i64) -> Result<()> {
             anyhow::bail!("Backup not found: {}", backup_path);
         }
 
+        // Reject an empty or serverless backup before touching the live file.
+        let (_, total) = count_mirrors_in_file(backup)?;
+        if total == 0 {
+            anyhow::bail!(
+                "Backup {} has no Server entries, refusing to restore",
+                backup_path
+            );
+        }
+        let contents = fs::read(backup)?;
+
         let mirrorlist = Path::new(MIRRORLIST_PATH);
 
         // Create a backup of the current mirrorlist before restoring
@@ -471,7 +481,7 @@ pub fn restore_mirror_backup(timestamp: i64) -> Result<()> {
             None
         };
 
-        fs::copy(backup, mirrorlist)?;
+        crate::util::write_bytes_atomic(mirrorlist, &contents)?;
 
         cleanup_old_backups();
 

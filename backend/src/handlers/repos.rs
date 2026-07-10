@@ -388,6 +388,16 @@ pub fn restore_repo_backup(timestamp: i64) -> Result<()> {
             anyhow::bail!("Backup not found: {}", backup_path);
         }
 
+        // Reject an empty or repo-less backup before touching the live file.
+        let (total, _) = count_repos_in_file(backup);
+        if total == 0 {
+            anyhow::bail!(
+                "Backup {} has no repositories, refusing to restore",
+                backup_path
+            );
+        }
+        let contents = fs::read(backup)?;
+
         let conf = Path::new(PACMAN_CONF_PATH);
 
         // Back up the current pacman.conf before overwriting it, so a restore is
@@ -400,7 +410,7 @@ pub fn restore_repo_backup(timestamp: i64) -> Result<()> {
             None
         };
 
-        fs::copy(backup, conf)?;
+        crate::util::write_bytes_atomic(conf, &contents)?;
         cleanup_old_backups();
 
         Ok(pre_restore_backup)
