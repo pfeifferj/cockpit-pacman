@@ -205,7 +205,7 @@ export type ErrorCode =
   | "permission_denied"
   | "internal_error";
 
-const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<ErrorCode>([
+export const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   "timeout",
   "database_locked",
   "network_error",
@@ -216,6 +216,12 @@ const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   "permission_denied",
   "internal_error",
 ]);
+
+// Any envelope-shaped payload is an error; an unrecognized code maps to
+// internal_error so it surfaces instead of being read back as a success value.
+function asErrorCode(code: string): ErrorCode {
+  return KNOWN_ERROR_CODES.has(code) ? (code as ErrorCode) : "internal_error";
+}
 
 export function isNetworkErrorCode(code: ErrorCode): boolean {
   return code === "network_error" || code === "timeout";
@@ -248,7 +254,7 @@ export class BackendError extends Error {
 // backend/src/util.rs; the two can't share code across the FFI boundary, so the
 // list is mirrored deliberately. parseErrorCode is the single TS classifier:
 // other views (e.g. UpdatesView) call it instead of re-deriving from regexes.
-const NETWORK_ERROR_KEYWORDS = [
+export const NETWORK_ERROR_KEYWORDS = [
   "network",
   "connection",
   "could not connect",
@@ -346,14 +352,18 @@ async function runBackend<T>(command: string, args: string[] = [], options?: { s
 
   try {
     const parsed = JSON.parse(output);
+    const rec = parsed as Record<string, unknown>;
     if (
       parsed &&
       typeof parsed === "object" &&
-      "message" in parsed &&
-      typeof (parsed as Record<string, unknown>).code === "string" &&
-      KNOWN_ERROR_CODES.has((parsed as Record<string, unknown>).code as string)
+      typeof rec.code === "string" &&
+      typeof rec.message === "string"
     ) {
-      throw BackendError.fromStructured(parsed as StructuredError);
+      throw BackendError.fromStructured({
+        code: asErrorCode(rec.code),
+        message: rec.message,
+        details: typeof rec.details === "string" ? rec.details : undefined,
+      });
     }
     return parsed as T;
   } catch (ex) {
@@ -505,10 +515,9 @@ function runStreamingBackend(
     if (
       !("type" in parsed) &&
       typeof parsed.message === "string" &&
-      typeof parsed.code === "string" &&
-      KNOWN_ERROR_CODES.has(parsed.code)
+      typeof parsed.code === "string"
     ) {
-      return { code: parsed.code as ErrorCode, message: parsed.message };
+      return { code: asErrorCode(parsed.code), message: parsed.message };
     }
     return null;
   };

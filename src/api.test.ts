@@ -154,14 +154,18 @@ describe("listInstalled", () => {
     });
   });
 
-  it("does not treat a success response with an unknown code value as an error", async () => {
+  it("surfaces an envelope with an unrecognized code as an internal_error", async () => {
     mockSpawn.mockReturnValue(
       createMockSpawnPromise(
-        JSON.stringify({ code: "ok", message: "done", packages: [], total: 0 })
+        JSON.stringify({ code: "some_future_code", message: "backend said something" })
       )
     );
 
-    await expect(listInstalled()).resolves.toMatchObject({ total: 0 });
+    await expect(listInstalled()).rejects.toMatchObject({
+      name: "BackendError",
+      code: "internal_error",
+      message: "backend said something",
+    });
   });
 });
 
@@ -323,6 +327,23 @@ describe("runUpgrade", () => {
     );
 
     expect(callbacks.onError).toHaveBeenCalledWith("failed retrieving file", "network_error");
+    expect(callbacks.onComplete).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a streaming envelope with an unrecognized code instead of dropping it", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+    };
+
+    runUpgrade(callbacks);
+
+    mockProc._emit(JSON.stringify({ code: "some_future_code", message: "unexpected" }) + "\n");
+
+    expect(callbacks.onError).toHaveBeenCalledWith("unexpected", "internal_error");
     expect(callbacks.onComplete).not.toHaveBeenCalled();
   });
 

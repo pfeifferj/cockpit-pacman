@@ -1987,3 +1987,31 @@ fn services_status_two_services_fixture_round_trip() {
         serde_json::from_str(include_str!("../../test/fixtures/services-status.json")).unwrap();
     serde_json::from_value::<ServicesStatus>(fixture["two-services"].clone()).unwrap();
 }
+
+/// The error-code vocabulary and network keyword list are mirrored in api.ts;
+/// pin the Rust side to the shared fixture so drift fails a test. The frontend
+/// has a matching assertion in src/test/contract.test.ts.
+#[test]
+fn error_codes_match_shared_fixture() {
+    use cockpit_pacman_backend::util::{ERROR_CODES, NETWORK_ERROR_KEYWORDS};
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../../test/fixtures/error-codes.json")).unwrap();
+
+    let fixture_set = |field: &str| -> std::collections::BTreeSet<String> {
+        fixture[field]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect()
+    };
+    let rust_set = |xs: &[&str]| -> std::collections::BTreeSet<String> {
+        xs.iter().map(|s| s.to_string()).collect()
+    };
+
+    assert_eq!(rust_set(ERROR_CODES), fixture_set("codes"));
+    assert_eq!(
+        rust_set(NETWORK_ERROR_KEYWORDS),
+        fixture_set("networkKeywords")
+    );
+}

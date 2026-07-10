@@ -770,7 +770,10 @@ fn main() {
         // with no such consumer, so it must exit non-zero on failure for the
         // unit result to reflect reality.
         let emit_envelope = args[1] != "scheduled-run";
-        if emit_envelope && let Some(code) = classify_error(&e) {
+        if emit_envelope {
+            // Always emit a structured envelope so an unclassifiable error still
+            // reaches the frontend with its real message, not an empty stdout.
+            let code = classify_error(&e).unwrap_or("internal_error");
             let _ = emit_json(&StructuredError {
                 code: code.to_string(),
                 message: format!("{}", e),

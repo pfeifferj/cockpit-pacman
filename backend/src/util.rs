@@ -620,6 +620,40 @@ pub fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     write_result
 }
 
+/// The error-code vocabulary shared with the frontend. The backend must never
+/// emit a code outside this set; both ends pin it to test/fixtures/error-codes.json
+/// so the two lists can't drift. Mirrors KNOWN_ERROR_CODES / ErrorCode in api.ts.
+pub const ERROR_CODES: &[&str] = &[
+    "timeout",
+    "database_locked",
+    "network_error",
+    "transaction_failed",
+    "validation_error",
+    "cancelled",
+    "not_found",
+    "permission_denied",
+    "internal_error",
+];
+
+/// Canonical network-error keyword list. Kept in sync with NETWORK_ERROR_KEYWORDS
+/// / parseErrorCode in src/api.ts; the two can't share code across the process
+/// boundary, so the list is mirrored and pinned via test/fixtures/error-codes.json.
+pub const NETWORK_ERROR_KEYWORDS: &[&str] = &[
+    "network",
+    "connection",
+    "could not connect",
+    "unable to connect",
+    "could not resolve",
+    "resolve host",
+    "host not found",
+    "name resolution",
+    "temporary failure in name resolution",
+    "dns",
+    "failed retrieving file",
+    "failed to retrieve",
+    "download library error",
+];
+
 /// Classify an error message into a frontend ErrorCode by keyword. Returns None
 /// when nothing matches confidently. Mirrors parseErrorCode in api.ts so both
 /// ends agree on the same buckets.
@@ -631,24 +665,6 @@ pub fn classify_message(message: &str) -> Option<&'static str> {
     if lower.contains("unable to lock database") || lower.contains("database is locked") {
         return Some("database_locked");
     }
-    // Canonical network-error keyword list. Kept in sync with
-    // NETWORK_ERROR_KEYWORDS / parseErrorCode in src/api.ts; the two can't share
-    // code across the FFI boundary, so the list is mirrored deliberately.
-    const NETWORK_ERROR_KEYWORDS: &[&str] = &[
-        "network",
-        "connection",
-        "could not connect",
-        "unable to connect",
-        "could not resolve",
-        "resolve host",
-        "host not found",
-        "name resolution",
-        "temporary failure in name resolution",
-        "dns",
-        "failed retrieving file",
-        "failed to retrieve",
-        "download library error",
-    ];
     if NETWORK_ERROR_KEYWORDS.iter().any(|kw| lower.contains(kw)) {
         return Some("network_error");
     }
@@ -889,9 +905,10 @@ macro_rules! check_cancel_early {
 #[cfg(test)]
 mod tests {
     use super::{
-        backups_to_prune, config_path, enqueue_capped, list_cache_packages, output_with_timeout,
-        read_backup_provenance, reconcile_backup_provenance, record_backup_provenance,
-        terminate_child, write_bytes_atomic, write_event_flushed, write_json_atomic_with_mode,
+        ERROR_CODES, backups_to_prune, classify_error, classify_message, config_path,
+        enqueue_capped, list_cache_packages, output_with_timeout, read_backup_provenance,
+        reconcile_backup_provenance, record_backup_provenance, terminate_child, write_bytes_atomic,
+        write_event_flushed, write_json_atomic_with_mode,
     };
     use crate::models::{BackupSource, StreamEvent};
     use std::collections::VecDeque;
@@ -1074,6 +1091,16 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn classify_returns_none_for_unclassifiable_error() {
+        // main.rs falls back to "internal_error" when classification returns None,
+        // so an unclassifiable error still reaches the frontend as an envelope.
+        assert_eq!(classify_message("something entirely unexpected"), None);
+        assert_eq!(classify_error(&anyhow::anyhow!("weird failure")), None);
+        assert!(classify_message("connection refused").is_some());
+        assert!(ERROR_CODES.contains(&"internal_error"));
     }
 
     #[test]

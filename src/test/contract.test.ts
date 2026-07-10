@@ -79,9 +79,11 @@ import {
   getSyncPackageInfo,
   getServicesStatus,
   listArchiveVersions,
+  KNOWN_ERROR_CODES,
+  NETWORK_ERROR_KEYWORDS,
 } from "../api";
 
-// JSON fixtures — vitest resolves these at build time via Vite's JSON import support
+// JSON fixtures: vitest resolves these at build time via Vite's JSON import support
 import packageListFixture from "../../test/fixtures/package-list.json";
 import packageDetailFixture from "../../test/fixtures/package-detail.json";
 import updatesFixture from "../../test/fixtures/updates.json";
@@ -98,6 +100,7 @@ import cacheInfoFixture from "../../test/fixtures/cache-info.json";
 import keyringStatusFixture from "../../test/fixtures/keyring-status.json";
 import dependencyTreeFixture from "../../test/fixtures/dependency-tree.json";
 import streamEventsFixture from "../../test/fixtures/stream-events.json";
+import errorCodesFixture from "../../test/fixtures/error-codes.json";
 import orphansFixture from "../../test/fixtures/orphans.json";
 import saveMirrorlistFixture from "../../test/fixtures/save-mirrorlist.json";
 import refreshMirrorsFixture from "../../test/fixtures/refresh-mirrors.json";
@@ -1210,5 +1213,19 @@ describe("CLI argv contract", () => {
     spawnReturns({});
     await getScheduledRuns({ offset: 5, limit: 20 });
     expect(lastArgv()).toEqual(["list-scheduled-runs", "5", "20"]);
+  });
+});
+
+// Pins the frontend error vocabulary to the shared fixture. The backend has a
+// matching assertion in backend/tests/contract_tests.rs; drift fails both sides.
+describe("error-code contract", () => {
+  it("KNOWN_ERROR_CODES matches the shared fixture", () => {
+    expect([...KNOWN_ERROR_CODES].sort()).toEqual([...errorCodesFixture.codes].sort());
+  });
+
+  it("NETWORK_ERROR_KEYWORDS matches the shared fixture", () => {
+    expect([...NETWORK_ERROR_KEYWORDS].sort()).toEqual(
+      [...errorCodesFixture.networkKeywords].sort()
+    );
   });
 });

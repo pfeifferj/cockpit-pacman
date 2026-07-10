@@ -1,0 +1,28 @@
+{
+  "codes": [
+    "timeout",
+    "database_locked",
+    "network_error",
+    "transaction_failed",
+    "validation_error",
+    "cancelled",
+    "not_found",
+    "permission_denied",
+    "internal_error"
+  ],
+  "networkKeywords": [
+    "network",
+    "connection",
+    "could not connect",
+    "unable to connect",
+    "could not resolve",
+    "resolve host",
+    "host not found",
+    "name resolution",
+    "temporary failure in name resolution",
+    "dns",
+    "failed retrieving file",
+    "failed to retrieve",
+    "download library error"
+  ]
+}
