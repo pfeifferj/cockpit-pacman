@@ -2,24 +2,27 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, cleanup } from "@testing-library/react";
 import { HistoryView } from "./HistoryView";
 import * as api from "../api";
-import { mockGroupedLogResponse } from "../test/mocks";
+import { mockGroupedLogResponse, mockLogResponse } from "../test/mocks";
 
 vi.mock("../api", async () => {
   const actual = await vi.importActual("../api");
   return {
     ...actual,
     getGroupedHistory: vi.fn(),
+    getHistory: vi.fn(),
     getPackageInfo: vi.fn(),
     getSyncPackageInfo: vi.fn(),
   };
 });
 
 const mockGetGroupedHistory = vi.mocked(api.getGroupedHistory);
+const mockGetHistory = vi.mocked(api.getHistory);
 
 describe("HistoryView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetGroupedHistory.mockResolvedValue(mockGroupedLogResponse);
+    mockGetHistory.mockResolvedValue(mockLogResponse);
   });
 
   afterEach(() => {
@@ -187,5 +190,22 @@ describe("HistoryView", () => {
     });
     expect(screen.getByPlaceholderText("Filter by package name...")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Retry/i })).toBeInTheDocument();
+  });
+
+  it("switching to Flat fetches getHistory and renders entries", async () => {
+    render(<HistoryView />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Package History")).toBeInTheDocument();
+    });
+    expect(mockGetHistory).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Flat" }));
+
+    await waitFor(() => {
+      expect(mockGetHistory).toHaveBeenCalled();
+    });
+    // Expand/Collapse-all button is grouped-only
+    expect(screen.queryByRole("button", { name: /Expand all|Collapse all/i })).not.toBeInTheDocument();
   });
 });

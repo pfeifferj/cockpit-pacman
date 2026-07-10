@@ -8,6 +8,7 @@ import type {
   SyncPackageDetails,
   GroupedLogResponse,
   LogGroup,
+  LogResponse,
   DependencyTreeResponse,
   NewsResponse,
 } from "../api";
@@ -316,6 +317,15 @@ export const mockLogGroups: LogGroup[] = [
 export const mockGroupedLogResponse: GroupedLogResponse = {
   groups: mockLogGroups,
   total_groups: 3,
+  total_upgraded: 3,
+  total_installed: 2,
+  total_removed: 1,
+  total_other: 0,
+};
+
+export const mockLogResponse: LogResponse = {
+  entries: mockLogGroups.flatMap((g) => g.entries),
+  total: mockLogGroups.reduce((n, g) => n + g.entries.length, 0),
   total_upgraded: 3,
   total_installed: 2,
   total_removed: 1,

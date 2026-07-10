@@ -721,6 +721,11 @@ export async function getGroupedHistory(params: HistoryParams = {}): Promise<Gro
   ]);
 }
 
+export async function getHistory(params: HistoryParams = {}): Promise<LogResponse> {
+  const { offset = 0, limit = 20, filter = "all", search = "" } = params;
+  return runBackend<LogResponse>("history", [String(offset), String(limit), filter, search]);
+}
+
 export async function listDowngrades(packageName?: string): Promise<DowngradeResponse> {
   const args = packageName ? [sanitizeSearchInput(packageName)] : [];
   return runBackend<DowngradeResponse>("list-downgrades", args);

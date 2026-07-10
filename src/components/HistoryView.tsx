@@ -23,6 +23,8 @@ import {
   SearchInput,
   Select,
   SelectOption,
+  ToggleGroup,
+  ToggleGroupItem,
   Toolbar,
   ToolbarContent,
   ToolbarItem,
@@ -35,15 +37,19 @@ import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
   LogEntry,
   LogGroup,
+  LogResponse,
   GroupedLogResponse,
   HistoryFilterType,
+  HistoryParams,
   getGroupedHistory,
+  getHistory,
 } from "../api";
 import { TimeAgo } from "./TimeAgo";
 import { sanitizeErrorMessage, sanitizeSearchInput } from "../utils";
 import { SEARCH_DEBOUNCE_MS } from "../constants";
 
 type ViewState = "loading" | "ready" | "error";
+type ViewMode = "grouped" | "flat";
 
 const ACTION_COLORS: Record<string, "blue" | "green" | "red" | "orange" | "grey"> = {
   upgraded: "blue",
@@ -73,7 +79,9 @@ interface HistoryViewProps {
 
 export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
   const [state, setState] = useState<ViewState>("loading");
+  const [viewMode, setViewMode] = useState<ViewMode>("grouped");
   const [groupedData, setGroupedData] = useState<GroupedLogResponse | null>(null);
+  const [flatData, setFlatData] = useState<LogResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { page, perPage, offset, setPage, onSetPage, onPerPageSelect } = usePagination({ defaultPerPage: 20 });
   const [filter, setFilter] = useState<HistoryFilterType>("all");
@@ -94,38 +102,45 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
     });
   }, [initialSearch, setPage]);
 
+  const fetchHistory = useCallback(
+    (params: HistoryParams) => (viewMode === "grouped" ? getGroupedHistory(params) : getHistory(params)),
+    [viewMode]
+  );
+
+  const applyResponse = useCallback(
+    (response: GroupedLogResponse | LogResponse) => {
+      if (viewMode === "grouped") {
+        const g = response as GroupedLogResponse;
+        setGroupedData(g);
+        const shouldExpandAll = expandAllRef.current;
+        expandAllRef.current = false;
+        setExpandedGroups(shouldExpandAll ? new Set(g.groups.map((x) => x.id)) : new Set());
+      } else {
+        setFlatData(response as LogResponse);
+      }
+    },
+    [viewMode]
+  );
+
   const loadHistory = useCallback(async () => {
     setState("loading");
     setError(null);
     try {
-      const response = await getGroupedHistory({
-        offset,
-        limit: perPage,
-        filter,
-        search: searchQuery,
-      });
-      setGroupedData(response);
-      const shouldExpandAll = expandAllRef.current;
-      expandAllRef.current = false;
-      setExpandedGroups(
-        shouldExpandAll ? new Set(response.groups.map((g) => g.id)) : new Set()
-      );
+      const response = await fetchHistory({ offset, limit: perPage, filter, search: searchQuery });
+      applyResponse(response);
       setState("ready");
     } catch (ex) {
       setState("error");
       setError(ex instanceof Error ? ex.message : String(ex));
     }
-  }, [offset, perPage, filter, searchQuery]);
+  }, [offset, perPage, filter, searchQuery, fetchHistory, applyResponse]);
 
   useEffect(() => {
     let cancelled = false;
-    getGroupedHistory({ offset, limit: perPage, filter, search: searchQuery })
+    fetchHistory({ offset, limit: perPage, filter, search: searchQuery })
       .then((response) => {
         if (cancelled) return;
-        setGroupedData(response);
-        const shouldExpandAll = expandAllRef.current;
-        expandAllRef.current = false;
-        setExpandedGroups(shouldExpandAll ? new Set(response.groups.map((g) => g.id)) : new Set());
+        applyResponse(response);
         setState("ready");
       })
       .catch((ex) => {
@@ -134,7 +149,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
         setError(ex instanceof Error ? ex.message : String(ex));
       });
     return () => { cancelled = true; };
-  }, [offset, perPage, filter, searchQuery]);
+  }, [offset, perPage, filter, searchQuery, fetchHistory, applyResponse]);
 
   useEffect(() => {
     const sanitized = sanitizeSearchInput(searchInput);
@@ -154,6 +169,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
     setFilter(value);
     setPage(1);
     setFilterOpen(false);
+  };
+
+  const handleViewModeChange = (mode: ViewMode) => {
+    if (mode === viewMode) return;
+    setState("loading");
+    setViewMode(mode);
+    setPage(1);
   };
 
   const allExpanded = groupedData?.groups.length
@@ -189,6 +211,25 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
     }
     return entry.old_version || entry.new_version || "";
   };
+
+  const renderEntryRow = (entry: LogEntry, index: number): React.ReactNode => (
+    <Tr key={`${entry.timestamp}-${entry.package}-${index}`} isClickable onRowClick={() => handleRowClick(entry.package)}>
+      <Td dataLabel="Package">
+        <Button variant="link" isInline className="pf-v6-u-p-0">
+          {entry.package}
+        </Button>
+      </Td>
+      <Td dataLabel="Version">
+        <code>{formatVersion(entry)}</code>
+      </Td>
+      <Td dataLabel="Action">
+        <Label color={ACTION_COLORS[entry.action] || "grey"} icon={ACTION_ICONS[entry.action]}>
+          {entry.action}
+        </Label>
+      </Td>
+      <Td dataLabel="Time"><TimeAgo timestamp={entry.timestamp} /></Td>
+    </Tr>
+  );
 
   const renderGroupSummary = (group: LogGroup): React.ReactNode => {
     const labels: React.ReactNode[] = [];
@@ -230,7 +271,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
     return labels;
   };
 
-  if (state === "loading" && !groupedData) {
+  // Active dataset for the current view mode drives stats, empty-states, paging.
+  const totals = viewMode === "grouped" ? groupedData : flatData;
+  const hasData = viewMode === "grouped" ? !!groupedData : !!flatData;
+  const itemCount = viewMode === "grouped" ? (groupedData?.total_groups || 0) : (flatData?.total || 0);
+  const resultCount = viewMode === "grouped" ? (groupedData?.groups.length || 0) : (flatData?.entries.length || 0);
+
+  if (state === "loading" && !hasData) {
     return (
       <Card>
         <CardBody>
@@ -242,7 +289,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
     );
   }
 
-  if (state === "error" && !groupedData) {
+  if (state === "error" && !hasData) {
     return (
       <Card>
         <CardBody>
@@ -259,7 +306,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
     );
   }
 
-  if (!groupedData?.groups.length && filter === "all" && !searchQuery && state !== "loading") {
+  if (!resultCount && filter === "all" && !searchQuery && state !== "loading") {
     return (
       <Card>
         <CardBody>
@@ -290,29 +337,29 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
               <FlexItem>
                 <StatBox
                   label="Upgraded"
-                  value={(groupedData?.total_upgraded || 0).toLocaleString()}
+                  value={(totals?.total_upgraded || 0).toLocaleString()}
                   color="info"
                 />
               </FlexItem>
               <FlexItem>
                 <StatBox
                   label="Installed"
-                  value={(groupedData?.total_installed || 0).toLocaleString()}
+                  value={(totals?.total_installed || 0).toLocaleString()}
                   color="success"
                 />
               </FlexItem>
               <FlexItem>
                 <StatBox
                   label="Removed"
-                  value={(groupedData?.total_removed || 0).toLocaleString()}
+                  value={(totals?.total_removed || 0).toLocaleString()}
                   color="danger"
                 />
               </FlexItem>
-              {(groupedData?.total_other || 0) > 0 && (
+              {(totals?.total_other || 0) > 0 && (
                 <FlexItem>
                   <StatBox
                     label="Other"
-                    value={(groupedData?.total_other || 0).toLocaleString()}
+                    value={(totals?.total_other || 0).toLocaleString()}
                     color="warning"
                   />
                 </FlexItem>
@@ -323,6 +370,20 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
 
         <Toolbar>
           <ToolbarContent>
+            <ToolbarItem>
+              <ToggleGroup aria-label="History view mode">
+                <ToggleGroupItem
+                  text="Grouped"
+                  isSelected={viewMode === "grouped"}
+                  onChange={() => handleViewModeChange("grouped")}
+                />
+                <ToggleGroupItem
+                  text="Flat"
+                  isSelected={viewMode === "flat"}
+                  onChange={() => handleViewModeChange("flat")}
+                />
+              </ToggleGroup>
+            </ToolbarItem>
             <ToolbarItem>
               <SearchInput
                 placeholder="Filter by package name..."
@@ -354,18 +415,20 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
                 <SelectOption value="removed">Removed</SelectOption>
               </Select>
             </ToolbarItem>
-            <ToolbarItem>
-              <Button
-                variant="secondary"
-                onClick={toggleAllGroups}
-                isDisabled={!groupedData?.groups.length}
-              >
-                {allExpanded ? "Collapse all" : "Expand all"}
-              </Button>
-            </ToolbarItem>
+            {viewMode === "grouped" && (
+              <ToolbarItem>
+                <Button
+                  variant="secondary"
+                  onClick={toggleAllGroups}
+                  isDisabled={!groupedData?.groups.length}
+                >
+                  {allExpanded ? "Collapse all" : "Expand all"}
+                </Button>
+              </ToolbarItem>
+            )}
             <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
               <CompactPagination
-                itemCount={groupedData?.total_groups || 0}
+                itemCount={itemCount}
                 perPage={perPage}
                 page={page}
                 onSetPage={onSetPage}
@@ -387,7 +450,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
               </EmptyStateActions>
             </EmptyStateFooter>
           </EmptyState>
-        ) : !groupedData?.groups.length ? (
+        ) : !resultCount ? (
           <EmptyState headingLevel="h3" titleText="No matching entries">
             <EmptyStateBody>
               {searchQuery
@@ -395,10 +458,36 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
                 : `No ${filter} packages found in history.`}
             </EmptyStateBody>
           </EmptyState>
+        ) : viewMode === "flat" ? (
+          <>
+            <Table aria-label="Package history (flat)" variant="compact">
+              <Thead>
+                <Tr>
+                  <Th>Package</Th>
+                  <Th>Version</Th>
+                  <Th>Action</Th>
+                  <Th>Time</Th>
+                </Tr>
+              </Thead>
+              <Tbody>
+                {flatData?.entries.map((entry: LogEntry, index: number) => renderEntryRow(entry, index))}
+              </Tbody>
+            </Table>
+
+            <Pagination
+              itemCount={itemCount}
+              perPage={perPage}
+              page={page}
+              onSetPage={onSetPage}
+              onPerPageSelect={onPerPageSelect}
+              perPageOptions={PER_PAGE_OPTIONS}
+              variant="bottom"
+            />
+          </>
         ) : (
           <>
             <Accordion asDefinitionList={false}>
-              {groupedData.groups.map((group: LogGroup) => (
+              {groupedData?.groups.map((group: LogGroup) => (
                 <AccordionItem key={group.id} isExpanded={expandedGroups.has(group.id)}>
                   <AccordionToggle
                     onClick={() => toggleGroup(group.id)}
@@ -435,27 +524,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
                         </Tr>
                       </Thead>
                       <Tbody>
-                        {group.entries.map((entry: LogEntry, index: number) => (
-                          <Tr key={`${entry.timestamp}-${entry.package}-${index}`} isClickable onRowClick={() => handleRowClick(entry.package)}>
-                            <Td dataLabel="Package">
-                              <Button variant="link" isInline className="pf-v6-u-p-0">
-                                {entry.package}
-                              </Button>
-                            </Td>
-                            <Td dataLabel="Version">
-                              <code>{formatVersion(entry)}</code>
-                            </Td>
-                            <Td dataLabel="Action">
-                              <Label
-                                color={ACTION_COLORS[entry.action] || "grey"}
-                                icon={ACTION_ICONS[entry.action]}
-                              >
-                                {entry.action}
-                              </Label>
-                            </Td>
-                            <Td dataLabel="Time"><TimeAgo timestamp={entry.timestamp} /></Td>
-                          </Tr>
-                        ))}
+                        {group.entries.map((entry: LogEntry, index: number) => renderEntryRow(entry, index))}
                       </Tbody>
                     </Table>
                   </AccordionContent>
@@ -464,7 +533,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
             </Accordion>
 
             <Pagination
-              itemCount={groupedData?.total_groups || 0}
+              itemCount={itemCount}
               perPage={perPage}
               page={page}
               onSetPage={onSetPage}
