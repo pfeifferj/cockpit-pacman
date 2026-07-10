@@ -322,6 +322,7 @@ describe("MirrorsView", () => {
           enabled_count: 3,
           total_count: 10,
           size: 2048,
+          source: "manual",
         },
       ],
     });
@@ -373,6 +374,7 @@ describe("MirrorsView", () => {
           enabled_count: 3,
           total_count: 10,
           size: 2048,
+          source: "manual",
         },
       ],
     });
@@ -409,6 +411,7 @@ describe("MirrorsView", () => {
           enabled_count: 3,
           total_count: 10,
           size: 2048,
+          source: "manual",
         },
       ],
     });

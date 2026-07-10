@@ -6,9 +6,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use crate::models::{
-    MirrorBackup, MirrorBackupListResponse, MirrorEntry, MirrorListResponse, MirrorStatus,
-    MirrorStatusResponse, MirrorTestResult, RefreshMirrorsResponse, RestoreMirrorBackupResponse,
-    SaveMirrorlistResponse, StreamEvent,
+    BackupSource, MirrorBackup, MirrorBackupListResponse, MirrorEntry, MirrorListResponse,
+    MirrorStatus, MirrorStatusResponse, MirrorTestResult, RefreshMirrorsResponse,
+    RestoreMirrorBackupResponse, SaveMirrorlistResponse, StreamEvent,
 };
 use crate::util::{TimeoutGuard, emit_event, emit_json, is_cancelled, setup_signal_handler};
 use crate::validation::validate_mirror_url;
@@ -308,6 +308,7 @@ const MAX_BACKUPS: usize = 5;
 const BACKUP_DIR: &str = "/etc/pacman.d";
 const BACKUP_NAME_PREFIX: &str = "mirrorlist.backup.";
 const BACKUP_PREFIX: &str = "/etc/pacman.d/mirrorlist.backup.";
+const BACKUP_META_PATH: &str = "/etc/pacman.d/.mirrorlist-backups.meta.json";
 
 pub fn save_mirrorlist(mirrors: &[MirrorEntry]) -> Result<()> {
     for mirror in mirrors {
@@ -366,6 +367,7 @@ pub fn save_mirrorlist(mirrors: &[MirrorEntry]) -> Result<()> {
 
         // Clean up old backups, keeping only the most recent MAX_BACKUPS
         cleanup_old_backups();
+        note_backup(&backup_path, BackupSource::Manual);
 
         Ok(backup_path)
     })?;
@@ -409,6 +411,7 @@ fn count_mirrors_in_file(path: &Path) -> Result<(usize, usize)> {
 pub fn list_mirror_backups() -> Result<()> {
     let parent = Path::new("/etc/pacman.d");
     let mut backups: Vec<MirrorBackup> = Vec::new();
+    let provenance = crate::util::read_backup_provenance(Path::new(BACKUP_META_PATH));
 
     for entry in fs::read_dir(parent)? {
         let entry = entry?;
@@ -436,12 +439,15 @@ pub fn list_mirror_backups() -> Result<()> {
             .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
             .unwrap_or_else(|| "Unknown".to_string());
 
+        let source = provenance.get(&timestamp).copied().unwrap_or_default();
+
         backups.push(MirrorBackup {
             timestamp,
             date,
             enabled_count,
             total_count,
             size,
+            source,
         });
     }
 
@@ -483,7 +489,7 @@ pub fn restore_mirror_backup(timestamp: i64) -> Result<()> {
 
         crate::util::write_bytes_atomic(mirrorlist, &contents)?;
 
-        cleanup_old_backups();
+        note_backup(&pre_restore_backup, BackupSource::Auto);
 
         Ok(pre_restore_backup)
     })?;
@@ -508,6 +514,7 @@ pub fn delete_mirror_backup(timestamp: i64) -> Result<()> {
         }
 
         fs::remove_file(backup)?;
+        reconcile_backups();
         Ok(())
     })?;
 
@@ -520,6 +527,28 @@ pub fn delete_mirror_backup(timestamp: i64) -> Result<()> {
 
 fn cleanup_old_backups() {
     crate::util::prune_old_backups(Path::new(BACKUP_DIR), BACKUP_NAME_PREFIX, MAX_BACKUPS);
+}
+
+fn note_backup(backup: &Option<String>, source: BackupSource) {
+    if let Some(b) = backup
+        && let Some(ts) = crate::util::backup_timestamp(b, BACKUP_PREFIX)
+    {
+        crate::util::record_backup_provenance(
+            Path::new(BACKUP_META_PATH),
+            Path::new(BACKUP_DIR),
+            BACKUP_NAME_PREFIX,
+            ts,
+            source,
+        );
+    }
+}
+
+fn reconcile_backups() {
+    crate::util::reconcile_backup_provenance(
+        Path::new(BACKUP_META_PATH),
+        Path::new(BACKUP_DIR),
+        BACKUP_NAME_PREFIX,
+    );
 }
 
 #[cfg(test)]

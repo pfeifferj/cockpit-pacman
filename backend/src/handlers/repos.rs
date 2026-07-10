@@ -5,13 +5,17 @@ use std::io::Write;
 use std::path::Path;
 use ts_rs::TS;
 
-use crate::models::{ListReposResponse, RepoDirectiveFull, RepoEntry, SaveReposResponse};
+use crate::models::{
+    BackupSource, ListReposResponse, RepoDirectiveFull, RepoEntry, SaveReposResponse,
+};
 use crate::util::emit_json;
 use crate::validation::{validate_directive_value, validate_repo_name};
 
 const PACMAN_CONF_PATH: &str = "/etc/pacman.conf";
 const BACKUP_PREFIX: &str = "/etc/pacman.conf.backup.";
 const BACKUP_NAME_PREFIX: &str = "pacman.conf.backup.";
+const BACKUP_DIR: &str = "/etc";
+const BACKUP_META_PATH: &str = "/etc/.pacman-conf-backups.meta.json";
 const LOCK_PATH: &str = "/etc/pacman.conf.lock";
 const MAX_BACKUPS: usize = 5;
 
@@ -287,6 +291,7 @@ pub fn save_repos(repos: &[RepoEntry]) -> Result<()> {
         }
 
         cleanup_old_backups();
+        note_backup(&backup_path, BackupSource::Manual);
 
         Ok(backup_path)
     })?;
@@ -308,6 +313,7 @@ pub struct RepoBackup {
     pub enabled_count: usize,
     #[ts(type = "number")]
     pub size: u64,
+    pub source: BackupSource,
 }
 
 #[derive(Serialize, TS)]
@@ -346,6 +352,7 @@ pub fn list_repo_backups() -> Result<()> {
         Ok(rd) => rd,
         Err(_) => return emit_json(&RepoBackupListResponse { backups }),
     };
+    let provenance = crate::util::read_backup_provenance(Path::new(BACKUP_META_PATH));
 
     for entry in read_dir.flatten() {
         let name = match entry.file_name().into_string() {
@@ -366,12 +373,15 @@ pub fn list_repo_backups() -> Result<()> {
             .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
             .unwrap_or_else(|| "Unknown".to_string());
 
+        let source = provenance.get(&timestamp).copied().unwrap_or_default();
+
         backups.push(RepoBackup {
             timestamp,
             date,
             repo_count,
             enabled_count,
             size,
+            source,
         });
     }
 
@@ -411,7 +421,8 @@ pub fn restore_repo_backup(timestamp: i64) -> Result<()> {
         };
 
         crate::util::write_bytes_atomic(conf, &contents)?;
-        cleanup_old_backups();
+
+        note_backup(&pre_restore_backup, BackupSource::Auto);
 
         Ok(pre_restore_backup)
     })?;
@@ -432,6 +443,7 @@ pub fn delete_repo_backup(timestamp: i64) -> Result<()> {
             anyhow::bail!("Backup not found: {}", backup_path);
         }
         fs::remove_file(backup)?;
+        reconcile_backups();
         Ok(())
     })?;
 
@@ -450,4 +462,26 @@ fn cleanup_old_backups() {
         .parent()
         .unwrap_or(Path::new("/etc"));
     crate::util::prune_old_backups(parent, BACKUP_NAME_PREFIX, MAX_BACKUPS);
+}
+
+fn note_backup(backup: &Option<String>, source: BackupSource) {
+    if let Some(b) = backup
+        && let Some(ts) = crate::util::backup_timestamp(b, BACKUP_PREFIX)
+    {
+        crate::util::record_backup_provenance(
+            Path::new(BACKUP_META_PATH),
+            Path::new(BACKUP_DIR),
+            BACKUP_NAME_PREFIX,
+            ts,
+            source,
+        );
+    }
+}
+
+fn reconcile_backups() {
+    crate::util::reconcile_backup_provenance(
+        Path::new(BACKUP_META_PATH),
+        Path::new(BACKUP_DIR),
+        BACKUP_NAME_PREFIX,
+    );
 }

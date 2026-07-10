@@ -12,7 +12,7 @@ use std::sync::{Arc, Condvar, LazyLock, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use ureq::config::IpFamily;
 
-use crate::models::StreamEvent;
+use crate::models::{BackupSource, StreamEvent};
 
 static DETECTED_IP_FAMILY: LazyLock<IpFamily> = LazyLock::new(|| {
     // Resolve archlinux.org and probe its AAAA record with a short TCP connect.
@@ -385,8 +385,7 @@ pub fn prune_old_backups(parent: &Path, name_prefix: &str, keep: usize) {
         .filter_map(|entry| entry.ok())
         .filter_map(|entry| {
             let name = entry.file_name().into_string().ok()?;
-            let ts: i64 = name.strip_prefix(name_prefix)?.parse().ok()?;
-            Some((entry.path(), ts))
+            Some((entry.path(), backup_timestamp(&name, name_prefix)?))
         })
         .collect();
 
@@ -394,6 +393,74 @@ pub fn prune_old_backups(parent: &Path, name_prefix: &str, keep: usize) {
         if let Err(e) = std::fs::remove_file(&path) {
             eprintln!("Warning: failed to remove old backup {:?}: {}", path, e);
         }
+    }
+}
+
+/// Parse the unix-seconds suffix out of a backup name or path with the given
+/// prefix. `prefix` is a filename prefix or a full-path prefix depending on the
+/// caller; both are a plain `strip_prefix` + integer parse.
+pub fn backup_timestamp(name_or_path: &str, prefix: &str) -> Option<i64> {
+    name_or_path.strip_prefix(prefix)?.parse().ok()
+}
+
+/// Timestamps of every backup file in `parent` whose name starts with
+/// `name_prefix`, parsed from the unix-seconds suffix.
+fn existing_backup_timestamps(parent: &Path, name_prefix: &str) -> std::collections::HashSet<i64> {
+    let mut set = std::collections::HashSet::new();
+    if let Ok(rd) = std::fs::read_dir(parent) {
+        for entry in rd.flatten() {
+            if let Ok(name) = entry.file_name().into_string()
+                && let Some(ts) = backup_timestamp(&name, name_prefix)
+            {
+                set.insert(ts);
+            }
+        }
+    }
+    set
+}
+
+/// Read the timestamp-to-source map recording how each backup was created. A
+/// missing or corrupt manifest yields an empty map; callers default unlisted
+/// backups to Manual so backups predating the manifest still render.
+pub fn read_backup_provenance(manifest: &Path) -> std::collections::BTreeMap<i64, BackupSource> {
+    std::fs::read_to_string(manifest)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// Record `timestamp`'s provenance and drop entries whose backup file no longer
+/// exists, keeping the manifest bounded as backups are pruned. Best-effort: a
+/// write failure is logged, not propagated, so it never fails the enclosing
+/// save/restore. Callers hold the backup set's file lock.
+pub fn record_backup_provenance(
+    manifest: &Path,
+    backup_dir: &Path,
+    name_prefix: &str,
+    timestamp: i64,
+    source: BackupSource,
+) {
+    let live = existing_backup_timestamps(backup_dir, name_prefix);
+    let mut map = read_backup_provenance(manifest);
+    map.insert(timestamp, source);
+    map.retain(|ts, _| *ts == timestamp || live.contains(ts));
+    if let Err(e) = write_json_atomic_with_mode(manifest, &map, 0o600) {
+        eprintln!(
+            "Warning: failed to write backup provenance {:?}: {}",
+            manifest, e
+        );
+    }
+}
+
+/// Drop manifest entries whose backup file no longer exists. Call after a
+/// backup is deleted so the manifest doesn't retain a stale source. Best-effort.
+pub fn reconcile_backup_provenance(manifest: &Path, backup_dir: &Path, name_prefix: &str) {
+    let live = existing_backup_timestamps(backup_dir, name_prefix);
+    let mut map = read_backup_provenance(manifest);
+    let before = map.len();
+    map.retain(|ts, _| live.contains(ts));
+    if map.len() != before {
+        let _ = write_json_atomic_with_mode(manifest, &map, 0o600);
     }
 }
 
@@ -823,9 +890,10 @@ macro_rules! check_cancel_early {
 mod tests {
     use super::{
         backups_to_prune, config_path, enqueue_capped, list_cache_packages, output_with_timeout,
+        read_backup_provenance, reconcile_backup_provenance, record_backup_provenance,
         terminate_child, write_bytes_atomic, write_event_flushed, write_json_atomic_with_mode,
     };
-    use crate::models::StreamEvent;
+    use crate::models::{BackupSource, StreamEvent};
     use std::collections::VecDeque;
     use std::path::PathBuf;
     use std::time::Duration;
@@ -975,6 +1043,35 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().contains(".tmp."))
             .collect();
         assert!(stray.is_empty(), "temp file left behind: {stray:?}");
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn backup_provenance_records_and_reconciles() {
+        let dir = std::env::temp_dir().join(format!("cpac-prov-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let prefix = "cfg.backup.";
+        let manifest = dir.join(".meta.json");
+        for ts in [100i64, 200, 300] {
+            std::fs::write(dir.join(format!("{prefix}{ts}")), b"x").unwrap();
+        }
+
+        record_backup_provenance(&manifest, &dir, prefix, 100, BackupSource::Manual);
+        record_backup_provenance(&manifest, &dir, prefix, 200, BackupSource::Auto);
+        let map = read_backup_provenance(&manifest);
+        assert_eq!(map.get(&100), Some(&BackupSource::Manual));
+        assert_eq!(map.get(&200), Some(&BackupSource::Auto));
+        assert_eq!(map.get(&300), None);
+
+        std::fs::remove_file(dir.join(format!("{prefix}100"))).unwrap();
+        reconcile_backup_provenance(&manifest, &dir, prefix);
+        assert_eq!(read_backup_provenance(&manifest).get(&100), None);
+        assert_eq!(
+            read_backup_provenance(&manifest).get(&200),
+            Some(&BackupSource::Auto)
+        );
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

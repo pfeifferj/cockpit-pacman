@@ -578,6 +578,17 @@ pub struct RefreshMirrorsResponse {
     pub last_check: Option<String>,
 }
 
+/// How a config backup came to exist. Defaults to Manual so backups predating
+/// the provenance manifest still classify.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+#[serde(rename_all = "lowercase")]
+pub enum BackupSource {
+    #[default]
+    Manual,
+    Auto,
+}
+
 #[derive(Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct MirrorBackup {
@@ -588,6 +599,7 @@ pub struct MirrorBackup {
     pub total_count: usize,
     #[ts(type = "number")]
     pub size: u64,
+    pub source: BackupSource,
 }
 
 #[derive(Serialize, Deserialize, TS)]

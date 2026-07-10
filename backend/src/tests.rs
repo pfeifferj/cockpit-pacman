@@ -1,6 +1,7 @@
 use crate::models::{
-    MirrorBackup, MirrorBackupListResponse, NewsItem, NewsResponse, Package, PackageDetails,
-    PackageListResponse, RestoreMirrorBackupResponse, SearchResult, UpdateInfo, UpdatesResponse,
+    BackupSource, MirrorBackup, MirrorBackupListResponse, NewsItem, NewsResponse, Package,
+    PackageDetails, PackageListResponse, RestoreMirrorBackupResponse, SearchResult, UpdateInfo,
+    UpdatesResponse,
 };
 use crate::util::parse_package_filename;
 use crate::validation::{
@@ -1165,6 +1166,7 @@ fn test_mirror_backup_serialization() {
         enabled_count: 3,
         total_count: 10,
         size: 2048,
+        source: BackupSource::Manual,
     };
 
     let json = serde_json::to_string(&backup).unwrap();
@@ -1185,6 +1187,7 @@ fn test_mirror_backup_list_response_serialization() {
                 enabled_count: 3,
                 total_count: 10,
                 size: 2048,
+                source: BackupSource::Manual,
             },
             MirrorBackup {
                 timestamp: 1704060000,
@@ -1192,6 +1195,7 @@ fn test_mirror_backup_list_response_serialization() {
                 enabled_count: 5,
                 total_count: 8,
                 size: 1024,
+                source: BackupSource::Auto,
             },
         ],
     };
