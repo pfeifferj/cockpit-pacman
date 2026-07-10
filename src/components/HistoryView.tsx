@@ -275,7 +275,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
 
   // Active dataset for the current view mode drives stats, empty-states, paging.
   const totals = viewMode === "grouped" ? groupedData : flatData;
-  const hasData = viewMode === "grouped" ? !!groupedData : !!flatData;
+  const hasData = !!totals;
   const itemCount = viewMode === "grouped" ? (groupedData?.total_groups || 0) : (flatData?.total || 0);
   const resultCount = viewMode === "grouped" ? (groupedData?.groups.length || 0) : (flatData?.entries.length || 0);
 

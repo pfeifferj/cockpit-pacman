@@ -62,50 +62,31 @@ const PackageSecuritySection: React.FC<{ name: string }> = ({ name }) => {
     return <span className="pf-v6-u-color-200">No advisories for this package.</span>;
   }
 
+  const section = <T extends { name: string; severity: string }>(
+    term: string,
+    items: T[],
+    label: (item: T) => string,
+  ) =>
+    items.length > 0 && (
+      <DescriptionListGroup>
+        <DescriptionListTerm>{term}</DescriptionListTerm>
+        <DescriptionListDescription>
+          <LabelGroup numLabels={10}>
+            {items.map((x) => (
+              <Label key={x.name} isCompact color={severityColor(x.severity)}>
+                {label(x)}
+              </Label>
+            ))}
+          </LabelGroup>
+        </DescriptionListDescription>
+      </DescriptionListGroup>
+    );
+
   return (
     <DescriptionList isCompact>
-      {info.advisories.length > 0 && (
-        <DescriptionListGroup>
-          <DescriptionListTerm>Advisories</DescriptionListTerm>
-          <DescriptionListDescription>
-            <LabelGroup numLabels={10}>
-              {info.advisories.map((a) => (
-                <Label key={a.name} isCompact color={severityColor(a.severity)}>
-                  {a.name} ({a.severity}, {a.date})
-                </Label>
-              ))}
-            </LabelGroup>
-          </DescriptionListDescription>
-        </DescriptionListGroup>
-      )}
-      {info.groups.length > 0 && (
-        <DescriptionListGroup>
-          <DescriptionListTerm>Groups</DescriptionListTerm>
-          <DescriptionListDescription>
-            <LabelGroup numLabels={10}>
-              {info.groups.map((g) => (
-                <Label key={g.name} isCompact color={severityColor(g.severity)}>
-                  {g.name} ({g.status})
-                </Label>
-              ))}
-            </LabelGroup>
-          </DescriptionListDescription>
-        </DescriptionListGroup>
-      )}
-      {info.issues.length > 0 && (
-        <DescriptionListGroup>
-          <DescriptionListTerm>Issues</DescriptionListTerm>
-          <DescriptionListDescription>
-            <LabelGroup numLabels={10}>
-              {info.issues.map((i) => (
-                <Label key={i.name} isCompact color={severityColor(i.severity)}>
-                  {i.name} ({i.issue_type}, {i.status})
-                </Label>
-              ))}
-            </LabelGroup>
-          </DescriptionListDescription>
-        </DescriptionListGroup>
-      )}
+      {section("Advisories", info.advisories, (a) => `${a.name} (${a.severity}, ${a.date})`)}
+      {section("Groups", info.groups, (g) => `${g.name} (${g.status})`)}
+      {section("Issues", info.issues, (i) => `${i.name} (${i.issue_type}, ${i.status})`)}
     </DescriptionList>
   );
 };

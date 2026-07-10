@@ -1102,6 +1102,36 @@ mod tests {
     }
 
     #[test]
+    fn every_classified_code_is_in_the_shared_vocabulary() {
+        // classify_* return bare literals; this pins them to ERROR_CODES so the
+        // backend can't emit a code the frontend doesn't know.
+        let messages = [
+            "operation timed out",
+            "unable to lock database",
+            "could not resolve host",
+            "failed retrieving file from mirror",
+            "not found",
+            "permission denied",
+        ];
+        for msg in messages {
+            if let Some(code) = classify_message(msg) {
+                assert!(
+                    ERROR_CODES.contains(&code),
+                    "unknown code {code:?} for {msg:?}"
+                );
+            }
+        }
+        for msg in messages {
+            if let Some(code) = classify_error(&anyhow::anyhow!("{msg}")) {
+                assert!(
+                    ERROR_CODES.contains(&code),
+                    "unknown code {code:?} for {msg:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn request_cancel_sets_the_flag() {
         super::reset_cancelled();
         super::request_cancel();
