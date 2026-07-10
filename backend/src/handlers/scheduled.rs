@@ -245,6 +245,37 @@ pub fn get_scheduled_runs(offset: usize, limit: usize) -> Result<()> {
     emit_json(&response)
 }
 
+/// True only for outcomes where the process died without running its own
+/// logging. `timeout` is excluded on purpose: SendSIGKILL=no lets a timed-out
+/// run finish and self-report (or wedge forever, in which case ExecStopPost
+/// never fires), so recording it here would duplicate the run's own entry.
+fn is_kill_result(result: &str) -> bool {
+    matches!(result, "signal" | "core-dump" | "watchdog")
+}
+
+/// Called from the unit's ExecStopPost. Records a failed run only for an abrupt
+/// kill, the one outcome scheduled_run() cannot report itself.
+pub fn record_interrupted() -> Result<()> {
+    let result = std::env::var("SERVICE_RESULT").unwrap_or_default();
+    if !is_kill_result(&result) {
+        return Ok(());
+    }
+
+    let mode = AppConfig::load()
+        .map(|c| c.schedule.mode)
+        .unwrap_or_default();
+    let entry = LogEntry::new(
+        get_timestamp(),
+        mode,
+        "failed",
+        0,
+        0,
+        Some(format!("Run killed by systemd (result={result})")),
+        Vec::new(),
+    );
+    log_run(&entry)
+}
+
 pub fn scheduled_run() -> Result<()> {
     let config = AppConfig::load()?;
 
@@ -265,6 +296,23 @@ pub fn scheduled_run() -> Result<()> {
     let timestamp = get_timestamp();
 
     eprintln!("[{}] Starting scheduled {} run", timestamp, mode);
+
+    // A locked db is logged as a skipped run; the unit intentionally has no
+    // ConditionPathExists so the skip is recorded rather than silent.
+    if crate::handlers::lock::is_db_locked() {
+        eprintln!("pacman database is locked, skipping scheduled run");
+        let entry = LogEntry::new(
+            timestamp,
+            mode,
+            "skipped",
+            0,
+            0,
+            None,
+            vec!["Skipped: pacman database locked".to_string()],
+        );
+        log_run(&entry)?;
+        return Ok(());
+    }
 
     // Check for cancellation before starting
     if let CheckResult::Cancelled | CheckResult::TimedOut(_) = check_cancel(&_timeout_guard) {
@@ -540,7 +588,18 @@ pub fn scheduled_run() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::derive_status;
+    use super::{derive_status, is_kill_result};
+
+    #[test]
+    fn is_kill_result_matches_only_abrupt_kills() {
+        for r in ["signal", "core-dump", "watchdog"] {
+            assert!(is_kill_result(r), "{r} should count as a kill");
+        }
+        // "timeout" is self-reported (SendSIGKILL=no), so it must not record here.
+        for r in ["success", "exit-code", "timeout", "protocol", ""] {
+            assert!(!is_kill_result(r), "{r} should not count as a kill");
+        }
+    }
 
     #[test]
     fn derive_status_uses_explicit_value() {

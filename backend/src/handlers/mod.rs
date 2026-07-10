@@ -42,7 +42,9 @@ pub use reboot::get_reboot_status;
 pub use repos::{
     delete_repo_backup, list_repo_backups, list_repos, restore_repo_backup, save_repos,
 };
-pub use scheduled::{get_schedule_config, get_scheduled_runs, scheduled_run, set_schedule_config};
+pub use scheduled::{
+    get_schedule_config, get_scheduled_runs, record_interrupted, scheduled_run, set_schedule_config,
+};
 pub use security::{check_security, security_info};
 pub use services::get_services_status;
 pub use signoff::{read_credentials_from_stdin, signoff_list, signoff_revoke, signoff_sign};

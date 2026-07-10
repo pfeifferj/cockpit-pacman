@@ -9,11 +9,11 @@ use cockpit_pacman_backend::handlers::{
     install_package, keyring_status, list_archive_versions, list_downgrades, list_ignored,
     list_installed, list_mirror_backups, list_mirrors, list_orphans, list_repo_backups, list_repos,
     local_package_info, mark_dismissed, mark_news_read, preflight_upgrade,
-    read_credentials_from_stdin, read_dismissal, read_news_state, refresh_keyring, refresh_mirrors,
-    remove_ignored, remove_orphans, remove_package, remove_stale_lock, restore_mirror_backup,
-    restore_repo_backup, run_upgrade, save_mirrorlist, save_repos, scheduled_run, search,
-    security_info, set_schedule_config, signoff_list, signoff_revoke, signoff_sign, sync_database,
-    sync_package_info, test_mirrors,
+    read_credentials_from_stdin, read_dismissal, read_news_state, record_interrupted,
+    refresh_keyring, refresh_mirrors, remove_ignored, remove_orphans, remove_package,
+    remove_stale_lock, restore_mirror_backup, restore_repo_backup, run_upgrade, save_mirrorlist,
+    save_repos, scheduled_run, search, security_info, set_schedule_config, signoff_list,
+    signoff_revoke, signoff_sign, sync_database, sync_package_info, test_mirrors,
 };
 use cockpit_pacman_backend::models::{MirrorEntry, RepoEntry, StructuredError};
 use cockpit_pacman_backend::util::{classify_error, emit_json, shutdown_event_writer};
@@ -58,6 +58,7 @@ const COMMANDS: &[&str] = &[
     "set-schedule",
     "list-scheduled-runs",
     "scheduled-run",
+    "scheduled-record-interrupted",
     "reboot-status",
     "services-status",
     "pacnew-status",
@@ -178,6 +179,7 @@ Commands:
   list-scheduled-runs [offset] [limit]
                          List scheduled run history
   scheduled-run          Execute scheduled operation (called by systemd)
+  scheduled-record-interrupted   Record a systemd-killed run (ExecStopPost)
   reboot-status          Check if system reboot is recommended
   services-status        List running services whose binaries were replaced
   pacnew-status          List .pacnew/.pacsave config files needing manual merge
@@ -549,6 +551,7 @@ fn main() {
             validate_pagination(offset, limit).and_then(|_| get_scheduled_runs(offset, limit))
         }
         "scheduled-run" => scheduled_run(),
+        "scheduled-record-interrupted" => record_interrupted(),
         "reboot-status" => get_reboot_status(),
         "services-status" => get_services_status(),
         "pacnew-status" => get_pacnew_status(),
@@ -766,10 +769,13 @@ fn main() {
 
     if let Err(e) = result {
         // The structured envelope + exit 0 is for commands whose stdout the
-        // frontend parses. scheduled-run is invoked by a systemd oneshot unit
-        // with no such consumer, so it must exit non-zero on failure for the
-        // unit result to reflect reality.
-        let emit_envelope = args[1] != "scheduled-run";
+        // frontend parses. The scheduled commands are invoked by the systemd
+        // oneshot unit with no such consumer, so they must exit non-zero on
+        // failure for the unit result to reflect reality.
+        let emit_envelope = !matches!(
+            args[1].as_str(),
+            "scheduled-run" | "scheduled-record-interrupted"
+        );
         if emit_envelope {
             // Every frontend-consumed command reports failure as an envelope, so
             // an unclassifiable error still carries its real message.

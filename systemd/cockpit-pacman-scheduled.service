@@ -2,11 +2,13 @@
 Description=Cockpit Pacman Scheduled Upgrade
 After=network-online.target
 Wants=network-online.target
-ConditionPathExists=!/var/lib/pacman/db.lck
 
 [Service]
 Type=oneshot
 ExecStart=/usr/libexec/cockpit-pacman/cockpit-pacman-backend scheduled-run
+# An abrupt kill (signal/core-dump/watchdog) leaves no run entry of its own;
+# ExecStopPost records it. Timeouts self-report, so they are ignored there.
+ExecStopPost=/usr/libexec/cockpit-pacman/cockpit-pacman-backend scheduled-record-interrupted
 Nice=19
 IOSchedulingClass=idle
 # A commit must never be SIGKILLed (no rollback). SendSIGKILL=no forbids it;

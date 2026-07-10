@@ -36,6 +36,11 @@ fn db_path() -> PathBuf {
     )
 }
 
+/// Whether pacman's transaction lock is currently present.
+pub(crate) fn is_db_locked() -> bool {
+    db_path().join("db.lck").exists()
+}
+
 // alpm holds an open fd to db.lck while locked, so the owner is whichever
 // process has that exact file open; matching anything under the db dir would
 // misreport read-only queries (and our own backend) as the holder. `lock` must
