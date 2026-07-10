@@ -102,6 +102,7 @@ import {
 } from "../api";
 import type { KeyringCredentials, ErrorCode, ScheduledRunEntry, StreamingHandle } from "../api";
 import { NetworkErrorState } from "./NetworkErrorState";
+import { ErrorDetails } from "./ErrorDetails";
 import { CompactPagination } from "./CompactPagination";
 
 import { appendCapped, isDbLockError, sanitizeUrl } from "../utils";
@@ -341,6 +342,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [log, setLog] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
+  const [errorDetails, setErrorDetails] = useState<string | undefined>(undefined);
   const [warnings, setWarnings] = useState<string[]>([]);
   const cancelRef = useRef<StreamingHandle | null>(null);
   const [errorOrigin, setErrorOrigin] = useState<ErrorOrigin>("check");
@@ -351,10 +353,11 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   // Consecutive errors can commit in one render batch without ever showing
   // the intermediate state, so the epoch forces LockErrorBody to remount
   // (and re-check the lock) for each new error.
-  const failWith = useCallback((origin: ErrorOrigin, message: string, code?: ErrorCode) => {
+  const failWith = useCallback((origin: ErrorOrigin, message: string, code?: ErrorCode, details?: string) => {
     setErrorOrigin(origin);
     setError(message);
     setErrorCode(code);
+    setErrorDetails(details);
     setErrorEpoch((e) => e + 1);
     setState("error");
   }, []);
@@ -621,6 +624,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     setState("checking");
     setError(null);
     setErrorCode(undefined);
+    setErrorDetails(undefined);
     setWarnings([]);
     setLockRetryExhausted(false);
     // page_status is published by a dedicated effect (see publishPageStatus
@@ -633,7 +637,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       setState(response.updates.length > 0 ? "available" : "uptodate");
       loadSecurityData();
     } catch (ex) {
-      failWith("check", ex instanceof Error ? ex.message : String(ex), ex instanceof BackendError ? ex.code : undefined);
+      failWith("check", ex instanceof Error ? ex.message : String(ex), ex instanceof BackendError ? ex.code : undefined, ex instanceof BackendError ? ex.details : undefined);
     }
   }, [loadSecurityData, failWith]);
 
@@ -843,6 +847,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     setPreflightLoading(true);
     setError(null);
     setErrorCode(undefined);
+    setErrorDetails(undefined);
     setLockRetryExhausted(false);
     try {
       const preflight = await preflightUpgrade(ignoredPackages);
@@ -877,7 +882,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       startUpgrade();
     } catch (ex) {
       setPreflightLoading(false);
-      failWith("preflight", ex instanceof Error ? ex.message : String(ex), ex instanceof BackendError ? ex.code : undefined);
+      failWith("preflight", ex instanceof Error ? ex.message : String(ex), ex instanceof BackendError ? ex.code : undefined, ex instanceof BackendError ? ex.details : undefined);
     }
   };
 
@@ -1336,6 +1341,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
                 {showLockRecovery
                   ? <LockErrorBody key={errorEpoch} onRetry={manualResumeAfterLock} onAutoRetry={autoResumeAfterLock} />
                   : error}
+                {!showLockRecovery && <ErrorDetails details={errorDetails} />}
               </EmptyStateBody>
               <EmptyStateFooter>
                 <EmptyStateActions>

@@ -1,6 +1,7 @@
 import React from "react";
 import { Alert } from "@patternfly/react-core";
 import { isDbLockError } from "../utils";
+import { ErrorDetails } from "./ErrorDetails";
 import type { ErrorCode } from "../api";
 
 interface ErrorAlertProps {
@@ -9,6 +10,8 @@ interface ErrorAlertProps {
   title: string;
   lockMessage?: string;
   className?: string;
+  /** Backend context chain (BackendError.details), shown under the message. */
+  details?: string;
 }
 
 /** Error alert that downgrades to a warning when pacman's database is locked. */
@@ -18,6 +21,7 @@ export const ErrorAlert: React.FC<ErrorAlertProps> = ({
   title,
   lockMessage = "Another package manager operation is in progress. Please wait for it to complete.",
   className,
+  details,
 }) => {
   const locked = isDbLockError(error, code);
   return (
@@ -27,6 +31,7 @@ export const ErrorAlert: React.FC<ErrorAlertProps> = ({
       className={className}
     >
       {locked ? lockMessage : error}
+      {!locked && <ErrorDetails details={details} />}
     </Alert>
   );
 };
