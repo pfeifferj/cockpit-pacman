@@ -1,0 +1,7 @@
+pre_remove() {
+    systemctl disable --now cockpit-pacman-scheduled.timer 2>/dev/null || true
+}
+
+post_remove() {
+    rm -rf /etc/systemd/system/cockpit-pacman-scheduled.timer.d
+}
