@@ -23,24 +23,32 @@ pub fn keyring_status() -> Result<()> {
                 false
             }
             Ok(InitializationStatus::PathIsSymlink) => {
-                warnings.push(
-                    "Security warning: keyring path is a symlink. This may be unsafe.".to_string(),
-                );
+                warnings.push(format!(
+                    "Security warning: keyring path ({}) is a symlink. This may be unsafe.",
+                    keyring.get_homedir()
+                ));
                 false
             }
             Ok(InitializationStatus::IncorrectPermissions { actual }) => {
                 warnings.push(format!(
-                    "Keyring directory has incorrect permissions: {:o} (expected 700)",
+                    "Keyring directory ({}) has incorrect permissions: {:o} (expected 700)",
+                    keyring.get_homedir(),
                     actual
                 ));
                 true
             }
             Ok(InitializationStatus::NoKeyringFiles) => {
-                warnings.push("Keyring directory exists but contains no keys.".to_string());
+                warnings.push(format!(
+                    "Keyring directory ({}) exists but contains no keys.",
+                    keyring.get_homedir(),
+                ));
                 false
             }
             Ok(InitializationStatus::NoTrustDb) => {
-                warnings.push("Keyring missing trust database.".to_string());
+                warnings.push(format!(
+                    "Keyring directory ({}) missing trust database.",
+                    keyring.get_homedir(),
+                ));
                 false
             }
             Ok(status) => {
