@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::TransactionGuard;
-use crate::inhibit::ShutdownInhibitor;
 use crate::util::{CheckResult, TimeoutGuard, check_cancel};
 
 /// Records alpm questions that need a human decision. Never answers, so
@@ -81,16 +80,16 @@ macro_rules! checkpoint {
     };
 }
 
-/// One sysupgrade transaction: init, sync, prepare, gate, commit. Callbacks,
-/// timeouts, and result reporting stay with the caller. `flags` gates the run
-/// for unattended callers (which must have called `install` on the handle);
-/// interactive callers pass None and answer questions in their own question
-/// cb. Err only when the transaction cannot be initialized.
+/// One sysupgrade transaction: init, sync, prepare, gate, commit. Callbacks
+/// and reporting stay with the caller. `flags` gates the run for unattended
+/// callers (which must have called `install` on the handle); interactive
+/// callers pass None and answer in their own question cb. Callers hold a
+/// ShutdownInhibitor across this call and their result recording. Err only
+/// when the transaction cannot be initialized.
 pub fn run_sysupgrade(
     handle: &mut Alpm,
     timeout: &TimeoutGuard,
     flags: Option<&InterventionFlags>,
-    inhibit_msg: &str,
 ) -> Result<SysupgradeOutcome> {
     checkpoint!(timeout);
 
@@ -128,7 +127,6 @@ pub fn run_sysupgrade(
 
     checkpoint!(timeout);
 
-    let _inhibitor = ShutdownInhibitor::take(inhibit_msg);
     match tx.commit().err().map(|e| e.to_string()) {
         None => Ok(SysupgradeOutcome::Upgraded { packages }),
         Some(e) => Ok(classify_commit_error(

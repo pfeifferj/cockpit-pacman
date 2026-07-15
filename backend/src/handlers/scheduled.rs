@@ -10,6 +10,7 @@ use crate::alpm::{
     setup_dl_cb, setup_log_cb,
 };
 use crate::config::{AppConfig, ScheduleConfigResponse, ScheduleMode, ScheduleSetResponse};
+use crate::inhibit::ShutdownInhibitor;
 use crate::models::{ScheduledRunEntry, ScheduledRunsResponse};
 use crate::util::{
     CheckResult, TimeoutGuard, check_cancel, emit_json, setup_signal_handler, with_file_lock,
@@ -431,12 +432,9 @@ pub fn scheduled_run() -> Result<()> {
     let flags = InterventionFlags::default();
     flags.install(&mut handle);
 
-    let outcome = match run_sysupgrade(
-        &mut handle,
-        &_timeout_guard,
-        Some(&flags),
-        "Applying scheduled package upgrade",
-    ) {
+    let _inhibitor = ShutdownInhibitor::take("Applying scheduled package upgrade");
+
+    let outcome = match run_sysupgrade(&mut handle, &_timeout_guard, Some(&flags)) {
         Ok(outcome) => outcome,
         Err(e) => {
             let entry = LogEntry::new(

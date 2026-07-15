@@ -461,7 +461,9 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
     setup_event_cb(&mut handle, EventScope::Upgrade);
     setup_question_cb(&mut handle, true);
 
-    match run_sysupgrade(&mut handle, &timeout, None, "Applying package changes")? {
+    let _inhibitor = ShutdownInhibitor::take("Applying package changes");
+
+    match run_sysupgrade(&mut handle, &timeout, None)? {
         SysupgradeOutcome::CancelledEarly(r) => {
             emit_cancellation_complete(&r);
             Ok(())
