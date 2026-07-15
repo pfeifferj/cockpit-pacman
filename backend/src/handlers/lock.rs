@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::Serialize;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
@@ -101,44 +101,27 @@ pub fn check_lock() -> Result<()> {
     })
 }
 
-pub fn remove_stale_lock() -> Result<()> {
-    let db = db_path();
-    let lock = db.join("db.lck");
+/// Remove db.lck only if no process holds it open. Ok(true) if removed,
+/// Ok(false) if no lock existed, Err with the refusal reason otherwise.
+pub(crate) fn try_remove_stale_lock() -> Result<bool, String> {
+    try_remove_stale_lock_at(&db_path().join("db.lck"))
+}
 
+fn try_remove_stale_lock_at(lock: &Path) -> Result<bool, String> {
     if !lock.exists() {
-        return emit_json(&LockRemoveResult {
-            removed: false,
-            error: Some("No lock file exists".to_string()),
-        });
+        return Ok(false);
     }
 
     // Match and remove the same canonical path; a failed resolve refuses
     // removal rather than deleting a lock we can't verify.
-    let canonical = match lock.canonicalize() {
-        Ok(path) => path,
-        Err(e) => {
-            return emit_json(&LockRemoveResult {
-                removed: false,
-                error: Some(format!("Could not resolve lock file: {}", e)),
-            });
-        }
-    };
+    let canonical = lock
+        .canonicalize()
+        .map_err(|e| format!("Could not resolve lock file: {}", e))?;
 
-    let before = match lock_identity(&canonical) {
-        Some(id) => id,
-        None => {
-            return emit_json(&LockRemoveResult {
-                removed: false,
-                error: Some("Could not stat lock file".to_string()),
-            });
-        }
-    };
+    let before = lock_identity(&canonical).ok_or("Could not stat lock file")?;
 
     if let Some(proc) = find_lock_holder(&canonical) {
-        return emit_json(&LockRemoveResult {
-            removed: false,
-            error: Some(format!("Database in use by {}", proc)),
-        });
+        return Err(format!("Database in use by {}", proc));
     }
 
     // db.lck is an O_EXCL presence lock: it can't be acquired while it exists, so
@@ -148,28 +131,55 @@ pub fn remove_stale_lock() -> Result<()> {
     // catches. The remaining stat->unlink gap is an accepted micro-window (a
     // path-based unlink can't be made conditional on inode).
     if lock_identity(&canonical) != Some(before) {
-        return emit_json(&LockRemoveResult {
-            removed: false,
-            error: Some(
-                "Lock file changed during check; not removing (a process may have taken the lock)"
-                    .to_string(),
-            ),
-        });
+        return Err(
+            "Lock file changed during check; not removing (a process may have taken the lock)"
+                .to_string(),
+        );
     }
 
-    fs::remove_file(&canonical).context("Failed to remove lock file")?;
+    fs::remove_file(&canonical).map_err(|e| format!("Failed to remove lock file: {}", e))?;
+    Ok(true)
+}
 
-    emit_json(&LockRemoveResult {
-        removed: true,
-        error: None,
-    })
+pub fn remove_stale_lock() -> Result<()> {
+    let result = match try_remove_stale_lock() {
+        Ok(true) => LockRemoveResult {
+            removed: true,
+            error: None,
+        },
+        Ok(false) => LockRemoveResult {
+            removed: false,
+            error: Some("No lock file exists".to_string()),
+        },
+        Err(e) => LockRemoveResult {
+            removed: false,
+            error: Some(e),
+        },
+    };
+    emit_json(&result)
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::{find_lock_holder, lock_identity};
+    use super::{find_lock_holder, lock_identity, try_remove_stale_lock_at};
     use std::fs::File;
+
+    #[test]
+    fn try_remove_reaps_only_a_holderless_lock() {
+        let path = std::env::temp_dir().join(format!("db-lck-reap-{}", std::process::id()));
+
+        assert_eq!(try_remove_stale_lock_at(&path), Ok(false));
+
+        let file = File::create(&path).unwrap();
+        let err = try_remove_stale_lock_at(&path).unwrap_err();
+        assert!(err.contains(&format!("(pid {})", std::process::id())));
+        assert!(path.exists(), "a held lock must not be removed");
+
+        drop(file);
+        assert_eq!(try_remove_stale_lock_at(&path), Ok(true));
+        assert!(!path.exists(), "a holderless lock must be removed");
+    }
 
     #[test]
     fn lock_identity_detects_replacement() {
