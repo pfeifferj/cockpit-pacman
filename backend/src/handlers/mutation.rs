@@ -4,8 +4,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::alpm::{
-    TransactionGuard, get_handle, interrupt_if_cancelled, progress_to_string, setup_dl_cb,
-    setup_log_cb, try_interrupt,
+    SysupgradeOutcome, TransactionGuard, get_handle, interrupt_if_cancelled, progress_to_string,
+    run_sysupgrade, setup_dl_cb, setup_log_cb, try_interrupt,
 };
 use crate::check_cancel_early;
 use crate::db::invalidate_repo_map_cache;
@@ -461,42 +461,64 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
     setup_event_cb(&mut handle, EventScope::Upgrade);
     setup_question_cb(&mut handle, true);
 
-    check_cancel_early!(&timeout);
-
-    let mut tx = TransactionGuard::new(&mut handle, TransFlag::NONE)?;
-
-    check_cancel_early!(&timeout);
-
-    if let Err(e) = tx.sync_sysupgrade(false) {
-        emit_event(&StreamEvent::Complete {
-            success: false,
-            message: Some(format!("Failed to prepare system upgrade: {}", e)),
-        });
-        return Err(e.into());
+    match run_sysupgrade(&mut handle, &timeout, None, "Applying package changes")? {
+        SysupgradeOutcome::CancelledEarly(r) => {
+            emit_cancellation_complete(&r);
+            Ok(())
+        }
+        SysupgradeOutcome::SyncFailed(e) => {
+            emit_event(&StreamEvent::Complete {
+                success: false,
+                message: Some(format!("Failed to prepare system upgrade: {}", e)),
+            });
+            Err(anyhow::anyhow!(e))
+        }
+        SysupgradeOutcome::PrepareFailed(e) => Err(prepare_failure(&e)),
+        SysupgradeOutcome::NothingToDo => {
+            emit_event(&StreamEvent::Complete {
+                success: true,
+                message: Some("System is up to date".to_string()),
+            });
+            Ok(())
+        }
+        SysupgradeOutcome::Upgraded { .. } => {
+            emit_event(&StreamEvent::Complete {
+                success: true,
+                message: None,
+            });
+            Ok(())
+        }
+        SysupgradeOutcome::Interrupted(CheckResult::TimedOut(secs)) => {
+            emit_event(&StreamEvent::Complete {
+                success: false,
+                message: Some(format!("Operation timed out after {} seconds", secs)),
+            });
+            Ok(())
+        }
+        SysupgradeOutcome::Interrupted(_) => {
+            emit_event(&StreamEvent::Complete {
+                success: false,
+                message: Some(
+                    "Operation interrupted - system may be in inconsistent state".to_string(),
+                ),
+            });
+            Ok(())
+        }
+        // Intervention needs flags; with None it cannot occur, but map it to
+        // the failure wire message rather than panic.
+        SysupgradeOutcome::CommitFailed(e)
+        | SysupgradeOutcome::Intervention { error: Some(e), .. } => {
+            let message = format!("Failed to commit transaction: {}", e);
+            emit_event(&StreamEvent::Complete {
+                success: false,
+                message: Some(message.clone()),
+            });
+            Err(anyhow::anyhow!(message))
+        }
+        SysupgradeOutcome::Intervention { error: None, .. } => {
+            Err(prepare_failure("manual intervention required"))
+        }
     }
-
-    check_cancel_early!(&timeout);
-
-    if let Some(err_msg) = tx.prepare().err().map(|e| e.to_string()) {
-        return Err(prepare_failure(&err_msg));
-    }
-
-    if tx.add().is_empty() && tx.remove().is_empty() {
-        emit_event(&StreamEvent::Complete {
-            success: true,
-            message: Some("System is up to date".to_string()),
-        });
-        return Ok(());
-    }
-
-    check_cancel_early!(&timeout);
-
-    commit_and_complete(
-        &mut tx,
-        &timeout,
-        "Operation interrupted - system may be in inconsistent state",
-        None,
-    )
 }
 
 pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
