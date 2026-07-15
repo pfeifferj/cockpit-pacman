@@ -1,18 +1,15 @@
-use alpm::{AnyQuestion, Question, TransFlag};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::alpm::{
-    TransactionGuard, find_available_updates, get_handle, setup_dl_cb, setup_log_cb,
+    InterventionFlags, SysupgradeOutcome, find_available_updates, get_handle, run_sysupgrade,
+    setup_dl_cb, setup_log_cb,
 };
 use crate::config::{AppConfig, ScheduleConfigResponse, ScheduleMode, ScheduleSetResponse};
-use crate::inhibit::ShutdownInhibitor;
 use crate::models::{ScheduledRunEntry, ScheduledRunsResponse};
 use crate::util::{
     CheckResult, TimeoutGuard, check_cancel, emit_json, setup_signal_handler, with_file_lock,
@@ -431,27 +428,16 @@ pub fn scheduled_run() -> Result<()> {
         return Ok(());
     }
 
-    let has_conflicts = Arc::new(AtomicBool::new(false));
-    let has_removals = Arc::new(AtomicBool::new(false));
-    let has_import_keys = Arc::new(AtomicBool::new(false));
+    let flags = InterventionFlags::default();
+    flags.install(&mut handle);
 
-    let conflicts_cb = Arc::clone(&has_conflicts);
-    let removals_cb = Arc::clone(&has_removals);
-    let import_keys_cb = Arc::clone(&has_import_keys);
-
-    handle.set_question_cb(
-        (),
-        move |question: AnyQuestion, _: &mut ()| match question.question() {
-            Question::Conflict(_) => conflicts_cb.store(true, Ordering::SeqCst),
-            Question::RemovePkgs(_) => removals_cb.store(true, Ordering::SeqCst),
-            Question::ImportKey(_) => import_keys_cb.store(true, Ordering::SeqCst),
-            Question::Replace(_) => removals_cb.store(true, Ordering::SeqCst),
-            _ => {}
-        },
-    );
-
-    let mut tx = match TransactionGuard::new(&mut handle, TransFlag::NONE) {
-        Ok(tx) => tx,
+    let outcome = match run_sysupgrade(
+        &mut handle,
+        &_timeout_guard,
+        Some(&flags),
+        "Applying scheduled package upgrade",
+    ) {
+        Ok(outcome) => outcome,
         Err(e) => {
             let entry = LogEntry::new(
                 timestamp,
@@ -467,140 +453,160 @@ pub fn scheduled_run() -> Result<()> {
         }
     };
 
-    if let Err(e) = tx.sync_sysupgrade(false) {
-        let entry = LogEntry::new(
-            timestamp,
-            mode,
-            "failed",
-            packages_checked,
-            0,
-            Some(format!("Failed to prepare upgrade: {}", e)),
-            details,
-        );
-        log_run(&entry)?;
-        return Err(e.into());
-    }
-
-    let conflicts_detected = has_conflicts.load(Ordering::SeqCst);
-    let removals_detected = has_removals.load(Ordering::SeqCst);
-    let imports_detected = has_import_keys.load(Ordering::SeqCst);
-
-    let prepare_failed = tx.prepare().is_err();
-
-    if prepare_failed {
-        eprintln!("Failed to prepare upgrade transaction");
-        let entry = LogEntry::new(
-            timestamp,
-            mode,
-            "failed",
-            packages_checked,
-            0,
-            Some("Failed to prepare upgrade transaction".to_string()),
-            details,
-        );
-        log_run(&entry)?;
-        anyhow::bail!("Failed to prepare upgrade transaction");
-    }
-
-    if conflicts_detected || removals_detected || imports_detected {
-        eprintln!("Manual intervention required, skipping");
-        let mut reasons = Vec::new();
-        if conflicts_detected {
-            reasons.push("conflicts detected");
-        }
-        if removals_detected {
-            reasons.push("package removals required");
-        }
-        if imports_detected {
-            reasons.push("key imports required");
-        }
-        let entry = LogEntry::new(
-            timestamp,
-            mode,
-            "skipped",
-            packages_checked,
-            0,
-            None,
-            vec![format!(
-                "Skipped: manual intervention required ({})",
-                reasons.join(", ")
-            )],
-        );
-        log_run(&entry)?;
-        return Ok(());
-    }
-
-    let packages_to_upgrade = tx.add().len();
-
-    if packages_to_upgrade == 0 {
-        eprintln!("No packages to upgrade after preparation");
-        let entry = LogEntry::new(
-            timestamp,
-            mode,
-            "ok",
-            packages_checked,
-            0,
-            None,
-            vec!["No packages to upgrade after preparation".to_string()],
-        );
-        log_run(&entry)?;
-        return Ok(());
-    }
-
-    // Final check before committing - this is the point of no return
-    if let CheckResult::Cancelled | CheckResult::TimedOut(_) = check_cancel(&_timeout_guard) {
-        let entry = LogEntry::new(
-            timestamp,
-            mode,
-            "failed",
-            packages_checked,
-            0,
-            Some("Operation cancelled or timed out before commit".to_string()),
-            details,
-        );
-        log_run(&entry)?;
-        anyhow::bail!("Operation cancelled or timed out");
-    }
-
-    eprintln!(
-        "Committing upgrade of {} package(s)...",
-        packages_to_upgrade
-    );
-
-    let _inhibitor = ShutdownInhibitor::take("Applying scheduled package upgrade");
-
-    if let Err(e) = tx.commit() {
-        let entry = LogEntry::new(
-            timestamp,
-            mode,
-            "failed",
-            packages_checked,
-            0,
-            Some(format!("Failed to commit upgrade: {}", e)),
-            details,
-        );
-        log_run(&entry)?;
-        return Err(e.into());
-    }
-
-    eprintln!("Upgrade completed successfully");
+    let (status, upgraded, error, detail_override) = outcome_to_log_parts(&outcome);
+    eprintln!("Scheduled run finished: {}", status);
     let entry = LogEntry::new(
         timestamp,
         mode,
-        "ok",
+        status,
         packages_checked,
-        packages_to_upgrade,
-        None,
-        details,
+        upgraded,
+        error.clone(),
+        match detail_override {
+            Some(detail) => vec![detail],
+            None => details,
+        },
     );
     log_run(&entry)?;
 
+    if status == "failed" {
+        anyhow::bail!(error.unwrap_or_else(|| "Scheduled upgrade failed".to_string()));
+    }
     Ok(())
+}
+
+/// Map a sysupgrade outcome onto run-record fields:
+/// (status, packages_upgraded, error, detail replacing the update list).
+fn outcome_to_log_parts(
+    outcome: &SysupgradeOutcome,
+) -> (&'static str, usize, Option<String>, Option<String>) {
+    match outcome {
+        SysupgradeOutcome::Upgraded { packages } => ("ok", *packages, None, None),
+        SysupgradeOutcome::NothingToDo => (
+            "ok",
+            0,
+            None,
+            Some("No packages to upgrade after preparation".to_string()),
+        ),
+        SysupgradeOutcome::Intervention { reasons, .. } => (
+            "skipped",
+            0,
+            None,
+            Some(format!(
+                "Skipped: manual intervention required ({})",
+                reasons.join(", ")
+            )),
+        ),
+        SysupgradeOutcome::CancelledEarly(_) => (
+            "failed",
+            0,
+            Some("Operation cancelled or timed out before commit".to_string()),
+            None,
+        ),
+        SysupgradeOutcome::Interrupted(CheckResult::TimedOut(secs)) => (
+            "failed",
+            0,
+            Some(format!(
+                "Upgrade timed out after {} seconds during commit",
+                secs
+            )),
+            None,
+        ),
+        SysupgradeOutcome::Interrupted(_) => (
+            "failed",
+            0,
+            Some("Upgrade interrupted during commit".to_string()),
+            None,
+        ),
+        SysupgradeOutcome::SyncFailed(e) => (
+            "failed",
+            0,
+            Some(format!("Failed to prepare upgrade: {}", e)),
+            None,
+        ),
+        SysupgradeOutcome::PrepareFailed(e) => (
+            "failed",
+            0,
+            Some(format!("Failed to prepare upgrade transaction: {}", e)),
+            None,
+        ),
+        SysupgradeOutcome::CommitFailed(e) => (
+            "failed",
+            0,
+            Some(format!("Failed to commit upgrade: {}", e)),
+            None,
+        ),
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{derive_status, is_kill_result};
+    use super::{SysupgradeOutcome, derive_status, is_kill_result, outcome_to_log_parts};
+    use crate::util::CheckResult;
+
+    #[test]
+    fn intervention_maps_to_skipped_at_every_stage() {
+        // Prepare-time conflict: flag set and prepare errored.
+        let prepare_conflict = SysupgradeOutcome::Intervention {
+            reasons: vec!["conflicts detected"],
+            error: Some("conflicting files".to_string()),
+        };
+        // Commit-time ImportKey refusal: flag set and commit errored.
+        let commit_import = SysupgradeOutcome::Intervention {
+            reasons: vec!["key imports required"],
+            error: Some("required key missing from keyring".to_string()),
+        };
+        for outcome in [prepare_conflict, commit_import] {
+            let (status, upgraded, error, detail) = outcome_to_log_parts(&outcome);
+            assert_eq!(status, "skipped");
+            assert_eq!(upgraded, 0);
+            assert_eq!(error, None);
+            assert!(
+                detail
+                    .unwrap()
+                    .starts_with("Skipped: manual intervention required (")
+            );
+        }
+
+        let (_, _, _, detail) = outcome_to_log_parts(&SysupgradeOutcome::Intervention {
+            reasons: vec!["conflicts detected", "key imports required"],
+            error: None,
+        });
+        assert_eq!(
+            detail.unwrap(),
+            "Skipped: manual intervention required (conflicts detected, key imports required)"
+        );
+    }
+
+    #[test]
+    fn failures_keep_failed_status_and_error() {
+        let cases = [
+            SysupgradeOutcome::SyncFailed("e".into()),
+            SysupgradeOutcome::PrepareFailed("e".into()),
+            SysupgradeOutcome::CommitFailed("e".into()),
+            SysupgradeOutcome::CancelledEarly(CheckResult::Cancelled),
+            SysupgradeOutcome::Interrupted(CheckResult::Cancelled),
+            SysupgradeOutcome::Interrupted(CheckResult::TimedOut(1800)),
+        ];
+        for outcome in cases {
+            let (status, upgraded, error, _) = outcome_to_log_parts(&outcome);
+            assert_eq!(status, "failed", "{outcome:?} must record failed");
+            assert_eq!(upgraded, 0);
+            assert!(error.is_some(), "{outcome:?} must carry an error");
+        }
+    }
+
+    #[test]
+    fn success_records_upgraded_count() {
+        let (status, upgraded, error, detail) =
+            outcome_to_log_parts(&SysupgradeOutcome::Upgraded { packages: 7 });
+        assert_eq!((status, upgraded, error, detail), ("ok", 7, None, None));
+
+        let (status, upgraded, _, detail) = outcome_to_log_parts(&SysupgradeOutcome::NothingToDo);
+        assert_eq!(status, "ok");
+        assert_eq!(upgraded, 0);
+        assert_eq!(detail.unwrap(), "No packages to upgrade after preparation");
+    }
 
     #[test]
     fn is_kill_result_matches_only_abrupt_kills() {
