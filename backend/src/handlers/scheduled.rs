@@ -250,7 +250,7 @@ pub fn get_scheduled_runs(offset: usize, limit: usize) -> Result<()> {
 /// run finish and self-report (or wedge forever, in which case ExecStopPost
 /// never fires), so recording it here would duplicate the run's own entry.
 fn is_kill_result(result: &str) -> bool {
-    matches!(result, "signal" | "core-dump" | "watchdog")
+    matches!(result, "signal" | "core-dump" | "watchdog" | "oom-kill")
 }
 
 /// Called from the unit's ExecStopPost. Records a failed run only for an abrupt
@@ -592,7 +592,7 @@ mod tests {
 
     #[test]
     fn is_kill_result_matches_only_abrupt_kills() {
-        for r in ["signal", "core-dump", "watchdog"] {
+        for r in ["signal", "core-dump", "watchdog", "oom-kill"] {
             assert!(is_kill_result(r), "{r} should count as a kill");
         }
         // "timeout" is self-reported (SendSIGKILL=no), so it must not record here.
@@ -630,6 +630,18 @@ mod tests {
             last_value("SendSIGKILL="),
             Some("no"),
             "unit must set SendSIGKILL=no"
+        );
+
+        // Kernel OOM is the one SIGKILL SendSIGKILL=no cannot forbid.
+        assert_eq!(
+            last_value("OOMScoreAdjust="),
+            Some("-500"),
+            "unit must deprioritize the commit as an OOM victim"
+        );
+        assert_eq!(
+            last_value("OOMPolicy="),
+            Some("continue"),
+            "a child's OOM kill must not stop a commit in progress"
         );
 
         let stop_timeout: u64 = last_value("TimeoutStopSec=")

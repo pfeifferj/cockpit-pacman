@@ -6,8 +6,8 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/libexec/cockpit-pacman/cockpit-pacman-backend scheduled-run
-# An abrupt kill (signal/core-dump/watchdog) leaves no run entry of its own;
-# ExecStopPost records it. Timeouts self-report, so they are ignored there.
+# An abrupt kill leaves no run entry of its own; ExecStopPost records it.
+# Timeouts self-report, so they are ignored there.
 ExecStopPost=/usr/libexec/cockpit-pacman/cockpit-pacman-backend scheduled-record-interrupted
 Nice=19
 IOSchedulingClass=idle
@@ -17,6 +17,10 @@ IOSchedulingClass=idle
 TimeoutStartSec=10800
 TimeoutStopSec=900
 SendSIGKILL=no
+# Kernel OOM SIGKILLs bypass SendSIGKILL=no: keep the unit a last-resort
+# victim (not exempt) and survive a child hook's OOM kill.
+OOMScoreAdjust=-500
+OOMPolicy=continue
 
 # Security hardening
 ProtectKernelTunables=yes
