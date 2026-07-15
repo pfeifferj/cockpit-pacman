@@ -486,14 +486,21 @@ fn outcome_to_log_parts(
             None,
             Some("No packages to upgrade after preparation".to_string()),
         ),
-        SysupgradeOutcome::Intervention { reasons, .. } => (
+        SysupgradeOutcome::Intervention { reasons, error } => (
             "skipped",
             0,
             None,
-            Some(format!(
-                "Skipped: manual intervention required ({})",
-                reasons.join(", ")
-            )),
+            Some(match error {
+                Some(e) => format!(
+                    "Skipped: manual intervention required ({}); {}",
+                    reasons.join(", "),
+                    e
+                ),
+                None => format!(
+                    "Skipped: manual intervention required ({})",
+                    reasons.join(", ")
+                ),
+            }),
         ),
         SysupgradeOutcome::CancelledEarly(_) => (
             "failed",
@@ -554,15 +561,19 @@ mod tests {
             reasons: vec!["key imports required"],
             error: Some("required key missing from keyring".to_string()),
         };
-        for outcome in [prepare_conflict, commit_import] {
+        for (outcome, alpm_error) in [
+            (prepare_conflict, "conflicting files"),
+            (commit_import, "required key missing from keyring"),
+        ] {
             let (status, upgraded, error, detail) = outcome_to_log_parts(&outcome);
             assert_eq!(status, "skipped");
             assert_eq!(upgraded, 0);
             assert_eq!(error, None);
+            let detail = detail.unwrap();
+            assert!(detail.starts_with("Skipped: manual intervention required ("));
             assert!(
-                detail
-                    .unwrap()
-                    .starts_with("Skipped: manual intervention required (")
+                detail.ends_with(alpm_error),
+                "the alpm error must land in the skip detail"
             );
         }
 

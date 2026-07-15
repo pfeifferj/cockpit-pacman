@@ -490,11 +490,8 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
             });
             Ok(())
         }
-        SysupgradeOutcome::Interrupted(CheckResult::TimedOut(secs)) => {
-            emit_event(&StreamEvent::Complete {
-                success: false,
-                message: Some(format!("Operation timed out after {} seconds", secs)),
-            });
+        SysupgradeOutcome::Interrupted(r @ CheckResult::TimedOut(_)) => {
+            emit_cancellation_complete(&r);
             Ok(())
         }
         SysupgradeOutcome::Interrupted(_) => {

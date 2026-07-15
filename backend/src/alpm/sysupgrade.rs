@@ -29,12 +29,6 @@ impl InterventionFlags {
         });
     }
 
-    pub fn any(&self) -> bool {
-        self.conflicts.load(Ordering::SeqCst)
-            || self.removals.load(Ordering::SeqCst)
-            || self.import_keys.load(Ordering::SeqCst)
-    }
-
     pub fn reasons(&self) -> Vec<&'static str> {
         let mut reasons = Vec::new();
         if self.conflicts.load(Ordering::SeqCst) {
@@ -108,13 +102,14 @@ pub fn run_sysupgrade(
     // it outranks a prepare error: a conflict both sets its flag and fails
     // prepare (the recorded question kept alpm's refusal), and that needs a
     // human, not a failure record.
-    if let Some(f) = flags
-        && f.any()
-    {
-        return Ok(SysupgradeOutcome::Intervention {
-            reasons: f.reasons(),
-            error: prepare_err,
-        });
+    if let Some(f) = flags {
+        let reasons = f.reasons();
+        if !reasons.is_empty() {
+            return Ok(SysupgradeOutcome::Intervention {
+                reasons,
+                error: prepare_err,
+            });
+        }
     }
     if let Some(e) = prepare_err {
         return Ok(SysupgradeOutcome::PrepareFailed(e));
@@ -131,7 +126,7 @@ pub fn run_sysupgrade(
         None => Ok(SysupgradeOutcome::Upgraded { packages }),
         Some(e) => Ok(classify_commit_error(
             check_cancel(timeout),
-            flags.filter(|f| f.any()).map(|f| f.reasons()),
+            flags.map(|f| f.reasons()).filter(|r| !r.is_empty()),
             e,
         )),
     }
@@ -167,13 +162,11 @@ mod tests {
     #[test]
     fn reasons_are_stable_and_ordered() {
         let flags = InterventionFlags::default();
-        assert!(!flags.any());
         assert!(flags.reasons().is_empty());
 
         flags.import_keys.store(true, Ordering::SeqCst);
         flags.conflicts.store(true, Ordering::SeqCst);
         flags.removals.store(true, Ordering::SeqCst);
-        assert!(flags.any());
         assert_eq!(
             flags.reasons(),
             vec![
@@ -188,7 +181,6 @@ mod tests {
     fn commit_error_classification_precedence() {
         let reasons = || Some(vec!["key imports required"]);
 
-        // A pending abort outranks everything, intervention outranks failure.
         assert_eq!(
             classify_commit_error(CheckResult::Cancelled, reasons(), "err".into()),
             SysupgradeOutcome::Interrupted(CheckResult::Cancelled)
