@@ -298,20 +298,32 @@ pub fn scheduled_run() -> Result<()> {
     eprintln!("[{}] Starting scheduled {} run", timestamp, mode);
 
     // A locked db is logged as a skipped run; the unit intentionally has no
-    // ConditionPathExists so the skip is recorded rather than silent.
-    if crate::handlers::lock::is_db_locked() {
-        eprintln!("pacman database is locked, skipping scheduled run");
-        let entry = LogEntry::new(
-            timestamp,
-            mode,
-            "skipped",
-            0,
-            0,
-            None,
-            vec!["Skipped: pacman database locked".to_string()],
-        );
-        log_run(&entry)?;
-        return Ok(());
+    // ConditionPathExists so the skip is recorded rather than silent. A lock
+    // with no holder process is reaped first, so a crashed pacman doesn't make
+    // every future run skip.
+    match crate::handlers::lock::try_remove_stale_lock() {
+        Ok(true) => {
+            eprintln!("removed stale pacman database lock, continuing");
+            details.push("Removed stale database lock (no holder process)".to_string());
+        }
+        Ok(false) => {}
+        Err(reason) => {
+            eprintln!(
+                "pacman database is locked ({}), skipping scheduled run",
+                reason
+            );
+            let entry = LogEntry::new(
+                timestamp,
+                mode,
+                "skipped",
+                0,
+                0,
+                None,
+                vec![format!("Skipped: pacman database locked ({})", reason)],
+            );
+            log_run(&entry)?;
+            return Ok(());
+        }
     }
 
     // Check for cancellation before starting
