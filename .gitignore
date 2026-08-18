@@ -9,7 +9,6 @@ backend/crates/*/target/
 *.swp
 *.swo
 coverage/
-/packaging/arch/PKGBUILD
 .auth/
 playwright-report/
 test-results/

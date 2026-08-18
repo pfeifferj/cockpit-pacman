@@ -29,12 +29,8 @@ build-frontend: generate-types
 clean:
 	cd backend && cargo clean
 	rm -rf node_modules dist
-	rm -f packaging/arch/PKGBUILD
 
-packaging/arch/PKGBUILD: packaging/arch/PKGBUILD.in
-	sed 's/VERSION/$(VERSION)/' $< > $@
-
-dist: packaging/arch/PKGBUILD
+dist:
 	git archive --format=tar --prefix=cockpit-pacman-$(VERSION)/ HEAD | xz > $(TARFILE)
 
 install:
