@@ -39,6 +39,9 @@ View and manage pacman keyring
 ![Mirrors](docs/img/mirrors.png)
 Test and configure pacman mirrors
 
+![Repositories](docs/img/repositories.png)
+Enable, disable, and reorder repositories with pacman.conf backup history
+
 </details>
 
 ## Prerequisites
