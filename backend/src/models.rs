@@ -445,6 +445,13 @@ pub struct ScheduledRunEntry {
     pub packages_upgraded: usize,
     pub error: Option<String>,
     pub details: Vec<String>,
+    /// Absent on records written before it existed, and on ExecStopPost
+    /// records, which never saw the run start.
+    pub duration_secs: Option<u64>,
+    /// This run found a pacman lock with no holder process and reaped it, which
+    /// means the run before it was killed mid-transaction. Says nothing about
+    /// this run, which is why it is not folded into `status`.
+    pub removed_stale_lock: bool,
 }
 
 #[derive(Serialize, Deserialize, TS)]

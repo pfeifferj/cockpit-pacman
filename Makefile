@@ -41,6 +41,7 @@ install:
 	install -m 755 $(BACKEND_BIN) $(DESTDIR)$(PREFIX)/libexec/cockpit-pacman/
 	install -m 644 systemd/cockpit-pacman-scheduled.service $(DESTDIR)$(PREFIX)/lib/systemd/system/
 	install -m 644 systemd/cockpit-pacman-scheduled.timer $(DESTDIR)$(PREFIX)/lib/systemd/system/
+	install -m 644 'systemd/cockpit-pacman-failure@.service' $(DESTDIR)$(PREFIX)/lib/systemd/system/
 
 devel-install: build
 	mkdir -p ~/.local/share/cockpit

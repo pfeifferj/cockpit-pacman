@@ -2,6 +2,7 @@
 Description=Cockpit Pacman Scheduled Upgrade
 After=network-online.target
 Wants=network-online.target
+OnFailure=cockpit-pacman-failure@%n.service
 
 [Service]
 Type=oneshot
@@ -17,10 +18,15 @@ IOSchedulingClass=idle
 TimeoutStartSec=10800
 TimeoutStopSec=900
 SendSIGKILL=no
+# TERM the main process only: mkinitcpio and dkms hooks know nothing of the
+# backend's cancel guard, and TERMing one mid-run leaves a half-built initramfs.
+KillMode=mixed
 # Kernel OOM SIGKILLs bypass SendSIGKILL=no: keep the unit a last-resort
 # victim (not exempt) and survive a child hook's OOM kill.
 OOMScoreAdjust=-500
 OOMPolicy=continue
+# A dropped line here is a lost diagnostic with nowhere else to appear.
+LogRateLimitIntervalSec=0
 
 # Security hardening
 ProtectKernelTunables=yes

@@ -332,6 +332,25 @@ where
     f()
 }
 
+/// Shared lock for readers. Opens read-only and never creates anything, so an
+/// unprivileged reader can take it against a root-owned directory, which
+/// with_file_lock cannot. A lock file that is missing or unreadable falls
+/// through to an unlocked read: the readers here already tolerate a torn line,
+/// and refusing to read at all would be the worse failure.
+pub fn with_file_read_lock<F, R>(lock_path: &Path, body: F) -> Result<R>
+where
+    F: FnOnce() -> Result<R>,
+{
+    let guard = match std::fs::File::open(lock_path) {
+        Ok(file) => file.lock_shared().ok().map(|()| file),
+        Err(_) => None,
+    };
+
+    let result = body();
+    drop(guard);
+    result
+}
+
 /// Return a backup path of the form `{prefix}{unix_secs}` that does not yet
 /// exist, advancing the second counter on collision. Callers hold the relevant
 /// file lock, so the existence check is race-free against other backend
@@ -593,6 +612,18 @@ fn write_json_atomic_inner<T: Serialize>(path: &Path, state: &T, mode: Option<u3
 /// atomic rename, so a crash mid-restore can't leave a truncated target. Callers
 /// hold the relevant file lock.
 pub fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    write_bytes_atomic_inner(path, bytes, None)
+}
+
+/// Like [`write_bytes_atomic`], but chmods the temp file to `mode` before the
+/// rename so the target never appears with looser permissions, even briefly.
+pub fn write_bytes_atomic_with_mode(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
+    write_bytes_atomic_inner(path, bytes, Some(mode))
+}
+
+fn write_bytes_atomic_inner(path: &Path, bytes: &[u8], mode: Option<u32>) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let file_name = path
         .file_name()
@@ -609,6 +640,10 @@ pub fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         tmp.write_all(bytes)
             .with_context(|| format!("Failed to write temp file {:?}", tmp_path))?;
         let _ = tmp.sync_all();
+        if let Some(m) = mode {
+            std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(m))
+                .with_context(|| format!("Failed to set permissions on {:?}", tmp_path))?;
+        }
         std::fs::rename(&tmp_path, path)
             .with_context(|| format!("Failed to rename {:?} to {:?}", tmp_path, path))?;
         Ok(())
