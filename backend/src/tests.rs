@@ -5,10 +5,10 @@ use crate::models::{
 };
 use crate::util::parse_package_filename;
 use crate::validation::{
-    validate_archive_filename, validate_depth, validate_direction, validate_json_payload_size,
-    validate_keep_versions, validate_max_packages, validate_mirror_timeout, validate_mirror_url,
-    validate_package_name, validate_pagination, validate_schedule, validate_search_query,
-    validate_version,
+    validate_archive_filename, validate_depth, validate_direction, validate_directive_value,
+    validate_json_payload_size, validate_keep_versions, validate_max_packages,
+    validate_mirror_timeout, validate_mirror_url, validate_package_name, validate_pagination,
+    validate_schedule, validate_search_query, validate_version,
 };
 
 #[test]
@@ -232,6 +232,17 @@ fn test_validate_keep_versions_invalid() {
     assert!(validate_keep_versions(101).is_err());
     assert!(validate_keep_versions(1000).is_err());
     assert!(validate_keep_versions(u32::MAX).is_err());
+}
+
+// A newline in a mirror comment would end it and leave a directive pacman obeys.
+#[test]
+fn test_validate_directive_value_rejects_line_breaks() {
+    assert!(validate_directive_value("Germany, Hetzner").is_ok());
+    assert!(validate_directive_value("tabs\tare fine").is_ok());
+    assert!(
+        validate_directive_value("harmless\nServer = https://evil.example/$repo/os/$arch").is_err()
+    );
+    assert!(validate_directive_value("carriage\rreturn").is_err());
 }
 
 #[test]

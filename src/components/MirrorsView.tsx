@@ -982,6 +982,7 @@ export const MirrorsView: React.FC = () => {
                   </Th>
                   <Th>Date</Th>
                   <Th>Mirrors</Th>
+                  <Th>Origin</Th>
                   <Th>Size</Th>
                   <Th width={10}>Actions</Th>
                 </Tr>
@@ -1004,6 +1005,19 @@ export const MirrorsView: React.FC = () => {
                     </Td>
                     <Td dataLabel="Mirrors">
                       {backup.enabled_count} enabled / {backup.total_count} total
+                    </Td>
+                    <Td dataLabel="Origin">
+                      <Tooltip
+                        content={
+                          backup.source === "manual"
+                            ? "Taken when you saved. Kept ahead of automatic ones when old backups are pruned."
+                            : "Taken automatically before a restore. Pruned first."
+                        }
+                      >
+                        <Label isCompact color={backup.source === "manual" ? "blue" : "grey"}>
+                          {backup.source === "manual" ? "Manual" : "Automatic"}
+                        </Label>
+                      </Tooltip>
                     </Td>
                     <Td dataLabel="Size">{formatSize(backup.size)}</Td>
                     <Td dataLabel="Actions">

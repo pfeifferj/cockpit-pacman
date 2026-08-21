@@ -347,6 +347,44 @@ describe("MirrorsView", () => {
     });
   });
 
+  it("distinguishes a backup you took from one taken for you", async () => {
+    mockListMirrorBackups.mockResolvedValue({
+      backups: [
+        {
+          timestamp: 1704067200,
+          date: "2024-01-01 00:00:00 UTC",
+          enabled_count: 3,
+          total_count: 10,
+          size: 2048,
+          source: "manual",
+        },
+        {
+          timestamp: 1704063600,
+          date: "2023-12-31 23:00:00 UTC",
+          enabled_count: 2,
+          total_count: 9,
+          size: 1024,
+          source: "auto",
+        },
+      ],
+    });
+
+    render(<MirrorsView />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/mirror1\.example\.com/)).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Backup history"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Manual")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Automatic")).toBeInTheDocument();
+  });
+
   it("shows empty state when no backups exist", async () => {
     mockListMirrorBackups.mockResolvedValue({ backups: [] });
 
