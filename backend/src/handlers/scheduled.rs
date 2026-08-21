@@ -450,7 +450,7 @@ pub fn scheduled_run() -> Result<()> {
         handle.add_ignorepkg(pkg_name.as_str())?;
     }
 
-    setup_log_cb(&mut handle, Verbosity::Journal);
+    setup_log_cb(&mut handle);
     setup_dl_cb(&mut handle, Verbosity::Journal);
 
     eprintln!("Syncing package databases...");

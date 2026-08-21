@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { ARCH_STATUS_URL, NEWS_LOOKBACK_DAYS, REBOOT_PACKAGES } from "../constants";
+import { ARCH_STATUS_URL, LOG_FLUSH_MS, NEWS_LOOKBACK_DAYS, REBOOT_PACKAGES } from "../constants";
 import { useBackdropClose } from "../hooks/useBackdropClose";
 import { usePackageDetails } from "../hooks/usePackageDetails";
 import { useSortableTable } from "../hooks/useSortableTable";
@@ -361,6 +361,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [state, setState] = useState<ViewState>("loading");
   const [updates, setUpdates] = useState<UpdateInfo[]>([]);
   const [log, setLog] = useState("");
+  const logBuffer = useRef("");
+  const logFlush = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
   const [errorDetails, setErrorDetails] = useState<string | undefined>(undefined);
@@ -378,6 +380,33 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [state]);
+
+  // One upgrade emits tens of thousands of stream events, and a setState each
+  // re-renders this view far faster than anything can be read. Coalescing into
+  // one append per interval keeps the string concatenation off that path too.
+  const appendLog = useCallback((data: string) => {
+    logBuffer.current += data;
+    if (logFlush.current !== null) return;
+    logFlush.current = setTimeout(() => {
+      logFlush.current = null;
+      const pending = logBuffer.current;
+      logBuffer.current = "";
+      if (pending) setLog((prev) => appendCapped(prev, pending));
+    }, LOG_FLUSH_MS);
+  }, []);
+
+  const resetLog = useCallback(() => {
+    if (logFlush.current !== null) {
+      clearTimeout(logFlush.current);
+      logFlush.current = null;
+    }
+    logBuffer.current = "";
+    setLog("");
+  }, []);
+
+  useEffect(() => () => {
+    if (logFlush.current !== null) clearTimeout(logFlush.current);
+  }, []);
 
   // Consecutive errors can commit in one render batch without ever showing
   // the intermediate state, so the epoch forces LockErrorBody to remount
@@ -720,12 +749,12 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
   useEffect(() => {
     const { cancel } = syncDatabase({
-      onData: (data) => setLog((prev) => appendCapped(prev, data)),
+      onData: appendLog,
       onComplete: () => loadUpdates(),
       onError: (err, code, details) => failWith("sync", err, code, details),
     });
     return () => cancel();
-  }, [loadUpdates, failWith]);
+  }, [loadUpdates, failWith, appendLog]);
 
   const loadRebootStatus = useCallback(async () => {
     try {
@@ -857,12 +886,12 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     // Hard close so the old op releases db.lck before the new spawn takes it.
     cancelRef.current?.forceStop();
     setState("checking");
-    setLog("");
+    resetLog();
     setSelectedPackages(new Set());
     setLockRetryExhausted(false);
     cancelRef.current = syncDatabase(
       {
-        onData: (data) => setLog((prev) => appendCapped(prev, data)),
+        onData: appendLog,
         onComplete: () => loadUpdates(),
         onError: (err, code, details) => failWith("sync", err, code, details),
       },
@@ -921,7 +950,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const startUpgrade = () => {
     setConfirmModalOpen(false);
     setState("applying");
-    setLog("");
+    resetLog();
     setLockRetryExhausted(false);
     setCancelling(false);
     setCancelOutcome(null);
@@ -935,14 +964,15 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
     const handleEvent = (event: StreamEvent) => {
       if (event.type === "download") {
-        setUpgradeProgress((prev) => ({
-          ...prev,
-          phase: "downloading",
-          currentPackage: event.filename,
-          percent: event.downloaded && event.total
+        setUpgradeProgress((prev) => {
+          const percent = event.downloaded && event.total
             ? Math.round((event.downloaded / event.total) * 100)
-            : prev.percent,
-        }));
+            : prev.percent;
+          if (prev.phase === "downloading" && prev.currentPackage === event.filename && prev.percent === percent) {
+            return prev;
+          }
+          return { ...prev, phase: "downloading", currentPackage: event.filename, percent };
+        });
       } else if (event.type === "progress") {
         const phase = event.operation.includes("hook") ? "hooks" : "installing";
         setUpgradeProgress((prev) => ({
@@ -966,7 +996,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
     cancelRef.current = runUpgrade({
       onEvent: handleEvent,
-      onData: (data) => setLog((prev) => appendCapped(prev, data)),
+      onData: appendLog,
       onComplete: () => {
         autoResumedRef.current = false;
         if (isCancellingRef.current) {

@@ -55,25 +55,40 @@ impl EventScope {
 }
 
 fn setup_progress_cb(handle: &mut Alpm) {
+    let mut last: Option<(&'static str, String, i32, usize, usize)> = None;
+
     handle.set_progress_cb(
         (),
-        |progress: Progress,
-         pkgname: &str,
-         percent: i32,
-         howmany: usize,
-         current: usize,
-         _: &mut ()| {
+        move |progress: Progress,
+              pkgname: &str,
+              percent: i32,
+              howmany: usize,
+              current: usize,
+              _: &mut ()| {
             interrupt_if_cancelled();
             if is_cancelled() {
                 return;
             }
+
+            let operation = progress_to_string(progress);
+            if last.as_ref().is_some_and(|(op, pkg, pct, cur, total)| {
+                *op == operation
+                    && pkg == pkgname
+                    && *pct == percent
+                    && *cur == current
+                    && *total == howmany
+            }) {
+                return;
+            }
+
             emit_event(&StreamEvent::Progress {
-                operation: progress_to_string(progress).to_string(),
+                operation: operation.to_string(),
                 package: pkgname.to_string(),
                 percent,
                 current,
                 total: howmany,
             });
+            last = Some((operation, pkgname.to_string(), percent, current, howmany));
         },
     );
 }
@@ -403,7 +418,7 @@ pub fn sync_database(force: bool, timeout_secs: Option<u64>) -> Result<()> {
     check_cancel_early!(&timeout);
 
     let mut handle = get_handle()?;
-    setup_log_cb(&mut handle, Verbosity::Streaming);
+    setup_log_cb(&mut handle);
     setup_dl_cb(&mut handle, Verbosity::Streaming);
 
     match handle.syncdbs_mut().update(force) {
@@ -452,7 +467,7 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
         })?;
     }
 
-    setup_log_cb(&mut handle, Verbosity::Streaming);
+    setup_log_cb(&mut handle);
     setup_dl_cb(&mut handle, Verbosity::Streaming);
     setup_progress_cb(&mut handle);
     setup_event_cb(&mut handle, EventScope::Upgrade);
@@ -560,7 +575,7 @@ pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
         return Ok(());
     }
 
-    setup_log_cb(&mut handle, Verbosity::Streaming);
+    setup_log_cb(&mut handle);
     setup_progress_cb(&mut handle);
     setup_event_cb(&mut handle, EventScope::Remove);
 
@@ -607,7 +622,7 @@ pub fn install_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
 
     let mut handle = get_handle()?;
 
-    setup_log_cb(&mut handle, Verbosity::Streaming);
+    setup_log_cb(&mut handle);
     setup_dl_cb(&mut handle, Verbosity::Streaming);
     setup_progress_cb(&mut handle);
     setup_event_cb(&mut handle, EventScope::Install);
@@ -672,7 +687,7 @@ pub fn remove_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
 
     let mut handle = get_handle()?;
 
-    setup_log_cb(&mut handle, Verbosity::Streaming);
+    setup_log_cb(&mut handle);
     setup_progress_cb(&mut handle);
     setup_event_cb(&mut handle, EventScope::Remove);
 
