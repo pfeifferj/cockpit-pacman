@@ -38,7 +38,7 @@ export type ListReposResponse = { repos: Array<RepoEntry>, };
 
 export type LockRemoveResult = { removed: boolean, error?: string, };
 
-export type LockStatus = { locked: boolean, stale: boolean, lock_path: string, blocking_process?: string, };
+export type LockStatus = { locked: boolean, stale: boolean, lock_path: string, blocking_process?: string, holder_unknown: boolean, };
 
 export type LogEntry = { timestamp: string, action: string, package: string, old_version: string | null, new_version: string | null, };
 

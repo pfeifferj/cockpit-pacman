@@ -259,11 +259,12 @@ interface UpdatesViewProps {
 
 type ErrorOrigin = "check" | "sync" | "preflight" | "upgrade";
 
-const LockErrorBody: React.FC<{ onRetry: () => void; onAutoRetry: () => void }> = ({ onRetry, onAutoRetry }) => {
+const LockErrorBody: React.FC<{ onRetry: () => void; onAutoRetry: () => void; onCleared: () => void }> = ({ onRetry, onAutoRetry, onCleared }) => {
   const [checking, setChecking] = useState(true);
   const [removing, setRemoving] = useState(false);
-  const [lockInfo, setLockInfo] = useState<{ stale: boolean; process?: string } | null>(null);
+  const [lockInfo, setLockInfo] = useState<{ stale: boolean; process?: string; unknown: boolean } | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const [checkFailed, setCheckFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -274,11 +275,16 @@ const LockErrorBody: React.FC<{ onRetry: () => void; onAutoRetry: () => void }> 
           onAutoRetry();
           return;
         }
-        setLockInfo({ stale: status.stale, process: status.blocking_process });
+        setLockInfo({
+          stale: status.stale,
+          process: status.blocking_process,
+          unknown: status.holder_unknown,
+        });
       })
       .catch(() => {
         if (cancelled) return;
         setLockInfo(null);
+        setCheckFailed(true);
       })
       .finally(() => {
         if (cancelled) return;
@@ -293,6 +299,9 @@ const LockErrorBody: React.FC<{ onRetry: () => void; onAutoRetry: () => void }> 
     try {
       const result = await removeStaleLock();
       if (result.removed) {
+        // Raised on the page, not here: this component is replaced by the retry
+        // it triggers, and what the lock proves outlives the retry.
+        onCleared();
         onRetry();
       } else {
         setRemoveError(result.error || "Failed to remove lock");
@@ -312,6 +321,18 @@ const LockErrorBody: React.FC<{ onRetry: () => void; onAutoRetry: () => void }> 
     return (
       <Content component={ContentVariants.p}>
         The database is locked by <strong>{lockInfo.process}</strong>. Wait for it to finish, then retry.
+      </Content>
+    );
+  }
+
+  // Offering removal here would be acting on a check that did not conclude.
+  // A session without administrative access cannot see root's open files, so
+  // it finds no holder for a lock a running pacman still owns.
+  if (checkFailed || lockInfo?.unknown) {
+    return (
+      <Content component={ContentVariants.p}>
+        Could not determine whether the database lock is still in use. This check needs
+        administrative access. Grant it and retry, or wait for the running operation to finish.
       </Content>
     );
   }
@@ -348,9 +369,9 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [errorOrigin, setErrorOrigin] = useState<ErrorOrigin>("check");
   const autoResumedRef = useRef(false);
   const [lockRetryExhausted, setLockRetryExhausted] = useState(false);
+  const [lockCleared, setLockCleared] = useState(false);
   const [errorEpoch, setErrorEpoch] = useState(0);
 
-  // alpm acts on a cancel only between packages; leaving mid-transaction half-applies the upgrade.
   useEffect(() => {
     if (state !== "applying") return;
     const warn = (event: Event) => event.preventDefault();
@@ -1204,6 +1225,19 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     </Alert>
   ) : null;
 
+  const lockClearedAlert = lockCleared ? (
+    <Alert
+      variant="info"
+      isInline
+      title="Cleared a leftover database lock"
+      className="pf-v6-u-mb-md"
+      actionClose={<AlertActionCloseButton onClose={() => setLockCleared(false)} />}
+    >
+      A package transaction was interrupted before it could finish. If an earlier upgrade looks
+      incomplete, check the package list.
+    </Alert>
+  ) : null;
+
   const scheduledAlert = scheduledUnacked && latestScheduledRun ? (
     <Alert
       variant={latestScheduledRun.status === "failed" ? "danger" : "warning"}
@@ -1349,7 +1383,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
             >
               <EmptyStateBody>
                 {showLockRecovery
-                  ? <LockErrorBody key={errorEpoch} onRetry={manualResumeAfterLock} onAutoRetry={autoResumeAfterLock} />
+                  ? <LockErrorBody key={errorEpoch} onRetry={manualResumeAfterLock} onAutoRetry={autoResumeAfterLock} onCleared={() => setLockCleared(true)} />
                   : error}
                 {!showLockRecovery && <ErrorDetails details={errorDetails} />}
               </EmptyStateBody>
@@ -1504,6 +1538,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       <Card>
         <CardBody>
           {cancelAlert}
+          {lockClearedAlert}
           {rebootAlert}
           {servicesAlert}
           {pacnewAlert}
@@ -1530,6 +1565,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     return (
       <>
         {cancelAlert}
+        {lockClearedAlert}
         {rebootAlert}
         {servicesAlert}
         {pacnewAlert}
@@ -1628,6 +1664,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   return (
     <>
       {cancelAlert}
+      {lockClearedAlert}
       {rebootAlert}
       {servicesAlert}
       {pacnewAlert}
