@@ -701,7 +701,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     const { cancel } = syncDatabase({
       onData: (data) => setLog((prev) => appendCapped(prev, data)),
       onComplete: () => loadUpdates(),
-      onError: (err, code) => failWith("sync", err, code),
+      onError: (err, code, details) => failWith("sync", err, code, details),
     });
     return () => cancel();
   }, [loadUpdates, failWith]);
@@ -839,11 +839,14 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     setLog("");
     setSelectedPackages(new Set());
     setLockRetryExhausted(false);
-    cancelRef.current = syncDatabase({
-      onData: (data) => setLog((prev) => appendCapped(prev, data)),
-      onComplete: () => loadUpdates(),
-      onError: (err, code) => failWith("sync", err, code),
-    });
+    cancelRef.current = syncDatabase(
+      {
+        onData: (data) => setLog((prev) => appendCapped(prev, data)),
+        onComplete: () => loadUpdates(),
+        onError: (err, code, details) => failWith("sync", err, code, details),
+      },
+      true,
+    );
   };
 
   const handleApplyUpdates = async () => {
@@ -969,7 +972,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
           }
         });
       },
-      onError: (err, code) => {
+      onError: (err, code, details) => {
         cancelRef.current = null;
         if (isCancellingRef.current) {
           setCancelling(false);
@@ -979,7 +982,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
           loadPacnewStatus();
           return;
         }
-        failWith("upgrade", err, code);
+        failWith("upgrade", err, code, details);
       },
     }, ignoredPackages);
   };

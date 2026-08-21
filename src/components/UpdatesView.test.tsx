@@ -1779,6 +1779,43 @@ describe("UpdatesView", () => {
     });
   });
 
+  describe("Error details", () => {
+    it("shows the backend's context chain when a sync fails", async () => {
+      mockSyncDatabase.mockImplementation((callbacks) => {
+        setTimeout(
+          () =>
+            callbacks.onError(
+              "Failed to prepare transaction",
+              "transaction_failed",
+              "caused by: conflicting files in /usr/bin"
+            ),
+          0
+        );
+        return { cancel: vi.fn(), forceStop: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/conflicting files in \/usr\/bin/)).toBeInTheDocument();
+      });
+    });
+
+    it("shows nothing extra when the failure carries no chain", async () => {
+      mockSyncDatabase.mockImplementation((callbacks) => {
+        setTimeout(() => callbacks.onError("Failed to prepare transaction", "transaction_failed"), 0);
+        return { cancel: vi.fn(), forceStop: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText(/Failed to prepare transaction/).length).toBeGreaterThan(0);
+      });
+      expect(screen.queryByText(/caused by/)).not.toBeInTheDocument();
+    });
+  });
+
   describe("News Feed", () => {
     it("displays news items when returned", async () => {
       mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });

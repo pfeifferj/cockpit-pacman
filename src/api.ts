@@ -1,4 +1,4 @@
-import { BACKEND_TIMEOUT_MS } from "./constants";
+import { BACKEND_TIMEOUT_MS, STREAM_FIRST_OUTPUT_TIMEOUT_MS } from "./constants";
 import { isDbLockError, sanitizeSearchInput } from "./utils";
 
 // Wire types are generated from the Rust serde structs via ts-rs (see
@@ -6,55 +6,33 @@ import { isDbLockError, sanitizeSearchInput } from "./utils";
 // consumers keep importing them from "../api".
 import type {
   CacheInfo,
-  CachePackage,
-  CachedVersion,
-  ConflictInfo,
-  DependencyEdge,
-  DependencyNode,
   DependencyTreeResponse,
   DismissalState,
   DowngradeResponse,
   GroupedLogResponse,
   IgnoreOperationResponse,
   IgnoredPackagesResponse,
-  KeyringKey,
   KeyringStatusResponse,
   ListReposResponse,
   LockRemoveResult,
   LockStatus,
-  LogEntry,
-  LogGroup,
   LogResponse,
-  MirrorBackup,
   MirrorBackupListResponse,
   MirrorEntry,
   MirrorListResponse,
-  MirrorStatus,
   MirrorStatusResponse,
   MirrorTestResult,
-  NewsItem,
   NewsReadState,
   NewsResponse,
-  OrphanPackage,
   OrphanResponse,
-  Package,
   PackageDetails,
   PackageListResponse,
-  PackageSecurityAdvisory,
-  PacnewFile,
   PacnewStatus,
-  PreflightKeyInfo,
   PreflightResponse,
-  PreflightWarning,
-  ProviderChoice,
   RebootStatus,
   RefreshMirrorsResponse,
-  ReplacementInfo,
-  RepoBackup,
   RepoBackupListResponse,
-  RepoDirectiveFull,
   RepoEntry,
-  RestartBlocked,
   RestoreMirrorBackupResponse,
   RestoreRepoBackupResponse,
   SaveMirrorlistResponse,
@@ -62,110 +40,18 @@ import type {
   ScheduleConfig,
   ScheduleMode,
   ScheduleSetResponse,
-  ScheduledRunEntry,
   ScheduledRunsResponse,
   SearchResponse,
-  SearchResult,
-  SecurityInfoAdvisory,
-  SecurityInfoGroup,
-  SecurityInfoIssue,
   SecurityInfoResponse,
   SecurityResponse,
-  ServiceRestart,
   ServicesStatus,
-  Signoff,
   SignoffActionResponse,
-  SignoffGroupWithLocal,
   SignoffListResponse,
   StreamEvent,
   SyncPackageDetails,
-  UpdateInfo,
-  UpdateStats,
   UpdatesResponse,
-  VersionMatch,
-  WarningSeverity,
 } from "./bindings";
-export type {
-  CacheInfo,
-  CachePackage,
-  CachedVersion,
-  ConflictInfo,
-  DependencyEdge,
-  DependencyNode,
-  DependencyTreeResponse,
-  DismissalState,
-  DowngradeResponse,
-  GroupedLogResponse,
-  IgnoreOperationResponse,
-  IgnoredPackagesResponse,
-  KeyringKey,
-  KeyringStatusResponse,
-  ListReposResponse,
-  LockRemoveResult,
-  LockStatus,
-  LogEntry,
-  LogGroup,
-  LogResponse,
-  MirrorBackup,
-  MirrorBackupListResponse,
-  MirrorEntry,
-  MirrorListResponse,
-  MirrorStatus,
-  MirrorStatusResponse,
-  MirrorTestResult,
-  NewsItem,
-  NewsReadState,
-  NewsResponse,
-  OrphanPackage,
-  OrphanResponse,
-  Package,
-  PackageDetails,
-  PackageListResponse,
-  PackageSecurityAdvisory,
-  PacnewFile,
-  PacnewStatus,
-  PreflightKeyInfo,
-  PreflightResponse,
-  PreflightWarning,
-  ProviderChoice,
-  RebootStatus,
-  RefreshMirrorsResponse,
-  ReplacementInfo,
-  RepoBackup,
-  RepoBackupListResponse,
-  RepoDirectiveFull,
-  RepoEntry,
-  RestartBlocked,
-  RestoreMirrorBackupResponse,
-  RestoreRepoBackupResponse,
-  SaveMirrorlistResponse,
-  SaveReposResponse,
-  ScheduleConfig,
-  ScheduleMode,
-  ScheduleSetResponse,
-  ScheduledRunEntry,
-  ScheduledRunsResponse,
-  SearchResponse,
-  SearchResult,
-  SecurityInfoAdvisory,
-  SecurityInfoGroup,
-  SecurityInfoIssue,
-  SecurityInfoResponse,
-  SecurityResponse,
-  ServiceRestart,
-  ServicesStatus,
-  Signoff,
-  SignoffActionResponse,
-  SignoffGroupWithLocal,
-  SignoffListResponse,
-  StreamEvent,
-  SyncPackageDetails,
-  UpdateInfo,
-  UpdateStats,
-  UpdatesResponse,
-  VersionMatch,
-  WarningSeverity,
-};
+export type * from "./bindings";
 
 const BACKEND_PATH = "/usr/libexec/cockpit-pacman/cockpit-pacman-backend";
 
@@ -389,11 +275,11 @@ export async function listInstalled(
     repo,
     sortBy,
     sortDir,
-  ]);
+  ], { superuser: "none" });
 }
 
 export async function checkUpdates(): Promise<UpdatesResponse> {
-  return runBackend<UpdatesResponse>("check-updates");
+  return runBackend<UpdatesResponse>("check-updates", [], { superuser: "none" });
 }
 
 export async function checkLock(): Promise<LockStatus> {
@@ -413,17 +299,17 @@ export async function getSecurityInfo(name: string): Promise<SecurityInfoRespons
 }
 
 export async function getPackageInfo(name: string): Promise<PackageDetails> {
-  return runBackend<PackageDetails>("local-package-info", [name]);
+  return runBackend<PackageDetails>("local-package-info", [name], { superuser: "none" });
 }
 
 export async function searchPackages(params: SearchParams): Promise<SearchResponse> {
   const { query, offset = 0, limit = 100, installed = "all", sortBy = "", sortDir = "" } = params;
-  return runBackend<SearchResponse>("search", [sanitizeSearchInput(query), String(offset), String(limit), installed, sortBy, sortDir]);
+  return runBackend<SearchResponse>("search", [sanitizeSearchInput(query), String(offset), String(limit), installed, sortBy, sortDir], { superuser: "none" });
 }
 
 export async function getSyncPackageInfo(name: string, repo?: string): Promise<SyncPackageDetails> {
   const args = repo ? [name, repo] : [name];
-  return runBackend<SyncPackageDetails>("sync-package-info", args);
+  return runBackend<SyncPackageDetails>("sync-package-info", args, { superuser: "none" });
 }
 
 export async function preflightUpgrade(ignore?: string[]): Promise<PreflightResponse> {
@@ -453,7 +339,7 @@ export interface UpgradeCallbacks {
   /** Called when the operation completes successfully */
   onComplete: () => void;
   /** Called when the operation fails with an error message and a classified code */
-  onError: (error: string, code?: ErrorCode) => void;
+  onError: (error: string, code?: ErrorCode, details?: string) => void;
   /** Timeout in seconds for the operation (default: 300) */
   timeout?: number;
   /** Superuser mode for cockpit.spawn (default: "require") */
@@ -492,7 +378,12 @@ function runStreamingBackend(
   let buffer = "";
   let completionHandled = false;
 
-  const markComplete = (success: boolean, message?: string, code?: ErrorCode) => {
+  const markComplete = (
+    success: boolean,
+    message?: string,
+    code?: ErrorCode,
+    details?: string,
+  ) => {
     // Guard against duplicate callbacks from concurrent paths (stream, then, catch)
     // Set flag immediately before any other work to prevent re-entry
     if (completionHandled) return;
@@ -504,7 +395,7 @@ function runStreamingBackend(
         callbacks.onComplete();
       } else {
         const msg = message || "Operation failed";
-        callbacks.onError(msg, code ?? parseErrorCode(msg));
+        callbacks.onError(msg, code ?? parseErrorCode(msg), details);
       }
     } catch (callbackError) {
       console.error("Callback error in markComplete:", callbackError);
@@ -515,13 +406,19 @@ function runStreamingBackend(
   // main.rs print a structured error envelope on stdout. It has a known code
   // and message but no StreamEvent `type`; treat it as a terminal error so the
   // backend's classification is not lost as an unknown event.
-  const asErrorEnvelope = (parsed: Record<string, unknown>): { code: ErrorCode; message: string } | null => {
+  const asErrorEnvelope = (
+    parsed: Record<string, unknown>,
+  ): { code: ErrorCode; message: string; details?: string } | null => {
     if (
       !("type" in parsed) &&
       typeof parsed.message === "string" &&
       typeof parsed.code === "string"
     ) {
-      return { code: asErrorCode(parsed.code), message: parsed.message };
+      return {
+        code: asErrorCode(parsed.code),
+        message: parsed.message,
+        details: typeof parsed.details === "string" ? parsed.details : undefined,
+      };
     }
     return null;
   };
@@ -531,7 +428,26 @@ function runStreamingBackend(
     { superuser: callbacks.superuser || "require", err: "out" }
   );
 
+  let firstOutputTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
+    firstOutputTimer = undefined;
+    proc.close("timeout");
+    markComplete(
+      false,
+      `Backend command '${command}' produced no output within ${STREAM_FIRST_OUTPUT_TIMEOUT_MS / 1000}s. ` +
+        "The privileged bridge may be waiting for administrative access.",
+      "timeout"
+    );
+  }, STREAM_FIRST_OUTPUT_TIMEOUT_MS);
+
+  const clearFirstOutputTimer = () => {
+    if (firstOutputTimer !== undefined) {
+      clearTimeout(firstOutputTimer);
+      firstOutputTimer = undefined;
+    }
+  };
+
   proc.stream((data) => {
+    clearFirstOutputTimer();
     buffer += data;
     const lines = buffer.split("\n");
     buffer = lines.pop() || "";
@@ -545,7 +461,7 @@ function runStreamingBackend(
 
         const envelope = asErrorEnvelope(parsed);
         if (envelope) {
-          markComplete(false, envelope.message, envelope.code);
+          markComplete(false, envelope.message, envelope.code, envelope.details);
           continue;
         }
 
@@ -567,8 +483,13 @@ function runStreamingBackend(
           callbacks.onData?.(`${event.event}${event.package ? `: ${event.package}` : ""}\n`);
         } else if (event.type === "complete") {
           markComplete(event.success, event.message);
+        } else if (event.type === "mirror_test") {
+          callbacks.onData?.(
+            `[${event.current}/${event.total}] ${event.url}: ${event.result.success ? `${event.result.latency_ms}ms` : event.result.error}\n`,
+          );
         } else {
-          console.warn("Unknown StreamEvent type:", (event as { type: string }).type);
+          const unhandled: never = event;
+          console.warn("Unknown StreamEvent type:", (unhandled as StreamEvent).type);
         }
       } catch {
         callbacks.onData?.(line + "\n");
@@ -577,13 +498,14 @@ function runStreamingBackend(
   });
 
   proc.then(() => {
+    clearFirstOutputTimer();
     // Process any remaining buffer
     if (buffer.trim()) {
       try {
         const parsed = JSON.parse(buffer) as Record<string, unknown>;
         const envelope = asErrorEnvelope(parsed);
         if (envelope) {
-          markComplete(false, envelope.message, envelope.code);
+          markComplete(false, envelope.message, envelope.code, envelope.details);
           return;
         }
         const event = parsed as unknown as StreamEvent;
@@ -603,6 +525,7 @@ function runStreamingBackend(
   });
 
   proc.catch((ex: unknown) => {
+    clearFirstOutputTimer();
     markComplete(false, extractErrorMessage(ex));
   });
 
@@ -622,8 +545,8 @@ export function runUpgrade(callbacks: UpgradeCallbacks, ignore?: string[]): Stre
   return runStreamingBackend("upgrade", args, callbacks, { gracefulCancel: true });
 }
 
-export function syncDatabase(callbacks: UpgradeCallbacks): StreamingHandle {
-  const args = ["true"];
+export function syncDatabase(callbacks: UpgradeCallbacks, force = false): StreamingHandle {
+  const args = [String(force)];
   if (callbacks.timeout !== undefined) {
     args.push(String(callbacks.timeout));
   }
@@ -652,7 +575,7 @@ export function initKeyring(callbacks: UpgradeCallbacks): StreamingHandle {
 }
 
 export async function listOrphans(): Promise<OrphanResponse> {
-  return runBackend<OrphanResponse>("list-orphans");
+  return runBackend<OrphanResponse>("list-orphans", [], { superuser: "none" });
 }
 
 export function installPackage(
@@ -686,7 +609,7 @@ export function removeOrphans(callbacks: UpgradeCallbacks): StreamingHandle {
 }
 
 export async function listIgnoredPackages(): Promise<IgnoredPackagesResponse> {
-  return runBackend<IgnoredPackagesResponse>("list-ignored");
+  return runBackend<IgnoredPackagesResponse>("list-ignored", [], { superuser: "none" });
 }
 
 export async function addIgnoredPackage(name: string): Promise<IgnoreOperationResponse> {
@@ -698,7 +621,7 @@ export async function removeIgnoredPackage(name: string): Promise<IgnoreOperatio
 }
 
 export async function getCacheInfo(): Promise<CacheInfo> {
-  return runBackend<CacheInfo>("cache-info");
+  return runBackend<CacheInfo>("cache-info", [], { superuser: "none" });
 }
 
 export function cleanCache(callbacks: UpgradeCallbacks, keepVersions: number = 3, packages?: string[]): StreamingHandle {
@@ -722,17 +645,17 @@ export async function getGroupedHistory(params: HistoryParams = {}): Promise<Gro
     String(limit),
     filter,
     search,
-  ]);
+  ], { superuser: "none" });
 }
 
 export async function getHistory(params: HistoryParams = {}): Promise<LogResponse> {
   const { offset = 0, limit = 20, filter = "all", search = "" } = params;
-  return runBackend<LogResponse>("history", [String(offset), String(limit), filter, search]);
+  return runBackend<LogResponse>("history", [String(offset), String(limit), filter, search], { superuser: "none" });
 }
 
 export async function listDowngrades(packageName?: string): Promise<DowngradeResponse> {
   const args = packageName ? [sanitizeSearchInput(packageName)] : [];
-  return runBackend<DowngradeResponse>("list-downgrades", args);
+  return runBackend<DowngradeResponse>("list-downgrades", args, { superuser: "none" });
 }
 
 export function downgradePackage(
@@ -748,7 +671,7 @@ export async function listArchiveVersions(packageName: string, query?: string): 
   if (query && query.trim()) {
     args.push(sanitizeSearchInput(query));
   }
-  return runBackend<DowngradeResponse>("list-archive-versions", args);
+  return runBackend<DowngradeResponse>("list-archive-versions", args, { superuser: "none" });
 }
 
 export function downgradeFromArchive(
@@ -765,7 +688,7 @@ export interface ScheduledRunsParams {
 }
 
 export async function getScheduleConfig(): Promise<ScheduleConfig> {
-  return runBackend<ScheduleConfig>("get-schedule");
+  return runBackend<ScheduleConfig>("get-schedule", [], { superuser: "none" });
 }
 
 export interface SetScheduleParams {
@@ -787,13 +710,13 @@ export async function setScheduleConfig(params: SetScheduleParams): Promise<Sche
 
 export async function getScheduledRuns(params: ScheduledRunsParams = {}): Promise<ScheduledRunsResponse> {
   const { offset = 0, limit = 50 } = params;
-  return runBackend<ScheduledRunsResponse>("list-scheduled-runs", [String(offset), String(limit)]);
+  return runBackend<ScheduledRunsResponse>("list-scheduled-runs", [String(offset), String(limit)], { superuser: "none" });
 }
 
 export type RebootReason = "kernel_update" | "critical_packages" | "none";
 
 export async function getRebootStatus(): Promise<RebootStatus> {
-  return runBackend<RebootStatus>("reboot-status");
+  return runBackend<RebootStatus>("reboot-status", [], { superuser: "none" });
 }
 
 export type PacnewKind = "pacnew" | "pacsave";
@@ -851,11 +774,11 @@ export interface MirrorTestCallbacks {
 }
 
 export async function listMirrors(): Promise<MirrorListResponse> {
-  return runBackend<MirrorListResponse>("list-mirrors");
+  return runBackend<MirrorListResponse>("list-mirrors", [], { superuser: "none" });
 }
 
 export async function fetchMirrorStatus(): Promise<MirrorStatusResponse> {
-  return runBackend<MirrorStatusResponse>("fetch-mirror-status");
+  return runBackend<MirrorStatusResponse>("fetch-mirror-status", [], { superuser: "none" });
 }
 
 export function testMirrors(
@@ -878,8 +801,6 @@ export function testMirrors(
       if (event.type === "mirror_test") {
         const e = event as unknown as Extract<StreamEvent, { type: "mirror_test" }>;
         callbacks.onTestResult?.(e.result, e.current, e.total);
-        callbacks.onData?.(`[${e.current}/${e.total}] ${e.url}: ${e.result.success ? `${e.result.latency_ms}ms` : e.result.error}\n`);
-        return true;
       }
       return false;
     },
@@ -911,7 +832,7 @@ export async function refreshMirrors(params: RefreshMirrorsParams = {}): Promise
 }
 
 export async function listMirrorBackups(): Promise<MirrorBackupListResponse> {
-  return runBackend<MirrorBackupListResponse>("list-mirror-backups");
+  return runBackend<MirrorBackupListResponse>("list-mirror-backups", [], { superuser: "none" });
 }
 
 export async function restoreMirrorBackup(timestamp: number): Promise<RestoreMirrorBackupResponse> {
@@ -923,7 +844,7 @@ export async function deleteMirrorBackup(timestamp: number): Promise<RestoreMirr
 }
 
 export async function fetchNews(days: number = 30): Promise<NewsResponse> {
-  return runBackend<NewsResponse>("fetch-news", [String(days)]);
+  return runBackend<NewsResponse>("fetch-news", [String(days)], { superuser: "none" });
 }
 
 export async function getNewsReadState(): Promise<NewsReadState> {
@@ -965,7 +886,7 @@ export async function getDependencyTree(params: DependencyTreeParams): Promise<D
     sanitizeSearchInput(name),
     String(depth),
     direction,
-  ]);
+  ], { superuser: "none" });
 }
 
 // Signoff types
@@ -1002,7 +923,7 @@ export async function revokeSignoff(
 }
 
 export async function listRepos(): Promise<ListReposResponse> {
-  return runBackend<ListReposResponse>("list-repos", [], { superuser: "require" });
+  return runBackend<ListReposResponse>("list-repos", [], { superuser: "none" });
 }
 
 export async function saveRepos(repos: RepoEntry[]): Promise<SaveReposResponse> {
