@@ -1,14 +1,21 @@
 use alpm::{Alpm, AnyDownloadEvent, DownloadEvent, LogLevel};
 
 use crate::models::StreamEvent;
-use crate::util::{emit_event, is_cancelled};
+use crate::util::{emit_event, may_interrupt_transaction};
 
 use super::log_level_to_string;
 
 /// Re-arm from every callback: alpm only latches the interrupt in
 /// STATE_COMMITTING, so a request during downloads has to be retried.
+///
+/// A cancel that came from the control channel going away is deliberately not
+/// re-armed. Cockpit's logout button and a websocket restart both close the
+/// channel without sending a cancel, and interrupting here stops libalpm
+/// between packages: the transaction ends part-applied, with the
+/// post-transaction hooks unrun. Nobody is waiting on the result either way, so
+/// finishing is the safer of the two.
 pub fn interrupt_if_cancelled() {
-    if is_cancelled() {
+    if may_interrupt_transaction() {
         super::try_interrupt();
     }
 }

@@ -586,7 +586,7 @@ export function installPackage(
   if (callbacks.timeout !== undefined) {
     args.push(String(callbacks.timeout));
   }
-  return runStreamingBackend("install-package", args, callbacks);
+  return runStreamingBackend("install-package", args, callbacks, { gracefulCancel: true });
 }
 
 export function removePackage(
@@ -597,7 +597,7 @@ export function removePackage(
   if (callbacks.timeout !== undefined) {
     args.push(String(callbacks.timeout));
   }
-  return runStreamingBackend("remove-package", args, callbacks);
+  return runStreamingBackend("remove-package", args, callbacks, { gracefulCancel: true });
 }
 
 export function removeOrphans(callbacks: UpgradeCallbacks): StreamingHandle {
@@ -605,7 +605,7 @@ export function removeOrphans(callbacks: UpgradeCallbacks): StreamingHandle {
   if (callbacks.timeout !== undefined) {
     args.push(String(callbacks.timeout));
   }
-  return runStreamingBackend("remove-orphans", args, callbacks);
+  return runStreamingBackend("remove-orphans", args, callbacks, { gracefulCancel: true });
 }
 
 export async function listIgnoredPackages(): Promise<IgnoredPackagesResponse> {

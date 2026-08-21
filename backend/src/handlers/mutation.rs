@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use crate::alpm::{
     SysupgradeOutcome, TransactionGuard, Verbosity, get_handle, interrupt_if_cancelled,
-    progress_to_string, run_sysupgrade, setup_dl_cb, setup_log_cb, try_interrupt,
+    progress_to_string, run_sysupgrade, setup_dl_cb, setup_log_cb,
 };
 use crate::check_cancel_early;
 use crate::db::invalidate_repo_map_cache;
@@ -63,8 +63,8 @@ fn setup_progress_cb(handle: &mut Alpm) {
          howmany: usize,
          current: usize,
          _: &mut ()| {
+            interrupt_if_cancelled();
             if is_cancelled() {
-                try_interrupt();
                 return;
             }
             emit_event(&StreamEvent::Progress {
@@ -458,6 +458,17 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
     setup_event_cb(&mut handle, EventScope::Upgrade);
     setup_question_cb(&mut handle, true);
 
+    if let Err(e) = handle.syncdbs_mut().update(false) {
+        emit_event(&StreamEvent::Complete {
+            success: false,
+            message: Some(format!("Failed to refresh package databases: {}", e)),
+        });
+        return Err(e.into());
+    }
+    invalidate_repo_map_cache();
+
+    check_cancel_early!(&timeout);
+
     let _inhibitor = ShutdownInhibitor::take("Applying package changes");
 
     match run_sysupgrade(&mut handle, &timeout, None)? {
@@ -522,6 +533,7 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
 
 pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
     setup_signal_handler();
+    spawn_cancel_listener();
     let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
 
     let mut handle = get_handle()?;
@@ -590,6 +602,7 @@ pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
 
 pub fn install_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
     setup_signal_handler();
+    spawn_cancel_listener();
     let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
 
     let mut handle = get_handle()?;
@@ -654,6 +667,7 @@ pub fn install_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
 
 pub fn remove_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
     setup_signal_handler();
+    spawn_cancel_listener();
     let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
 
     let mut handle = get_handle()?;

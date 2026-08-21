@@ -186,30 +186,10 @@ fn remove_if_holderless(lock: &Path, scan: impl Fn(&Path) -> Holder) -> Result<b
     Ok(true)
 }
 
-/// Write one line to the journal without going through stderr. This handler
-/// runs under cockpit.spawn, which collects stderr to build error messages
-/// rather than journalling it, so on success stderr reaches nobody.
-fn journal_note(message: &str) {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-
-    let Ok(mut child) = Command::new("systemd-cat")
-        .args(["-t", "cockpit-pacman", "-p", "warning"])
-        .stdin(Stdio::piped())
-        .spawn()
-    else {
-        return;
-    };
-    if let Some(stdin) = child.stdin.as_mut() {
-        let _ = writeln!(stdin, "{}", message);
-    }
-    let _ = child.wait();
-}
-
 pub fn remove_stale_lock() -> Result<()> {
     let result = match try_remove_stale_lock() {
         Ok(true) => {
-            journal_note(
+            crate::util::journal_note(
                 "cleared stale pacman database lock: a package transaction was interrupted \
                  before it could finish",
             );
