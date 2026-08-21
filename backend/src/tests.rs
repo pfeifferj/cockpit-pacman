@@ -780,43 +780,21 @@ fn test_config_preserves_unknown_fields_on_rewrite() {
 
 #[test]
 fn test_handle_commit_error_cancelled() {
-    use crate::util::{TimeoutGuard, handle_commit_error};
-
-    let timeout = TimeoutGuard::new(300);
+    use crate::util::handle_commit_error;
 
     // The cancel flag, not the error text, drives the interrupted outcome.
-    let result = handle_commit_error("transaction aborted", true, &timeout, "Operation cancelled");
+    let result = handle_commit_error("transaction aborted", true, "Operation cancelled");
     assert!(result.is_ok());
-    assert!(!result.unwrap());
-}
-
-#[test]
-fn test_handle_commit_error_timed_out() {
-    use crate::util::{TimeoutGuard, handle_commit_error};
-
-    // A zero-second guard is already timed out; an uncancelled commit failure
-    // is then reported as a timeout, not a generic error.
-    let timeout = TimeoutGuard::new(0);
-    let result = handle_commit_error(
-        "transaction aborted",
-        false,
-        &timeout,
-        "Operation cancelled",
-    );
-    assert!(result.is_ok());
-    assert!(!result.unwrap());
 }
 
 #[test]
 fn test_handle_commit_error_keywords_are_not_interrupts() {
-    use crate::util::{TimeoutGuard, handle_commit_error};
-
-    let timeout = TimeoutGuard::new(300);
+    use crate::util::handle_commit_error;
 
     // A real failure whose text mentions "signal"/"timeout" must not be masked
     // as a user interrupt: without the flag set, it is an error.
     for msg in ["download timeout on mirror", "scriptlet killed by signal 9"] {
-        let result = handle_commit_error(msg, false, &timeout, "Operation interrupted");
+        let result = handle_commit_error(msg, false, "Operation interrupted");
         assert!(
             result.is_err(),
             "{msg:?} should be a failure, not an interrupt"
@@ -826,16 +804,9 @@ fn test_handle_commit_error_keywords_are_not_interrupts() {
 
 #[test]
 fn test_handle_commit_error_actual_failure() {
-    use crate::util::{TimeoutGuard, handle_commit_error};
+    use crate::util::handle_commit_error;
 
-    let timeout = TimeoutGuard::new(300);
-
-    let result = handle_commit_error(
-        "conflicting files exist",
-        false,
-        &timeout,
-        "Operation failed",
-    );
+    let result = handle_commit_error("conflicting files exist", false, "Operation failed");
     assert!(result.is_err());
     assert!(
         result

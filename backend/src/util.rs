@@ -893,30 +893,18 @@ pub(crate) fn parse_package_filename(filename: &str) -> Option<(String, String, 
     }
 }
 
-/// Classify a failed commit: Ok(false) on cancel/timeout, Err on a real
-/// failure. `cancelled` decides it, not the error text, since the abort
-/// carries no reliable keyword and sniffing would mask real failures.
+/// Ok when a cancel caused the failure, Err otherwise; only the cancel flag decides.
 pub fn handle_commit_error(
     err_msg: &str,
     cancelled: bool,
-    timeout: &TimeoutGuard,
     interrupted_message: &str,
-) -> Result<bool> {
+) -> Result<()> {
     if cancelled {
         emit_event(&StreamEvent::Complete {
             success: false,
             message: Some(interrupted_message.to_string()),
         });
-        return Ok(false);
-    } else if timeout.is_timed_out() {
-        emit_event(&StreamEvent::Complete {
-            success: false,
-            message: Some(format!(
-                "Operation timed out after {} seconds",
-                timeout.timeout_secs()
-            )),
-        });
-        return Ok(false);
+        return Ok(());
     }
 
     emit_event(&StreamEvent::Complete {

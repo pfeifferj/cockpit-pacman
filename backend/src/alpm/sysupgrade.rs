@@ -50,11 +50,16 @@ pub enum SysupgradeOutcome {
     Upgraded {
         packages: usize,
     },
-    /// Cancel/timeout observed at a checkpoint, before any commit started.
+    /// Stopped with nothing applied: either at a checkpoint before the commit
+    /// started, or by a commit that reached the system with none of it.
     CancelledEarly(CheckResult),
-    /// Commit errored while a cancel/timeout was pending; the abort is the
-    /// cause, packages may be partially applied.
-    Interrupted(CheckResult),
+    /// A cancel landed part way: some packages are applied and some are not,
+    /// which is the only case that can leave the system inconsistent.
+    Interrupted,
+    /// A cancel was pending but everything landed: alpm refuses interrupts during post-transaction hooks.
+    CompletedDespiteCancel {
+        packages: usize,
+    },
     /// A recorded question kept alpm's refusal; the run needs a human.
     Intervention {
         reasons: Vec<&'static str>,
@@ -119,45 +124,114 @@ pub fn run_sysupgrade(
     if packages == 0 && tx.remove().is_empty() {
         return Ok(SysupgradeOutcome::NothingToDo);
     }
+    let targets: Vec<String> = tx.add().iter().map(|p| p.name().to_string()).collect();
 
     checkpoint!(timeout);
 
-    match tx.commit().err().map(|e| e.to_string()) {
-        None => Ok(SysupgradeOutcome::Upgraded { packages }),
-        Some(e) => Ok(classify_commit_error(
-            check_cancel(timeout),
-            flags.map(|f| f.reasons()).filter(|r| !r.is_empty()),
-            e,
-        )),
+    let commit_err = tx.commit().err().map(|e| e.to_string());
+    let check = check_cancel(timeout);
+    let intervention = flags.map(|f| f.reasons()).filter(|r| !r.is_empty());
+    drop(tx);
+
+    match commit_err {
+        None => Ok(classify_commit_ok(check, packages, || {
+            applied_state(handle, &targets)
+        })),
+        Some(e) => Ok(classify_commit_error(check, intervention, e)),
     }
 }
 
-/// Cancel/timeout outranks intervention outranks plain failure: a pending
-/// abort is what made commit fail (the error text carries no reliable
-/// keyword), and ImportKey fires inside trans_commit, so a refused key is
-/// only visible here.
+#[derive(Debug, PartialEq, Eq)]
+enum Applied {
+    All,
+    None,
+    Some,
+}
+
+fn applied_state(handle: &Alpm, targets: &[String]) -> Applied {
+    let local = handle.localdb();
+    // "Landed" is the same test find_available_updates makes: installed, and no
+    // syncdb offering anything newer.
+    let landed = targets
+        .iter()
+        .filter(|name| match local.pkg(name.as_str()) {
+            Ok(installed) => !handle.syncdbs().iter().any(|db| {
+                db.pkg(name.as_str())
+                    .map(|sync| sync.version() > installed.version())
+                    .unwrap_or(false)
+            }),
+            Err(_) => false,
+        })
+        .count();
+
+    applied_from_counts(landed, targets.len())
+}
+
+fn applied_from_counts(landed: usize, planned: usize) -> Applied {
+    match landed {
+        _ if planned == 0 => Applied::None,
+        n if n == planned => Applied::All,
+        0 => Applied::None,
+        _ => Applied::Some,
+    }
+}
+
+/// alpm returns Ok both from an interrupted commit and a completed one; the db settles which.
+fn classify_commit_ok(
+    check: CheckResult,
+    packages: usize,
+    applied: impl FnOnce() -> Applied,
+) -> SysupgradeOutcome {
+    match check {
+        CheckResult::Cancelled => match applied() {
+            Applied::All => SysupgradeOutcome::CompletedDespiteCancel { packages },
+            Applied::None => SysupgradeOutcome::CancelledEarly(CheckResult::Cancelled),
+            Applied::Some => SysupgradeOutcome::Interrupted,
+        },
+        CheckResult::Continue | CheckResult::TimedOut(_) => {
+            SysupgradeOutcome::Upgraded { packages }
+        }
+    }
+}
+
+/// Cancel outranks intervention outranks plain failure.
 fn classify_commit_error(
     check: CheckResult,
     intervention: Option<Vec<&'static str>>,
     error: String,
 ) -> SysupgradeOutcome {
     match check {
-        CheckResult::Continue => match intervention {
+        CheckResult::Cancelled => SysupgradeOutcome::Interrupted,
+        CheckResult::Continue | CheckResult::TimedOut(_) => match intervention {
             Some(reasons) => SysupgradeOutcome::Intervention {
                 reasons,
                 error: Some(error),
             },
             None => SysupgradeOutcome::CommitFailed(error),
         },
-        r => SysupgradeOutcome::Interrupted(r),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{InterventionFlags, SysupgradeOutcome, classify_commit_error};
+    use super::{
+        Applied, InterventionFlags, SysupgradeOutcome, applied_from_counts, classify_commit_error,
+        classify_commit_ok,
+    };
     use crate::util::CheckResult;
     use std::sync::atomic::Ordering;
+
+    #[test]
+    fn an_empty_plan_never_reads_as_fully_applied() {
+        assert_eq!(applied_from_counts(0, 0), Applied::None);
+    }
+
+    #[test]
+    fn a_partly_applied_plan_reads_as_some() {
+        assert_eq!(applied_from_counts(0, 3), Applied::None);
+        assert_eq!(applied_from_counts(2, 3), Applied::Some);
+        assert_eq!(applied_from_counts(3, 3), Applied::All);
+    }
 
     #[test]
     fn reasons_are_stable_and_ordered() {
@@ -178,16 +252,53 @@ mod tests {
     }
 
     #[test]
+    fn an_ok_commit_with_a_pending_cancel_is_classified_by_what_landed() {
+        assert_eq!(
+            classify_commit_ok(CheckResult::Cancelled, 10, || Applied::All),
+            SysupgradeOutcome::CompletedDespiteCancel { packages: 10 }
+        );
+        assert_eq!(
+            classify_commit_ok(CheckResult::Cancelled, 10, || Applied::None),
+            SysupgradeOutcome::CancelledEarly(CheckResult::Cancelled)
+        );
+        assert_eq!(
+            classify_commit_ok(CheckResult::Cancelled, 10, || Applied::Some),
+            SysupgradeOutcome::Interrupted
+        );
+    }
+
+    #[test]
+    fn an_ok_commit_without_a_cancel_is_an_upgrade() {
+        assert_eq!(
+            classify_commit_ok(CheckResult::Continue, 10, || panic!("must not re-check")),
+            SysupgradeOutcome::Upgraded { packages: 10 }
+        );
+        assert_eq!(
+            classify_commit_ok(CheckResult::TimedOut(1800), 10, || panic!(
+                "must not re-check"
+            )),
+            SysupgradeOutcome::Upgraded { packages: 10 }
+        );
+    }
+
+    #[test]
     fn commit_error_classification_precedence() {
         let reasons = || Some(vec!["key imports required"]);
 
         assert_eq!(
             classify_commit_error(CheckResult::Cancelled, reasons(), "err".into()),
-            SysupgradeOutcome::Interrupted(CheckResult::Cancelled)
+            SysupgradeOutcome::Interrupted
+        );
+        assert_eq!(
+            classify_commit_error(CheckResult::TimedOut(300), None, "err".into()),
+            SysupgradeOutcome::CommitFailed("err".into())
         );
         assert_eq!(
             classify_commit_error(CheckResult::TimedOut(300), reasons(), "err".into()),
-            SysupgradeOutcome::Interrupted(CheckResult::TimedOut(300))
+            SysupgradeOutcome::Intervention {
+                reasons: vec!["key imports required"],
+                error: Some("err".into())
+            }
         );
         assert_eq!(
             classify_commit_error(CheckResult::Continue, reasons(), "err".into()),
