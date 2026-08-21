@@ -27,7 +27,7 @@ setup("authenticate with cockpit", async ({ page }) => {
   await page.fill("#login-password-input", password);
   await page.click("#login-button");
 
-  await expect(page.locator("#host-toggle")).toBeVisible({ timeout: 30000 });
+  await expect(page.locator("#nav-system")).toBeVisible({ timeout: 30000 });
 
   await page.context().storageState({ path: authFile });
 });

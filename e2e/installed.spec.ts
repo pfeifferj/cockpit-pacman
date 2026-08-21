@@ -9,10 +9,10 @@ test.describe("Installed Packages Tab", () => {
   test("displays installed packages list", async ({ pacman }) => {
     await pacman.waitForLoading();
 
-    const table = pacman.page.locator("table");
+    const table = pacman.panel.locator("table").first();
     await expect(table).toBeVisible();
 
-    const rows = pacman.page.locator("table tbody tr");
+    const rows = pacman.panel.locator("table tbody tr");
     const count = await rows.count();
     expect(count).toBeGreaterThan(0);
   });
@@ -20,62 +20,62 @@ test.describe("Installed Packages Tab", () => {
   test("shows package count in pagination", async ({ pacman }) => {
     await pacman.waitForLoading();
 
-    const pagination = pacman.page.locator('[class*="pagination"]');
+    const pagination = pacman.panel.locator('[class*="pagination"]').first();
     await expect(pagination).toBeVisible();
   });
 
-  test("can search for packages", async ({ pacman }) => {
+  test("narrows the list when searching", async ({ pacman }) => {
     await pacman.waitForLoading();
 
-    const searchInput = pacman.page.locator('input[type="search"], input[placeholder*="Search"]');
+    const rows = pacman.panel.locator("table tbody tr");
+    const before = await rows.count();
+    expect(before).toBeGreaterThan(0);
+
+    const searchInput = pacman.panel
+      .locator('input[type="search"], input[placeholder*="Search"]')
+      .first();
     await expect(searchInput).toBeVisible();
-
     await searchInput.fill("linux");
-    await pacman.page.waitForTimeout(500);
-
     await pacman.waitForLoading();
 
-    const table = pacman.page.locator("table");
-    await expect(table).toBeVisible();
+    await expect(rows.first()).toBeVisible();
+    await expect.poll(() => rows.count()).toBeLessThan(before);
+    expect(await rows.count()).toBeGreaterThan(0);
   });
 
-  test("can filter by install reason", async ({ pacman }) => {
+  test("shows only explicit packages under the Explicit filter", async ({ pacman }) => {
+    await pacman.waitForLoading();
+    await pacman.selectFilter("Explicit");
     await pacman.waitForLoading();
 
-    const filterDropdown = pacman.page.locator('[class*="select"], [class*="dropdown"]').first();
-    if (await filterDropdown.isVisible()) {
-      await filterDropdown.click();
+    const reasons = pacman.panel.locator('td[data-label="Reason"]');
+    await expect(reasons.first()).toBeVisible();
 
-      const explicitOption = pacman.page.locator('button:has-text("Explicit"), [role="option"]:has-text("Explicit")');
-      if (await explicitOption.isVisible()) {
-        await explicitOption.click();
-        await pacman.waitForLoading();
-      }
+    const count = await reasons.count();
+    expect(count).toBeGreaterThan(0);
+    for (let i = 0; i < count; i++) {
+      await expect(reasons.nth(i)).toHaveText("explicit");
     }
   });
 
   test("can click on package to view details", async ({ pacman }) => {
     await pacman.waitForLoading();
 
-    const firstRow = pacman.page.locator("table tbody tr").first();
+    const firstRow = pacman.panel.locator("table tbody tr").first();
     await firstRow.click();
 
-    const modal = pacman.page.locator('[class*="modal"], [role="dialog"]');
+    const modal = pacman.frame.locator('[class*="modal"], [role="dialog"]').first();
     await expect(modal).toBeVisible({ timeout: 10000 });
   });
 
-  test("can change page size", async ({ pacman }) => {
+  test("renders one page rather than every installed package", async ({ pacman }) => {
     await pacman.waitForLoading();
 
-    const perPageDropdown = pacman.page.locator('[class*="per-page"], [class*="options-menu"]');
-    if (await perPageDropdown.isVisible()) {
-      await perPageDropdown.click();
+    const rows = pacman.panel.locator("table tbody tr");
+    await expect(rows.first()).toBeVisible();
+    const shown = await rows.count();
 
-      const option100 = pacman.page.locator('[role="option"]:has-text("100")');
-      if (await option100.isVisible()) {
-        await option100.click();
-        await pacman.waitForLoading();
-      }
-    }
+    expect(shown).toBeGreaterThan(0);
+    expect(shown).toBeLessThanOrEqual(100);
   });
 });

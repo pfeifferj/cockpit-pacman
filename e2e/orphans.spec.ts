@@ -3,70 +3,44 @@ import { test, expect } from "./fixtures";
 test.describe("Orphans Tab", () => {
   test.beforeEach(async ({ pacman }) => {
     await pacman.navigateToPlugin();
-    await pacman.switchTab("Orphans");
+    await pacman.switchTab("Installed Packages");
+    await pacman.selectFilter("Orphans");
+    await pacman.waitForLoading();
   });
 
-  test("displays orphans view", async ({ pacman }) => {
-    await pacman.waitForLoading();
-
-    const tableOrEmptyState = pacman.page.locator('table, [class*="empty-state"]');
-    await expect(tableOrEmptyState).toBeVisible({ timeout: 30000 });
+  test("lists the orphaned packages", async ({ pacman }) => {
+    const rows = pacman.panel.locator("table tbody tr");
+    await expect(rows.first()).toBeVisible({ timeout: 30000 });
+    expect(await rows.count()).toBeGreaterThan(0);
   });
 
-  test("shows orphan count or empty state", async ({ pacman }) => {
-    await pacman.waitForLoading();
-
-    const table = pacman.page.locator("table");
-    const emptyState = pacman.page.locator('[class*="empty-state"], text="No orphan"');
-
-    const hasTable = await table.isVisible().catch(() => false);
-    const hasEmptyState = await emptyState.isVisible().catch(() => false);
-
-    expect(hasTable || hasEmptyState).toBe(true);
+  test("names and versions every orphan", async ({ pacman }) => {
+    await expect(pacman.panel.locator('td[data-label="Package"]').first()).toBeVisible({
+      timeout: 30000,
+    });
+    await expect(pacman.panel.locator('td[data-label="Version"]').first()).not.toBeEmpty();
   });
 
-  test("displays total size of orphans", async ({ pacman }) => {
-    await pacman.waitForLoading();
+  test("reports how much space removing them frees", async ({ pacman }) => {
+    const spaceToFree = pacman.panel.locator("text=Space to Free");
+    await expect(spaceToFree).toBeVisible({ timeout: 30000 });
 
-    const table = pacman.page.locator("table");
-    if (await table.isVisible()) {
-      const sizeText = pacman.page.locator('text=/\\d+(\\.\\d+)?\\s*(B|KiB|MiB|GiB)/');
-      await expect(sizeText.first()).toBeVisible();
-    }
+    await expect(
+      pacman.panel.locator("text=/\\d+(\\.\\d+)?\\s*(B|KiB|MiB|GiB)/").first()
+    ).toBeVisible();
   });
 
-  test("shows remove button when orphans exist", async ({ pacman }) => {
-    await pacman.waitForLoading();
-
-    const table = pacman.page.locator("table");
-    if (await table.isVisible()) {
-      const removeButton = pacman.page.locator('button:has-text("Remove"), button:has-text("Clean")');
-      await expect(removeButton).toBeVisible();
-    }
+  test("offers to remove them", async ({ pacman }) => {
+    await expect(
+      pacman.panel.getByRole("button", { name: /Remove All Orphans/i })
+    ).toBeVisible({ timeout: 30000 });
   });
 
-  test("lists orphan package details", async ({ pacman }) => {
-    await pacman.waitForLoading();
+  test("opens details for an orphan", async ({ pacman }) => {
+    await pacman.panel.locator("table tbody tr").first().click();
 
-    const table = pacman.page.locator("table");
-    if (await table.isVisible()) {
-      const nameHeader = pacman.page.locator('th:has-text("Name")');
-      const versionHeader = pacman.page.locator('th:has-text("Version")');
-
-      await expect(nameHeader).toBeVisible();
-      await expect(versionHeader).toBeVisible();
-    }
-  });
-
-  test("can click on orphan to view details", async ({ pacman }) => {
-    await pacman.waitForLoading();
-
-    const firstRow = pacman.page.locator("table tbody tr").first();
-    if (await firstRow.isVisible()) {
-      await firstRow.click();
-
-      const modal = pacman.page.locator('[class*="modal"], [role="dialog"]');
-      await expect(modal).toBeVisible({ timeout: 10000 });
-    }
+    await expect(
+      pacman.frame.locator('[class*="modal"], [role="dialog"]').first()
+    ).toBeVisible({ timeout: 10000 });
   });
 });
