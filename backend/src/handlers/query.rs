@@ -139,7 +139,7 @@ pub fn list_installed(
 
 pub fn check_updates() -> Result<()> {
     let handle = get_handle()?;
-    let config = crate::config::AppConfig::load().unwrap_or_default();
+    let config = crate::config::AppConfig::load()?;
     let updates = find_available_updates(&handle, &config.ignored_packages);
 
     let response = UpdatesResponse {
