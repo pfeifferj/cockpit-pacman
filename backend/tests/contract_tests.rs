@@ -1187,6 +1187,7 @@ fn pacnew_status_shape() {
             path: "/etc/pacman.conf.pacnew".into(),
             package: "pacman".into(),
             kind: "pacnew".into(),
+            mtime: 1750000000,
         }],
     };
     let v = to_json(&status);
@@ -1198,6 +1199,7 @@ fn pacnew_status_shape() {
     assert_string(file, "path");
     assert_string(file, "package");
     assert_string(file, "kind");
+    assert_number(file, "mtime");
 
     assert_eq!(v["has_pacnew"], true);
     assert_eq!(file["kind"], "pacnew");

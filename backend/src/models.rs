@@ -488,6 +488,8 @@ pub struct PacnewFile {
     pub path: String,
     pub package: String,
     pub kind: String,
+    #[ts(type = "number")]
+    pub mtime: i64,
 }
 
 #[derive(Serialize, Deserialize, TS)]

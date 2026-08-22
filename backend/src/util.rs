@@ -129,6 +129,13 @@ pub fn journal_note(message: &str) {
     let _ = child.wait();
 }
 
+pub fn mtime_secs(meta: &std::fs::Metadata) -> i64 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_secs() as i64)
+}
+
 pub const DEFAULT_MUTATION_TIMEOUT_SECS: u64 = 300;
 
 pub struct TimeoutGuard {

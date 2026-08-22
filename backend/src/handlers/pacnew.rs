@@ -1,6 +1,6 @@
 use anyhow::Result;
 use std::collections::HashSet;
-use std::path::Path;
+use std::fs;
 
 use crate::alpm::get_handle;
 use crate::models::{PacnewFile, PacnewStatus};
@@ -12,11 +12,6 @@ fn merge_file_path(backup_name: &str, kind: &str) -> String {
     format!("/{}.{}", backup_name.trim_start_matches('/'), kind)
 }
 
-// Scans the backup arrays of installed packages, matching pacdiff's default
-// db-scan mode. A .pacsave left by a fully removed package is not attributable
-// here because the package is gone from the local db. Runs as the cockpit user,
-// so files under directories it cannot traverse (e.g. 0750 /etc/sudoers.d) are
-// skipped: exists() returns false on a stat permission error.
 pub fn get_pacnew_status() -> Result<()> {
     let handle = get_handle()?;
     let localdb = handle.localdb();
@@ -29,11 +24,14 @@ pub fn get_pacnew_status() -> Result<()> {
         for backup in pkg.backup() {
             for kind in KINDS {
                 let path = merge_file_path(backup.name(), kind);
-                if Path::new(&path).exists() && seen.insert(path.clone()) {
+                if let Ok(meta) = fs::metadata(&path)
+                    && seen.insert(path.clone())
+                {
                     files.push(PacnewFile {
                         path,
                         package: pkg_name.clone(),
                         kind: (*kind).to_string(),
+                        mtime: crate::util::mtime_secs(&meta),
                     });
                 }
             }

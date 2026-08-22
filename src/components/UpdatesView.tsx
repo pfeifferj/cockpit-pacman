@@ -1221,8 +1221,11 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     </Alert>
   ) : null;
 
+  // Keyed by mtime as well as path so that merging a .pacnew away and having a
+  // later upgrade write a new one to the same path is not treated as the file
+  // the user already dismissed.
   const pacnewSignature = useMemo(
-    () => (pacnewStatus?.files ?? []).map((f) => f.path).sort().join(","),
+    () => (pacnewStatus?.files ?? []).map((f) => `${f.path}@${f.mtime}`).sort().join(","),
     [pacnewStatus],
   );
 

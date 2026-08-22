@@ -84,7 +84,7 @@ export type PackageListResponse = { packages: Array<Package>, total: number, tot
 
 export type PackageSecurityAdvisory = { package: string, severity: string, advisory_type: string, avg_name: string, cve_ids: Array<string>, fixed_version: string | null, status: string, };
 
-export type PacnewFile = { path: string, package: string, kind: string, };
+export type PacnewFile = { path: string, package: string, kind: string, mtime: number, };
 
 export type PacnewStatus = { has_pacnew: boolean, files: Array<PacnewFile>, };
 
