@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::alpm::get_handle;
 use crate::models::{CacheInfo, CachePackage, StreamEvent};
-use crate::util::{emit_event, emit_json, get_cache_dir, list_cache_packages, load_cache_packages};
+use crate::util::{emit_event, emit_json, get_cache_dir, list_cache_packages};
 
 pub fn get_cache_info() -> Result<()> {
     let cache_dir = get_cache_dir();
@@ -74,7 +74,7 @@ pub fn clean_cache(keep_versions: u32, filter_pkgs: &[String]) -> Result<()> {
     let filter: HashSet<&str> = filter_pkgs.iter().map(|s| s.as_str()).collect();
 
     let mut groups: HashMap<String, Vec<(fs::DirEntry, String, String)>> = HashMap::new();
-    for (entry, filename, name, version) in load_cache_packages(&handle, cache_path) {
+    for (entry, filename, name, version) in list_cache_packages(cache_path) {
         if !filter.is_empty() && !filter.contains(name.as_str()) {
             continue;
         }
@@ -89,10 +89,30 @@ pub fn clean_cache(keep_versions: u32, filter_pkgs: &[String]) -> Result<()> {
     let keep = keep_versions as usize;
 
     for versions in groups.values_mut() {
+        if versions.len() <= keep {
+            continue;
+        }
         versions.sort_by(|a, b| alpm::vercmp(b.2.as_str(), a.2.as_str()));
 
-        for (entry, filename, _) in versions.iter().skip(keep) {
+        let mut kept = 0usize;
+        for (entry, filename, _) in versions.iter() {
             let path = entry.path();
+
+            let loadable = path
+                .to_str()
+                .is_some_and(|p| handle.pkg_load(p, false, alpm::SigLevel::NONE).is_ok());
+            if !loadable {
+                emit_event(&StreamEvent::Log {
+                    level: "warning".to_string(),
+                    message: format!("Skipping {}: not a readable package", filename),
+                });
+                continue;
+            }
+            if kept < keep {
+                kept += 1;
+                continue;
+            }
+
             let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
 
             match fs::remove_file(&path) {

@@ -871,52 +871,6 @@ pub fn get_cache_dir() -> String {
     "/var/cache/pacman/pkg".to_string()
 }
 
-/// Load package metadata from cached .pkg.tar files using alpm.
-/// Skips files that fail to load (corrupted or partial downloads).
-pub fn load_cache_packages(
-    handle: &alpm::Alpm,
-    cache_path: &std::path::Path,
-) -> Vec<(std::fs::DirEntry, String, String, String)> {
-    let entries = match std::fs::read_dir(cache_path) {
-        Ok(rd) => rd,
-        Err(_) => return Vec::new(),
-    };
-
-    entries
-        .filter_map(|entry_result| {
-            let entry = entry_result.ok()?;
-            let path = entry.path();
-            let filename = path.file_name()?.to_string_lossy().to_string();
-            if !filename.ends_with(".pkg.tar.zst")
-                && !filename.ends_with(".pkg.tar.xz")
-                && !filename.ends_with(".pkg.tar.gz")
-            {
-                return None;
-            }
-
-            let pkg = match handle.pkg_load(path.to_str()?, false, alpm::SigLevel::NONE) {
-                Ok(pkg) => pkg,
-                Err(e) => {
-                    eprintln!("Warning: skipping {}: {}", filename, e);
-                    return None;
-                }
-            };
-
-            Some((
-                entry,
-                filename,
-                pkg.name().to_string(),
-                pkg.version().to_string(),
-            ))
-        })
-        .collect()
-}
-
-/// Enumerate cache packages by parsing the filename for name/version instead of
-/// opening each archive with pkg_load. Use for read/report paths (cache info,
-/// downgrade listing); load_cache_packages stays for clean_cache, where only
-/// alpm-verified packages should be removed. Files whose name doesn't parse are
-/// skipped, matching load_cache_packages skipping files it can't load.
 pub fn list_cache_packages(
     cache_path: &std::path::Path,
 ) -> Vec<(std::fs::DirEntry, String, String, String)> {
