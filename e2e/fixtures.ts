@@ -92,3 +92,13 @@ export const test = base.extend<{ pacman: PackmanPage }>({
 });
 
 export { expect };
+
+export const GRAPH_NODES = "svg g.nodes > g";
+
+export async function graphFor(pacman: PackmanPage, name: string) {
+  const search = pacman.panel.getByPlaceholder("Search packages...");
+  await search.fill(name);
+  await search.press("Enter");
+  await pacman.waitForLoading();
+  await expect(pacman.panel.locator(GRAPH_NODES).first()).toBeAttached({ timeout: 30000 });
+}

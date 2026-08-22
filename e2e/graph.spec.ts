@@ -1,17 +1,8 @@
-import { test, expect, type PackmanPage } from "./fixtures";
+import { test, expect, graphFor, GRAPH_NODES, type PackmanPage } from "./fixtures";
 
-const NODES = "svg g.nodes > g";
-
-async function graphFor(pacman: PackmanPage, name: string) {
-  const search = pacman.panel.getByPlaceholder("Search packages...");
-  await search.fill(name);
-  await search.press("Enter");
-  await pacman.waitForLoading();
-  await expect(pacman.panel.locator(NODES).first()).toBeAttached({ timeout: 30000 });
-}
 
 async function nodeNames(pacman: PackmanPage): Promise<string[]> {
-  const names = await pacman.panel.locator(`${NODES} text`).allTextContents();
+  const names = await pacman.panel.locator(`${GRAPH_NODES} text`).allTextContents();
   return names.map((n) => n.trim()).sort();
 }
 
@@ -34,7 +25,7 @@ test.describe("Dependency Graph", () => {
   test("counts the nodes and edges it drew", async ({ pacman }) => {
     await graphFor(pacman, "bash");
 
-    const drawn = await pacman.panel.locator(NODES).count();
+    const drawn = await pacman.panel.locator(GRAPH_NODES).count();
     await expect(pacman.panel.getByText(`${drawn} nodes`)).toBeVisible();
 
     const label = await pacman.panel.getByText(/^\d+ edges$/).innerText();
@@ -47,7 +38,7 @@ test.describe("Dependency Graph", () => {
 
     await pacman.panel.locator('.pf-v6-c-toggle-group__button:has-text("Reverse")').click();
     await pacman.waitForLoading();
-    await expect(pacman.panel.locator(NODES).first()).toBeAttached({ timeout: 30000 });
+    await expect(pacman.panel.locator(GRAPH_NODES).first()).toBeAttached({ timeout: 30000 });
 
     const reverse = await nodeNames(pacman);
     expect(reverse).toContain("bash");
@@ -61,6 +52,6 @@ test.describe("Dependency Graph", () => {
     await pacman.waitForLoading();
 
     await expect(pacman.panel.getByText("Package not found")).toBeVisible({ timeout: 30000 });
-    await expect(pacman.panel.locator(NODES)).toHaveCount(0);
+    await expect(pacman.panel.locator(GRAPH_NODES)).toHaveCount(0);
   });
 });
