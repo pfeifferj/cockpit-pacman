@@ -104,6 +104,7 @@ describe("UpdatesView", () => {
       keys: [],
       total: 10,
       master_key_initialized: true,
+      status: "ready",
       warnings: [],
     });
     mockFetchNews.mockResolvedValue(mockNewsResponseEmpty);

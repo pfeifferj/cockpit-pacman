@@ -4,7 +4,7 @@ use pacman_key::{
 };
 
 use crate::alpm::validity_to_string;
-use crate::models::{KeyringKey, KeyringStatusResponse, StreamEvent};
+use crate::models::{KeyringKey, KeyringState, KeyringStatusResponse, StreamEvent};
 use crate::util::{emit_event, emit_json, is_cancelled, setup_signal_handler};
 
 pub fn keyring_status() -> Result<()> {
@@ -14,20 +14,20 @@ pub fn keyring_status() -> Result<()> {
         let mut warnings: Vec<String> = Vec::new();
         let keyring = Keyring::new();
 
-        let master_key_initialized = match keyring.is_initialized() {
-            Ok(InitializationStatus::Ready) => true,
+        let status = match keyring.is_initialized() {
+            Ok(InitializationStatus::Ready) => KeyringState::Ready,
             Ok(InitializationStatus::DirectoryMissing) => {
                 warnings.push(
                     "Keyring not initialized. Run 'pacman-key --init' to initialize.".to_string(),
                 );
-                false
+                KeyringState::Uninitialized
             }
             Ok(InitializationStatus::PathIsSymlink) => {
                 warnings.push(format!(
                     "Security warning: keyring path ({}) is a symlink. This may be unsafe.",
                     keyring.get_homedir()
                 ));
-                false
+                KeyringState::Undetermined
             }
             Ok(InitializationStatus::IncorrectPermissions { actual }) => {
                 warnings.push(format!(
@@ -35,31 +35,32 @@ pub fn keyring_status() -> Result<()> {
                     keyring.get_homedir(),
                     actual
                 ));
-                true
+                KeyringState::Ready
             }
             Ok(InitializationStatus::NoKeyringFiles) => {
                 warnings.push(format!(
                     "Keyring directory ({}) exists but contains no keys.",
                     keyring.get_homedir(),
                 ));
-                false
+                KeyringState::Uninitialized
             }
             Ok(InitializationStatus::NoTrustDb) => {
                 warnings.push(format!(
                     "Keyring directory ({}) missing trust database.",
                     keyring.get_homedir(),
                 ));
-                false
+                KeyringState::Uninitialized
             }
-            Ok(status) => {
-                warnings.push(format!("Keyring status: {:?}", status));
-                false
+            Ok(other) => {
+                warnings.push(format!("Keyring status: {:?}", other));
+                KeyringState::Undetermined
             }
             Err(e) => {
                 warnings.push(format!("Failed to check keyring status: {}", e));
-                false
+                KeyringState::Undetermined
             }
         };
+        let master_key_initialized = status == KeyringState::Ready;
 
         let keys: Vec<KeyringKey> = if master_key_initialized {
             match keyring.list_keys().await {
@@ -86,6 +87,7 @@ pub fn keyring_status() -> Result<()> {
             total: keys.len(),
             keys,
             master_key_initialized,
+            status,
             warnings,
         };
 

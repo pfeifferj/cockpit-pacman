@@ -316,12 +316,22 @@ pub struct KeyringKey {
     pub trust: String,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+#[serde(rename_all = "lowercase")]
+pub enum KeyringState {
+    Ready,
+    Uninitialized,
+    Undetermined,
+}
+
 #[derive(Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct KeyringStatusResponse {
     pub keys: Vec<KeyringKey>,
     pub total: usize,
     pub master_key_initialized: bool,
+    pub status: KeyringState,
     pub warnings: Vec<String>,
 }
 

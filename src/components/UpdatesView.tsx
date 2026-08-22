@@ -1625,7 +1625,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         {newsErrorAlert}
         {securityStaleAlert}
         {newsAlerts}
-        {keyringStatus && !keyringStatus.master_key_initialized && (
+        {keyringStatus?.status === "uninitialized" && (
           <Alert variant="warning" title="Keyring not initialized" isInline className="pf-v6-u-mb-md">
             The pacman keyring is not initialized. Package signature verification may fail.
           </Alert>
@@ -1725,7 +1725,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       {newsErrorAlert}
       {securityStaleAlert}
       {newsAlerts}
-      {keyringStatus && !keyringStatus.master_key_initialized && (
+      {keyringStatus?.status === "uninitialized" && (
         <Alert variant="warning" title="Keyring not initialized" isInline className="pf-v6-u-mb-md">
           The pacman keyring is not initialized. Package signature verification may fail.
         </Alert>

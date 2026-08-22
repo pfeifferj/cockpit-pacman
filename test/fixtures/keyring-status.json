@@ -17,5 +17,6 @@
   ],
   "total": 2,
   "master_key_initialized": true,
+  "status": "ready",
   "warnings": []
 }

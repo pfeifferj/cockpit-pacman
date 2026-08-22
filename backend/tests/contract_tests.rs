@@ -814,6 +814,7 @@ fn keyring_status_response_shape() {
         keys: vec![],
         total: 42,
         master_key_initialized: true,
+        status: cockpit_pacman_backend::models::KeyringState::Ready,
         warnings: vec![],
     };
     let v = to_json(&response);

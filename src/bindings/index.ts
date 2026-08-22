@@ -32,7 +32,9 @@ export type IgnoredPackagesResponse = { packages: Array<string>, total: number, 
 
 export type KeyringKey = { fingerprint: string, uid: string, created: string | null, expires: string | null, trust: string, };
 
-export type KeyringStatusResponse = { keys: Array<KeyringKey>, total: number, master_key_initialized: boolean, warnings: Array<string>, };
+export type KeyringState = "ready" | "uninitialized" | "undetermined";
+
+export type KeyringStatusResponse = { keys: Array<KeyringKey>, total: number, master_key_initialized: boolean, status: KeyringState, warnings: Array<string>, };
 
 export type ListReposResponse = { repos: Array<RepoEntry>, };
 

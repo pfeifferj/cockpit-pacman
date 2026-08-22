@@ -41,6 +41,12 @@ declare const cockpit: {
       superuser?: "try" | "require";
     },
   ): CockpitDBusClient;
+  permission(options?: { admin?: boolean }): {
+    allowed: boolean | null;
+    addEventListener(event: "changed", handler: () => void): void;
+    removeEventListener(event: "changed", handler: () => void): void;
+    close(): void;
+  };
   variant(type: string, value: unknown): { t: string; v: unknown };
   user(): Promise<CockpitUserInfo>;
   transport: {
