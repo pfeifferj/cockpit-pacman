@@ -24,6 +24,8 @@ use cockpit_pacman_backend::validation::{
     validate_signoff_arg,
 };
 
+const SYSTEMD_INVOKED: &[&str] = &["scheduled-run", "scheduled-record-interrupted"];
+
 /// Every dispatched subcommand name. Single source of truth for the help text
 /// (USAGE is checked against it in tests) and the unknown-command suggestion.
 /// Keep in sync with the dispatch match in `main`.
@@ -768,14 +770,7 @@ fn main() {
     shutdown_event_writer(Duration::from_secs(5));
 
     if let Err(e) = result {
-        // The structured envelope + exit 0 is for commands whose stdout the
-        // frontend parses. The scheduled commands are invoked by the systemd
-        // oneshot unit with no such consumer, so they must exit non-zero on
-        // failure for the unit result to reflect reality.
-        let emit_envelope = !matches!(
-            args[1].as_str(),
-            "scheduled-run" | "scheduled-record-interrupted"
-        );
+        let emit_envelope = !SYSTEMD_INVOKED.contains(&args[1].as_str());
         if emit_envelope {
             // Every frontend-consumed command reports failure as an envelope, so
             // an unclassifiable error still carries its real message.
@@ -795,6 +790,34 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const SCHEDULED_UNIT: &str = include_str!("../../systemd/cockpit-pacman-scheduled.service");
+    const FAILURE_UNIT: &str = include_str!("../../systemd/cockpit-pacman-failure@.service");
+
+    fn backend_invocations(unit: &str) -> Vec<&str> {
+        unit.lines()
+            .filter(|l| l.starts_with("Exec"))
+            .filter_map(|l| l.split("cockpit-pacman-backend ").nth(1))
+            .filter_map(|rest| rest.split_whitespace().next())
+            .collect()
+    }
+
+    #[test]
+    fn every_command_a_unit_runs_exits_non_zero_on_failure() {
+        let invoked: Vec<&str> = [SCHEDULED_UNIT, FAILURE_UNIT]
+            .iter()
+            .flat_map(|u| backend_invocations(u))
+            .collect();
+
+        assert!(!invoked.is_empty(), "unit parsing found nothing to check");
+        for cmd in invoked {
+            assert!(
+                SYSTEMD_INVOKED.contains(&cmd),
+                "{cmd} is run by a systemd unit but would report failure as an \
+                 envelope at exit 0, leaving the unit green"
+            );
+        }
+    }
 
     fn svec(parts: &[&str]) -> Vec<String> {
         parts.iter().map(|s| s.to_string()).collect()
