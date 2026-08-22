@@ -1302,6 +1302,19 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     () => (servicesStatus?.services ?? []).map((s) => s.name).sort().join(","),
     [servicesStatus],
   );
+  const servicesPartialAlert = servicesStatus?.scan_incomplete ? (
+    <Alert
+      variant="info"
+      isInline
+      title="Service check was incomplete"
+      className="pf-v6-u-mb-md"
+    >
+      Some running processes could not be inspected, so services needing a
+      restart may be missing from this list. Turn on administrative access for a
+      complete answer.
+    </Alert>
+  ) : null;
+
   const servicesAlert = servicesStatus?.restart_required
     && servicesSignature !== ""
     && dismissedServicesSignature !== undefined
@@ -1570,6 +1583,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
           {cancelAlert}
           {lockClearedAlert}
           {rebootAlert}
+          {servicesPartialAlert}
           {servicesAlert}
           {pacnewAlert}
           {scheduledAlert}
@@ -1597,7 +1611,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         {cancelAlert}
         {lockClearedAlert}
         {rebootAlert}
-        {servicesAlert}
+        {servicesPartialAlert}
+          {servicesAlert}
         {pacnewAlert}
         {scheduledAlert}
         {warnings.length > 0 && (
@@ -1696,7 +1711,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       {cancelAlert}
       {lockClearedAlert}
       {rebootAlert}
-      {servicesAlert}
+      {servicesPartialAlert}
+          {servicesAlert}
       {pacnewAlert}
       {scheduledAlert}
       {warnings.length > 0 && (

@@ -1910,6 +1910,7 @@ fn services_status_shape() {
             reason: "deleted_mappings".into(),
             restart_blocked: None,
         }],
+        scan_incomplete: false,
     };
     let v = to_json(&status);
 

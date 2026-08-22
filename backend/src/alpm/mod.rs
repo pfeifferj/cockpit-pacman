@@ -11,7 +11,7 @@ use alpm_utils::alpm_with_conf;
 use anyhow::{Context, Result};
 use pacman_key::KeyValidity;
 use pacmanconf::Config;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::models::UpdateInfo;
 
@@ -31,28 +31,35 @@ pub fn get_handle() -> Result<Alpm> {
     Ok(handle)
 }
 
-/// Build a file-path to owning-package map from the local db. One pass over
-/// every package and its file list, so callers doing many lookups should
-/// build this once and reuse.
-pub type FileOwnerIndex = HashMap<Vec<u8>, String>;
+pub fn resolve_file_owners(handle: &Alpm, wanted: &HashSet<String>) -> HashMap<String, String> {
+    let mut owners = HashMap::new();
+    if wanted.is_empty() {
+        return owners;
+    }
 
-pub fn build_file_owner_index(handle: &Alpm) -> FileOwnerIndex {
-    let mut index: FileOwnerIndex = HashMap::new();
+    let by_relative: HashMap<Vec<u8>, &str> = wanted
+        .iter()
+        .map(|path| {
+            (
+                path.strip_prefix('/').unwrap_or(path).as_bytes().to_vec(),
+                path.as_str(),
+            )
+        })
+        .collect();
+
     for pkg in handle.localdb().pkgs() {
-        let name = pkg.name().to_string();
         for file in pkg.files().files() {
-            index
-                .entry(file.name().to_vec())
-                .or_insert_with(|| name.clone());
+            if let Some(absolute) = by_relative.get(file.name())
+                && !owners.contains_key(*absolute)
+            {
+                owners.insert((*absolute).to_string(), pkg.name().to_string());
+            }
+        }
+        if owners.len() == wanted.len() {
+            break;
         }
     }
-    index
-}
-
-/// Lookup an owner by absolute path. alpm stores paths without leading '/'.
-pub fn lookup_file_owner<'a>(index: &'a FileOwnerIndex, path: &str) -> Option<&'a str> {
-    let relative = path.strip_prefix('/').unwrap_or(path).as_bytes();
-    index.get(relative).map(|s| s.as_str())
+    owners
 }
 
 /// Find all packages with available updates by comparing local versions to sync databases.

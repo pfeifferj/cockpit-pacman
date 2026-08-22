@@ -512,6 +512,9 @@ pub struct ServiceRestart {
 pub struct ServicesStatus {
     pub restart_required: bool,
     pub services: Vec<ServiceRestart>,
+    #[serde(default)]
+    /// The scan could not see every process, so `services` may be short.
+    pub scan_incomplete: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, TS)]

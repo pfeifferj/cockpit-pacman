@@ -163,7 +163,11 @@ stale?: boolean, };
 
 export type ServiceRestart = { name: string, pid: number, affected_packages: Array<string>, reason: string, restart_blocked?: RestartBlocked | null, };
 
-export type ServicesStatus = { restart_required: boolean, services: Array<ServiceRestart>, };
+export type ServicesStatus = { restart_required: boolean, services: Array<ServiceRestart>, 
+/**
+ * The scan could not see every process, so `services` may be short.
+ */
+scan_incomplete: boolean, };
 
 /**
  * Wire mirror of archweb_client's Signoff so the type can derive TS bindings

@@ -6,7 +6,7 @@ use std::io::ErrorKind;
 use zbus::blocking::{Connection, Proxy};
 use zbus::zvariant::{OwnedObjectPath, OwnedValue};
 
-use crate::alpm::{build_file_owner_index, get_handle, lookup_file_owner};
+use crate::alpm::{get_handle, resolve_file_owners};
 use crate::models::{RestartBlocked, ServiceRestart, ServicesStatus};
 use crate::util::emit_json;
 
@@ -209,6 +209,7 @@ pub fn get_services_status() -> Result<()> {
             ServicesStatus {
                 restart_required: false,
                 services: Vec::new(),
+                scan_incomplete: true,
             }
         }
     };
@@ -223,13 +224,14 @@ fn services_status_with_graph<G: SystemdGraph>(graph: &G) -> Result<ServicesStat
             return Ok(ServicesStatus {
                 restart_required: false,
                 services: Vec::new(),
+                scan_incomplete: true,
             });
         }
     };
 
-    let handle = get_handle()?;
-    let file_owner_index = build_file_owner_index(&handle);
-    let mut services = Vec::new();
+    let mut with_deleted: Vec<(String, u32, HashSet<String>)> = Vec::new();
+    let mut wanted: HashSet<String> = HashSet::new();
+    let mut scan_incomplete = false;
 
     for (unit, pid) in graph.running_services_with_pids()? {
         let Some(pid) = pid else {
@@ -238,7 +240,10 @@ fn services_status_with_graph<G: SystemdGraph>(graph: &G) -> Result<ServicesStat
 
         let maps = match fs::read_to_string(format!("/proc/{}/maps", pid)) {
             Ok(m) => m,
-            Err(e) if e.kind() == ErrorKind::PermissionDenied => continue,
+            Err(e) if e.kind() == ErrorKind::PermissionDenied => {
+                scan_incomplete = true;
+                continue;
+            }
             Err(e) if e.kind() == ErrorKind::NotFound => continue,
             Err(e) => return Err(e).context(format!("Failed to read /proc/{}/maps", pid)),
         };
@@ -253,13 +258,30 @@ fn services_status_with_graph<G: SystemdGraph>(graph: &G) -> Result<ServicesStat
             continue;
         }
 
+        wanted.extend(deleted_paths.iter().cloned());
+        with_deleted.push((unit, pid, deleted_paths));
+    }
+
+    if with_deleted.is_empty() {
+        return Ok(ServicesStatus {
+            restart_required: false,
+            services: Vec::new(),
+            scan_incomplete,
+        });
+    }
+
+    let handle = get_handle()?;
+    let owners = resolve_file_owners(&handle, &wanted);
+    let mut services = Vec::new();
+
+    for (unit, pid, deleted_paths) in with_deleted {
         let mut owners_seen: HashSet<String> = HashSet::new();
         let mut affected_packages: Vec<String> = Vec::new();
         for path in &deleted_paths {
-            if let Some(owner) = lookup_file_owner(&file_owner_index, path)
-                && owners_seen.insert(owner.to_string())
+            if let Some(owner) = owners.get(path)
+                && owners_seen.insert(owner.clone())
             {
-                affected_packages.push(owner.to_string());
+                affected_packages.push(owner.clone());
             }
         }
 
@@ -280,6 +302,7 @@ fn services_status_with_graph<G: SystemdGraph>(graph: &G) -> Result<ServicesStat
     Ok(ServicesStatus {
         restart_required: !services.is_empty(),
         services,
+        scan_incomplete,
     })
 }
 
@@ -388,6 +411,7 @@ mod tests {
     struct FakeGraph {
         deps: HashMap<String, Vec<String>>,
         user_services: Vec<String>,
+        fail_user_services: bool,
     }
 
     impl FakeGraph {
@@ -395,7 +419,13 @@ mod tests {
             Self {
                 deps: HashMap::new(),
                 user_services: Vec::new(),
+                fail_user_services: false,
             }
+        }
+
+        fn failing_user_services(mut self) -> Self {
+            self.fail_user_services = true;
+            self
         }
 
         fn edge(mut self, from: &str, to: &[&str]) -> Self {
@@ -416,6 +446,9 @@ mod tests {
         }
 
         fn running_user_services(&self) -> Result<Vec<String>> {
+            if self.fail_user_services {
+                anyhow::bail!("unit enumeration failed");
+            }
             Ok(self.user_services.clone())
         }
 
@@ -465,6 +498,15 @@ mod tests {
             assert!(set.contains(*s));
         }
         assert!(!set.contains("dbus.service"));
+    }
+
+    #[test]
+    fn fake_graph_enumeration_failure_marks_scan_incomplete() {
+        let g = FakeGraph::new().failing_user_services();
+        let status = services_status_with_graph(&g).unwrap();
+        assert!(status.scan_incomplete);
+        assert!(!status.restart_required);
+        assert!(status.services.is_empty());
     }
 
     #[test]

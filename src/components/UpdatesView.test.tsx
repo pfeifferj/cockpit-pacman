@@ -2279,6 +2279,33 @@ describe("UpdatesView", () => {
       setHostname(originalHostname);
     });
 
+    it("says so when the scan could not inspect every process", async () => {
+      mockGetServicesStatus.mockResolvedValue({
+        restart_required: false,
+        services: [],
+        scan_incomplete: true,
+      });
+      render(<UpdatesView />);
+
+      expect(
+        await screen.findByText("Service check was incomplete")
+      ).toBeInTheDocument();
+    });
+
+    it("stays quiet when the scan was complete and found nothing", async () => {
+      mockGetServicesStatus.mockResolvedValue({
+        restart_required: false,
+        services: [],
+        scan_incomplete: false,
+      });
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText("Service check was incomplete")).not.toBeInTheDocument();
+    });
+
     it("renders the alert with both sections and tags blocked rows", async () => {
       setHostname("fronker.example");
       mockGetServicesStatus.mockResolvedValue(mockServicesStatusMixed);
