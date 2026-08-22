@@ -634,6 +634,13 @@ pub fn write_json_atomic_with_mode<T: Serialize>(path: &Path, state: &T, mode: u
     write_json_atomic_inner(path, state, Some(mode))
 }
 
+fn sync_parent_dir(path: &Path) {
+    let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) else {
+        return;
+    };
+    let _ = File::open(parent).and_then(|dir| dir.sync_all());
+}
+
 fn write_json_atomic_inner<T: Serialize>(path: &Path, state: &T, mode: Option<u32>) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -666,6 +673,9 @@ fn write_json_atomic_inner<T: Serialize>(path: &Path, state: &T, mode: Option<u3
         }
         std::fs::rename(&tmp_path, path)
             .with_context(|| format!("Failed to rename {:?} to {:?}", tmp_path, path))?;
+        if mode.is_some() {
+            sync_parent_dir(path);
+        }
         Ok(())
     })();
 
@@ -713,6 +723,7 @@ fn write_bytes_atomic_inner(path: &Path, bytes: &[u8], mode: Option<u32>) -> Res
         }
         std::fs::rename(&tmp_path, path)
             .with_context(|| format!("Failed to rename {:?} to {:?}", tmp_path, path))?;
+        sync_parent_dir(path);
         Ok(())
     })();
 
