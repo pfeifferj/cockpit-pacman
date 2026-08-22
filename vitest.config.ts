@@ -1,6 +1,10 @@
 import { defineConfig } from "vitest/config";
+import pkg from "./package.json" with { type: "json" };
 
 export default defineConfig({
+  // The build injects this; without it the version check would compile out of
+  // every test and never be exercised.
+  define: { __BUNDLE_VERSION__: JSON.stringify(pkg.version) },
   test: {
     globals: true,
     environment: "jsdom",

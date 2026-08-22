@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import {
+  Alert,
   Page,
   PageSection,
   Tabs,
@@ -19,6 +20,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import type { KeyringCredentials } from "../api";
 import { getCredentials } from "../keyring";
 import { NavigationProvider } from "../contexts/NavigationContext";
+import { bundleVersion, mismatchedBackendVersion } from "../version";
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string | number>(0);
@@ -29,6 +31,13 @@ export const App: React.FC = () => {
   const orphanKeyRef = useRef(0);
   const [signoffAvailable, setSignoffAvailable] = useState(false);
   const [signoffCredentials, setSignoffCredentials] = useState<KeyringCredentials | null>(null);
+  const [staleBundle, setStaleBundle] = useState<string | null>(null);
+
+  useEffect(() => {
+    mismatchedBackendVersion()
+      .then(setStaleBundle)
+      .catch(() => setStaleBundle(null));
+  }, []);
 
   useEffect(() => {
     getCredentials()
@@ -84,6 +93,18 @@ export const App: React.FC = () => {
     <NavigationProvider value={navHandlers}>
     <Page className="no-masthead-sidebar pf-m-no-sidebar">
       <PageSection hasBodyWrapper={false} >
+        {staleBundle !== null && (
+          <Alert
+            variant="warning"
+            isInline
+            title="Reload to finish updating this page"
+            className="pf-v6-u-mb-md"
+          >
+            This page was loaded from version {bundleVersion} of cockpit-pacman
+            but is talking to version {staleBundle}. Reload the browser to pick
+            up the new version.
+          </Alert>
+        )}
         <Tabs
           activeKey={activeTab}
           onSelect={(_event, tabIndex) => setActiveTab(tabIndex)}

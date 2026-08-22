@@ -82,6 +82,7 @@ const COMMANDS: &[&str] = &[
     "check-security",
     "security-info",
     "check-lock",
+    "version",
     "remove-stale-lock",
     "list-repos",
     "save-repos",
@@ -221,6 +222,7 @@ Commands:
   check-security         Check installed packages against Arch Security Tracker
   security-info NAME     Get security advisory history for a package
   check-lock             Check if the pacman database lock exists and if it's stale
+  version                Print the backend version, for the frontend to compare against
   remove-stale-lock      Remove a stale database lock (requires root)
   list-repos             List configured repositories from pacman.conf
   save-repos <json>      Save repositories to pacman.conf (requires root)
@@ -708,6 +710,7 @@ fn main() {
             validate_package_name(&args[2]).and_then(|_| security_info(&args[2]))
         }
         "check-lock" => check_lock(),
+        "version" => emit_json(&serde_json::json!({ "version": env!("CARGO_PKG_VERSION") })),
         "list-repos" => list_repos(),
         "save-repos" => {
             if args.len() < 3 {
