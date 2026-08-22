@@ -1060,6 +1060,7 @@ fn test_parse_rss_body_decodes_hex_entity_en_dash() {
 #[cfg(feature = "integration-tests")]
 mod integration {
     use crate::alpm::{get_handle, resolve_file_owners};
+    use crate::handlers::dependency::build_dependency_tree;
     use std::collections::HashSet;
 
     #[test]
@@ -1125,6 +1126,35 @@ mod integration {
             1,
             "nothing beyond the asked-for paths is kept"
         );
+    }
+
+    #[test]
+    fn a_high_fan_out_tree_stays_within_the_node_cap() {
+        let tree = build_dependency_tree("glibc", 3, "reverse").expect("tree");
+
+        assert!(
+            tree.nodes.len() <= 500,
+            "node cap exceeded: {} nodes",
+            tree.nodes.len()
+        );
+        if tree.nodes.len() == 500 {
+            assert!(
+                tree.warnings.iter().any(|w| w.contains("truncated")),
+                "a truncated graph has to say so: {:?}",
+                tree.warnings
+            );
+        }
+
+        let ids: std::collections::HashSet<&str> =
+            tree.nodes.iter().map(|n| n.id.as_str()).collect();
+        for edge in &tree.edges {
+            assert!(
+                ids.contains(edge.source.as_str()) && ids.contains(edge.target.as_str()),
+                "edge {:?} -> {:?} has no node",
+                edge.source,
+                edge.target
+            );
+        }
     }
 
     #[test]

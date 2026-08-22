@@ -9,6 +9,14 @@ use crate::util::emit_json;
 const MAX_NODES: usize = 500;
 
 pub fn get_dependency_tree(name: &str, depth: u32, direction: &str) -> Result<()> {
+    emit_json(&build_dependency_tree(name, depth, direction)?)
+}
+
+pub fn build_dependency_tree(
+    name: &str,
+    depth: u32,
+    direction: &str,
+) -> Result<DependencyTreeResponse> {
     let handle = get_handle()?;
     let localdb = handle.localdb();
     let repo_map = get_repo_map(&handle);
@@ -72,10 +80,7 @@ pub fn get_dependency_tree(name: &str, depth: u32, direction: &str) -> Result<()
         }
 
         if nodes.len() >= MAX_NODES {
-            warnings.push(format!(
-                "Graph truncated at {} nodes for performance",
-                MAX_NODES
-            ));
+            note_truncation(&mut warnings);
             break;
         }
 
@@ -169,15 +174,20 @@ pub fn get_dependency_tree(name: &str, depth: u32, direction: &str) -> Result<()
         }
     }
 
-    let response = DependencyTreeResponse {
+    Ok(DependencyTreeResponse {
         nodes,
         edges,
         root: root_id,
         max_depth_reached,
         warnings,
-    };
+    })
+}
 
-    emit_json(&response)
+fn note_truncation(warnings: &mut Vec<String>) {
+    let message = format!("Graph truncated at {} nodes for performance", MAX_NODES);
+    if !warnings.contains(&message) {
+        warnings.push(message);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -230,6 +240,11 @@ fn add_dependency(
         }
     };
 
+    if !visited.contains(&resolved_name) && nodes.len() >= MAX_NODES {
+        note_truncation(warnings);
+        return;
+    }
+
     // Use resolved package name for edges and deduplication
     let (edge_source, edge_target) = match edge_type {
         "required_by" | "optional_for" => (resolved_name.clone(), source_name.to_string()),
@@ -263,4 +278,32 @@ fn add_dependency(
     });
 
     queue.push_back((resolved_name, new_depth));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn note_truncation_appends_the_warning() {
+        let mut warnings = Vec::new();
+        note_truncation(&mut warnings);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains(&MAX_NODES.to_string()));
+    }
+
+    #[test]
+    fn note_truncation_does_not_duplicate_the_warning() {
+        let mut warnings = Vec::new();
+        note_truncation(&mut warnings);
+        note_truncation(&mut warnings);
+        assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    fn note_truncation_keeps_unrelated_warnings() {
+        let mut warnings = vec!["Package 'foo' not found in databases".to_string()];
+        note_truncation(&mut warnings);
+        assert_eq!(warnings.len(), 2);
+    }
 }
