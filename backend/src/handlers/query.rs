@@ -465,18 +465,47 @@ pub fn sync_package_info(name: &str, repo: Option<&str>) -> Result<()> {
     emit_json(&details)
 }
 
+fn depended_on_names(localdb: &alpm::Db) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for pkg in localdb.pkgs() {
+        for dep in pkg.depends() {
+            if !names.contains(dep.name()) {
+                names.insert(dep.name().to_string());
+            }
+        }
+        for dep in pkg.optdepends() {
+            if !names.contains(dep.name()) {
+                names.insert(dep.name().to_string());
+            }
+        }
+    }
+    names
+}
+
+fn nothing_depends_on<'a>(
+    name: &str,
+    provides: impl Iterator<Item = &'a str>,
+    depended_on: &HashSet<String>,
+) -> bool {
+    !depended_on.contains(name) && !provides.into_iter().any(|p| depended_on.contains(p))
+}
+
 pub fn list_orphans() -> Result<()> {
     let handle = get_handle()?;
     let localdb = handle.localdb();
     let repo_map = get_repo_map(&handle);
+    let depended_on = depended_on_names(localdb);
 
     let orphans: Vec<OrphanPackage> = localdb
         .pkgs()
         .iter()
         .filter(|pkg| {
             pkg.reason() == alpm::PackageReason::Depend
-                && pkg.required_by().is_empty()
-                && pkg.optional_for().is_empty()
+                && nothing_depends_on(
+                    pkg.name(),
+                    pkg.provides().iter().map(|p| p.name()),
+                    &depended_on,
+                )
         })
         .map(|pkg| OrphanPackage {
             name: pkg.name().to_string(),
@@ -496,4 +525,36 @@ pub fn list_orphans() -> Result<()> {
     };
 
     emit_json(&response)
+}
+
+#[cfg(test)]
+mod orphan_tests {
+    use super::nothing_depends_on;
+    use std::collections::HashSet;
+
+    fn depended_on(names: &[&str]) -> HashSet<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_package_nothing_names_is_an_orphan() {
+        let d = depended_on(&["glibc", "bash"]);
+        assert!(nothing_depends_on("leftover", std::iter::empty(), &d));
+    }
+
+    #[test]
+    fn a_package_named_directly_is_not() {
+        let d = depended_on(&["glibc"]);
+        assert!(!nothing_depends_on("glibc", std::iter::empty(), &d));
+    }
+
+    #[test]
+    fn a_package_wanted_only_through_what_it_provides_is_not() {
+        let d = depended_on(&["sh"]);
+        assert!(!nothing_depends_on(
+            "bash",
+            ["sh", "bash-shell"].into_iter(),
+            &d
+        ));
+    }
 }
