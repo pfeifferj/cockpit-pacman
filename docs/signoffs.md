@@ -38,4 +38,4 @@ Should print your ArchWeb password. Once configured, reload cockpit-pacman and t
 
 ## How it works
 
-On page load, the cockpit-pacman frontend queries the Secret Service via D-Bus for an item matching `{service: "cockpit-pacman", type: "archweb"}`. If found, credentials are read from the keyring and passed to the backend as a base64-encoded argument on each signoff operation. The backend never stores or caches credentials.
+On page load, the cockpit-pacman frontend queries the Secret Service via D-Bus for an item matching `{service: "cockpit-pacman", type: "archweb"}`. If found, credentials are read from the keyring and passed to the backend over stdin, base64-encoded, on each signoff operation. Never as a command-line argument: `/proc/<pid>/cmdline` is world-readable. The backend never stores or caches credentials.

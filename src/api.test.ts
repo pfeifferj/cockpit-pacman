@@ -9,6 +9,7 @@ import {
   createMockStreamingProcess,
 } from "./test/mocks";
 import { STREAM_FIRST_OUTPUT_TIMEOUT_MS } from "./constants";
+import { getSignoffList, signoffPackage, revokeSignoff } from "./api";
 import {
   formatSize,
   listInstalled,
@@ -863,5 +864,37 @@ describe("downgradeFromArchive", () => {
 
     expect(callbacks.onComplete).toHaveBeenCalledTimes(1);
     expect(callbacks.onError).not.toHaveBeenCalled();
+  });
+});
+
+describe("signoff credentials", () => {
+  const credentials = { username: "someone", password: "hunter2" };
+
+  let sentToStdin: string[];
+
+  beforeEach(() => {
+    sentToStdin = [];
+    const promise = createMockSpawnPromise(JSON.stringify({ groups: [] }));
+    promise.input = ((data: string) => {
+      sentToStdin.push(data);
+    }) as unknown as () => void;
+    mockSpawn.mockReturnValue(promise);
+  });
+
+  it.each([
+    ["signoff-list", () => getSignoffList(credentials)],
+    ["signoff-sign", () => signoffPackage("linux", "core", "x86_64", credentials)],
+    ["signoff-revoke", () => revokeSignoff("linux", "core", "x86_64", credentials)],
+  ])("passes credentials to %s on stdin, never in argv", async (_cmd, call) => {
+    await call();
+
+    const [argv] = mockSpawn.mock.calls[0];
+    const joined = (argv as string[]).join(" ");
+    expect(joined).not.toContain(credentials.password);
+    expect(joined).not.toContain(credentials.username);
+    expect(joined).not.toContain(btoa(JSON.stringify(credentials)));
+
+    expect(sentToStdin).toHaveLength(1);
+    expect(JSON.parse(atob(sentToStdin[0]))).toEqual(credentials);
   });
 });

@@ -89,6 +89,13 @@ sudo make install
 make devel-install
 ```
 
+## Documentation
+
+- [Troubleshooting](docs/troubleshooting.md): locked database, interrupted
+  upgrade, a scheduled run with no record, where the config and backups live
+- [Configuration](docs/configuration.md): `/etc/cockpit-pacman/config.json`
+- [Signoffs](docs/signoffs.md): ArchWeb credentials and the signoff view
+
 ## Development
 
 ```bash
