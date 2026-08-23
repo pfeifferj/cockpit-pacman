@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::alpm::get_handle;
 use crate::handlers::downgrade::{
-    compare_versions, get_installed_version, is_version_older, run_pacman_upgrade,
+    DowngradeSource, compare_versions, get_installed_version, install_downgrade, is_version_older,
 };
 use crate::models::{CachedVersion, DowngradeResponse};
 use crate::util::{emit_json, parse_package_filename};
@@ -169,7 +169,6 @@ fn build_archive_versions(
 }
 
 pub fn downgrade_from_archive(name: &str, filename: &str, timeout: Option<u64>) -> Result<()> {
-    crate::util::setup_signal_handler();
     validate_package_name(name)?;
     validate_archive_filename(filename, name)?;
 
@@ -178,7 +177,7 @@ pub fn downgrade_from_archive(name: &str, filename: &str, timeout: Option<u64>) 
     let url =
         archive_file_url(name, filename).ok_or_else(|| anyhow::anyhow!("Invalid package name"))?;
 
-    run_pacman_upgrade(&url, name, &version, timeout)
+    install_downgrade(DowngradeSource::Url(url), name, &version, timeout)
 }
 
 #[cfg(test)]

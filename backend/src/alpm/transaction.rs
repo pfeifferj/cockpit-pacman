@@ -66,6 +66,14 @@ impl<'a> TransactionGuard<'a> {
         self.handle.syncdbs()
     }
 
+    pub fn load_pkg(
+        &self,
+        path: &str,
+        level: alpm::SigLevel,
+    ) -> Result<alpm::LoadedPackage<'_>, alpm::Error> {
+        self.handle.pkg_load(path, true, level)
+    }
+
     pub fn add_pkg<P: alpm::IntoPkgAdd>(&self, pkg: P) -> Result<(), alpm::AddError<P>> {
         self.handle.trans_add_pkg(pkg)
     }

@@ -2030,3 +2030,36 @@ fn error_codes_match_shared_fixture() {
         fixture["networkKeywords"].as_array().unwrap().len()
     );
 }
+
+#[test]
+fn the_backend_never_spawns_a_pacman_binary() {
+    let mut offenders = Vec::new();
+    let mut stack = vec![std::path::PathBuf::from("src")];
+
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).expect("backend/src is readable") {
+            let path = entry.expect("readable entry").path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let body = std::fs::read_to_string(&path).expect("source is utf-8");
+            for (n, line) in body.lines().enumerate() {
+                let spawns_pacman = line.contains("Command::new(\"pacman")
+                    || line.contains("Command::new(\"paccache")
+                    || line.contains("Command::new(\"checkupdates");
+                if spawns_pacman {
+                    offenders.push(format!("{}:{}", path.display(), n + 1));
+                }
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "use the alpm bindings instead of spawning pacman: {offenders:?}"
+    );
+}

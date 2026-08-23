@@ -663,7 +663,7 @@ export function downgradePackage(
   name: string,
   version: string
 ): StreamingHandle {
-  return runStreamingBackend("downgrade", [sanitizeSearchInput(name), sanitizeSearchInput(version)], callbacks);
+  return runStreamingBackend("downgrade", [sanitizeSearchInput(name), sanitizeSearchInput(version)], callbacks, { gracefulCancel: true });
 }
 
 export async function listArchiveVersions(packageName: string, query?: string): Promise<DowngradeResponse> {
@@ -679,7 +679,7 @@ export function downgradeFromArchive(
   name: string,
   filename: string
 ): StreamingHandle {
-  return runStreamingBackend("downgrade-archive", [sanitizeSearchInput(name), filename], callbacks);
+  return runStreamingBackend("downgrade-archive", [sanitizeSearchInput(name), filename], callbacks, { gracefulCancel: true });
 }
 
 export interface ScheduledRunsParams {
