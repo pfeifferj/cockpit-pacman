@@ -20,7 +20,7 @@ pub mod signoff;
 
 pub use archive::{downgrade_from_archive, list_archive_versions};
 pub use cache::{clean_cache, get_cache_info};
-pub use config::{add_ignored, list_ignored, remove_ignored};
+pub use config::{add_ignored, get_settings, list_ignored, remove_ignored, set_settings};
 pub use dependency::get_dependency_tree;
 pub use downgrade::{downgrade_package, list_downgrades};
 pub use keyring::{init_keyring, keyring_status, refresh_keyring};

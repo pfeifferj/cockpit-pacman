@@ -5,17 +5,26 @@
       "severity": "High",
       "advisory_type": "multiple issues",
       "avg_name": "AVG-2024-1234",
-      "cve_ids": ["CVE-2024-0001", "CVE-2024-0002"],
-      "status": "Fixed"
+      "cve_ids": [
+        "CVE-2024-0001",
+        "CVE-2024-0002"
+      ],
+      "status": "Fixed",
+      "affected_version": "3.0.0-1",
+      "installed_version": "3.2.1-1"
     },
     {
       "package": "curl",
       "severity": "Medium",
       "advisory_type": "information disclosure",
       "avg_name": "AVG-2024-5678",
-      "cve_ids": ["CVE-2024-0003"],
+      "cve_ids": [
+        "CVE-2024-0003"
+      ],
       "fixed_version": "8.5.0-1",
-      "status": "Fixed"
+      "status": "Fixed",
+      "affected_version": "8.4.0-1",
+      "installed_version": "8.4.0-2"
     },
     {
       "package": "libpng",
@@ -23,6 +32,21 @@
       "advisory_type": "denial of service",
       "avg_name": "AVG-2024-9999",
       "cve_ids": [],
+      "status": "Vulnerable",
+      "affected_version": "1.6.40-1",
+      "installed_version": "1.6.43-1"
+    },
+    {
+      "package": "linux",
+      "severity": "High",
+      "advisory_type": "arbitrary code execution",
+      "avg_name": "AVG-1879",
+      "cve_ids": [
+        "CVE-2021-43976",
+        "CVE-2021-4095"
+      ],
+      "affected_version": "5.15.8.arch1-1",
+      "installed_version": "7.1.8.arch1-3",
       "status": "Vulnerable"
     }
   ]

@@ -45,6 +45,8 @@ import type {
   SecurityInfoResponse,
   SecurityResponse,
   ServicesStatus,
+  SettingsResponse,
+  SettingsSetResponse,
   SignoffActionResponse,
   SignoffListResponse,
   StreamEvent,
@@ -290,12 +292,20 @@ export async function removeStaleLock(): Promise<LockRemoveResult> {
   return runBackend<LockRemoveResult>("remove-stale-lock", [], { superuser: "require" });
 }
 
-export async function checkSecurity(): Promise<SecurityResponse> {
-  return runBackend<SecurityResponse>("check-security", [], { superuser: "none" });
+export async function checkSecurity(force = false): Promise<SecurityResponse> {
+  return runBackend<SecurityResponse>("check-security", [String(force)], { superuser: "none" });
 }
 
 export async function getSecurityInfo(name: string): Promise<SecurityInfoResponse> {
   return runBackend<SecurityInfoResponse>("security-info", [name], { superuser: "none" });
+}
+
+export async function getSettings(): Promise<SettingsResponse> {
+  return runBackend<SettingsResponse>("get-settings", [], { superuser: "none" });
+}
+
+export async function setSecurityAdvisories(enabled: boolean): Promise<SettingsSetResponse> {
+  return runBackend<SettingsSetResponse>("set-settings", [String(enabled)]);
 }
 
 export async function getPackageInfo(name: string): Promise<PackageDetails> {

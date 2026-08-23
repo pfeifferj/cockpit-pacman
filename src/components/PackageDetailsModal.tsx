@@ -58,6 +58,13 @@ const PackageSecuritySection: React.FC<{ name: string }> = ({ name }) => {
   if (state === "error") {
     return <span className="pf-v6-u-color-200">{sanitizeErrorMessage(err)}</span>;
   }
+  if (info?.disabled) {
+    return (
+      <span className="pf-v6-u-color-200">
+        Security advisories are turned off for this system.
+      </span>
+    );
+  }
   if (!info || (!info.advisories.length && !info.groups.length && !info.issues.length)) {
     return <span className="pf-v6-u-color-200">No advisories for this package.</span>;
   }

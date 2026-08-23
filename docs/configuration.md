@@ -13,6 +13,7 @@ save, which rewrites it `0644`.
 
 ```json
 {
+  "security_advisories": true,
   "ignored_packages": ["linux", "nvidia"],
   "schedule": {
     "enabled": false,
@@ -40,3 +41,17 @@ Keys the running backend does not recognize are preserved, not dropped, when the
 file is rewritten. A config written by a newer version round-trips through an
 older one without losing fields, so upgrading and downgrading the plugin does not
 silently discard settings.
+
+## security_advisories
+
+Whether to consult the Arch Security Tracker. Defaults to `true`.
+
+Set it to `false` on systems the tracker does not describe, for example a
+distribution that backports fixes without closing the tracker's records (see
+[troubleshooting](troubleshooting.md#advisories-that-look-ancient) for why
+those records linger). With the feature off the backend makes no request to
+security.archlinux.org and says so explicitly, rather than showing an empty
+list that would read as a clean bill of health.
+
+The setting fails open: a config that cannot be read or parsed leaves
+advisories on, so a broken file cannot quietly suppress security data.

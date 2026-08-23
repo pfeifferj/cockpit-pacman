@@ -965,6 +965,8 @@ fn security_advisory_fixed_version_absent_when_none() {
         avg_name: "AVG-2024-1234".into(),
         cve_ids: vec!["CVE-2024-0001".into()],
         fixed_version: None,
+        affected_version: "3.0.0-1".into(),
+        installed_version: "3.2.1-1".into(),
         status: "Vulnerable".into(),
     };
     let v = to_json(&advisory);
@@ -975,6 +977,8 @@ fn security_advisory_fixed_version_absent_when_none() {
     assert_string(&v, "avg_name");
     assert_array(&v, "cve_ids");
     assert_string(&v, "status");
+    assert_string(&v, "affected_version");
+    assert_string(&v, "installed_version");
     // When None, fixed_version is ABSENT (not null) due to skip_serializing_if
     assert_absent(&v, "fixed_version");
 }
@@ -988,6 +992,8 @@ fn security_advisory_fixed_version_present_when_some() {
         avg_name: "AVG-2024-5678".into(),
         cve_ids: vec![],
         fixed_version: Some("8.5.0-1".into()),
+        affected_version: "8.4.0-1".into(),
+        installed_version: "8.4.0-2".into(),
         status: "Fixed".into(),
     };
     let v = to_json(&advisory);
@@ -1012,6 +1018,16 @@ fn security_advisories_fixture_documents_absent_vs_present_fixed_version() {
     // Second advisory has fixed_version present
     let fixed = &fixture["advisories"][1];
     assert_string(fixed, "fixed_version");
+
+    let stale = fixture["advisories"]
+        .as_array()
+        .expect("advisories is an array")
+        .last()
+        .expect("fixture has entries");
+    assert_eq!(stale["package"], "linux");
+    assert!(stale.get("fixed_version").is_none());
+    assert_eq!(stale["affected_version"], "5.15.8.arch1-1");
+    assert_eq!(stale["installed_version"], "7.1.8.arch1-3");
 }
 
 // LogEntry / GroupedLogResponse
@@ -1494,6 +1510,7 @@ fn security_info_response_shape() {
             issue_type: "arbitrary code execution".into(),
             status: "Fixed".into(),
         }],
+        disabled: false,
     };
     let v = to_json(&resp);
 

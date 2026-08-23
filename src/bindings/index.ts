@@ -82,7 +82,7 @@ export type PackageDetails = { name: string, version: string, description: strin
 
 export type PackageListResponse = { packages: Array<Package>, total: number, total_explicit: number, total_dependency: number, repositories: Array<string>, warnings: Array<string>, };
 
-export type PackageSecurityAdvisory = { package: string, severity: string, advisory_type: string, avg_name: string, cve_ids: Array<string>, fixed_version: string | null, status: string, };
+export type PackageSecurityAdvisory = { package: string, severity: string, advisory_type: string, avg_name: string, cve_ids: Array<string>, fixed_version: string | null, affected_version: string, installed_version: string, status: string, };
 
 export type PacnewFile = { path: string, package: string, kind: string, mtime: number, };
 
@@ -155,13 +155,13 @@ export type SecurityInfoGroup = { name: string, status: string, severity: string
 
 export type SecurityInfoIssue = { name: string, severity: string, issue_type: string, status: string, };
 
-export type SecurityInfoResponse = { name: string, advisories: Array<SecurityInfoAdvisory>, groups: Array<SecurityInfoGroup>, issues: Array<SecurityInfoIssue>, };
+export type SecurityInfoResponse = { name: string, advisories: Array<SecurityInfoAdvisory>, groups: Array<SecurityInfoGroup>, issues: Array<SecurityInfoIssue>, disabled?: boolean, };
 
 export type SecurityResponse = { advisories: Array<PackageSecurityAdvisory>, 
 /**
  * True when served from the on-disk cache because the live fetch failed.
  */
-stale?: boolean, };
+stale?: boolean, disabled?: boolean, };
 
 export type ServiceRestart = { name: string, pid: number, affected_packages: Array<string>, reason: string, restart_blocked?: RestartBlocked | null, };
 
@@ -170,6 +170,10 @@ export type ServicesStatus = { restart_required: boolean, services: Array<Servic
  * The scan could not see every process, so `services` may be short.
  */
 scan_incomplete: boolean, };
+
+export type SettingsResponse = { security_advisories: boolean, };
+
+export type SettingsSetResponse = { success: boolean, message: string, };
 
 /**
  * Wire mirror of archweb_client's Signoff so the type can derive TS bindings

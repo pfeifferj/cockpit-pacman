@@ -122,4 +122,28 @@ describe("PackageDetailsModal", () => {
       expect(screen.getByText(/No advisories for this package/i)).toBeInTheDocument();
     });
   });
+
+  it("says so when advisories are turned off, rather than showing none", async () => {
+    mockGetSecurityInfo.mockResolvedValue({
+      name: "linux",
+      advisories: [],
+      groups: [],
+      issues: [],
+      disabled: true,
+    });
+    render(
+      <PackageDetailsModal
+        packageDetails={mockPackageDetails}
+        isLoading={false}
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByText("Security advisories"));
+
+    await waitFor(() => {
+      expect(screen.getByText(/turned off for this system/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/No advisories for this package/i)).not.toBeInTheDocument();
+  });
 });
