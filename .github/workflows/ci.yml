@@ -86,9 +86,10 @@ jobs:
         working-directory: backend
         run: cargo clippy -- -D warnings
 
+      # The Arch container has the real pacman state the gated tests need.
       - name: Test
         working-directory: backend
-        run: cargo test
+        run: cargo test --features integration-tests
 
       - name: Check generated TS bindings are up to date
         run: |

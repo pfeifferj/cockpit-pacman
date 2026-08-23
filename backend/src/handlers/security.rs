@@ -102,12 +102,11 @@ struct Feed {
     stale: bool,
 }
 
-fn load_feed(client: &SecurityClient, force: bool) -> Result<Feed> {
-    let path = security_cache_path().ok();
+fn load_feed(client: &SecurityClient, force: bool, path: Option<&Path>) -> Result<Feed> {
     let mut cached = if force {
         None
     } else {
-        path.as_deref().and_then(read_feed_cache)
+        path.and_then(read_feed_cache)
     };
 
     if let Some(ref c) = cached
@@ -119,7 +118,7 @@ fn load_feed(client: &SecurityClient, force: bool) -> Result<Feed> {
 
     let stale_fallback = |cached: Option<FeedCache>| {
         cached
-            .or_else(|| path.as_deref().and_then(read_feed_cache))
+            .or_else(|| path.and_then(read_feed_cache))
             .and_then(|c| arch_security_client::parse_vulnerable(&c.body).ok())
             .map(|avgs| Feed { avgs, stale: true })
     };
@@ -127,7 +126,7 @@ fn load_feed(client: &SecurityClient, force: bool) -> Result<Feed> {
     match client.fetch_vulnerable_raw() {
         Ok(body) => match arch_security_client::parse_vulnerable(&body) {
             Ok(avgs) => {
-                if let Some(ref p) = path {
+                if let Some(p) = path {
                     let _ = write_feed_cache(
                         p,
                         &FeedCache {
@@ -154,7 +153,7 @@ pub fn check_security(force: bool) -> Result<()> {
     }
 
     let client = SecurityClient::new(crate::util::detected_ip_family());
-    let feed = load_feed(&client, force)?;
+    let feed = load_feed(&client, force, security_cache_path().ok().as_deref())?;
     let avgs = feed.avgs;
 
     let handle = get_handle()?;
@@ -399,5 +398,173 @@ mod tests {
             "a Low one an update fixes outranks a High one it cannot"
         );
         assert_eq!(list[1].package, "linux");
+    }
+}
+
+#[cfg(test)]
+mod feed_tests {
+    use super::{FeedCache, load_feed, now_secs, write_feed_cache};
+    use arch_security_client::SecurityClient;
+    use wiremock::matchers::{method, path as req_path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    const ONE_AVG: &str = r#"[{"name":"AVG-1","packages":["bash"],"status":"Vulnerable",
+        "severity":"High","type":"code execution","affected":"5.0-1","fixed":null,
+        "issues":["CVE-2024-1"],"advisories":[]}]"#;
+
+    fn cache_file(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("cpac-feed-{tag}-{}", std::process::id()))
+    }
+
+    fn ipv4() -> ureq::config::IpFamily {
+        ureq::config::IpFamily::Ipv4Only
+    }
+
+    async fn serving(body: &str) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(req_path("/issues/vulnerable.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn a_fresh_cache_is_served_without_asking_upstream() {
+        let path = cache_file("fresh");
+        write_feed_cache(
+            &path,
+            &FeedCache {
+                fetched_at: now_secs(),
+                body: ONE_AVG.to_string(),
+            },
+        )
+        .expect("writes");
+
+        let server = MockServer::start().await;
+        let client = SecurityClient::with_base_url(&server.uri(), ipv4());
+
+        let feed = load_feed(&client, false, Some(&path)).expect("served from cache");
+        assert_eq!(feed.avgs.len(), 1);
+        assert!(!feed.stale, "reuse inside the window is not staleness");
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap_or_default()
+                .is_empty()
+        );
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[tokio::test]
+    async fn force_refetches_even_when_the_cache_is_fresh() {
+        let path = cache_file("force");
+        write_feed_cache(
+            &path,
+            &FeedCache {
+                fetched_at: now_secs(),
+                body: "[]".to_string(),
+            },
+        )
+        .expect("writes");
+
+        let server = serving(ONE_AVG).await;
+        let client = SecurityClient::with_base_url(&server.uri(), ipv4());
+
+        let feed = load_feed(&client, true, Some(&path)).expect("refetches");
+        assert_eq!(
+            feed.avgs.len(),
+            1,
+            "the served feed won, not the cached one"
+        );
+        assert_eq!(
+            server.received_requests().await.unwrap_or_default().len(),
+            1
+        );
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[tokio::test]
+    async fn an_old_cache_answers_when_the_fetch_fails() {
+        let path = cache_file("stale");
+        write_feed_cache(
+            &path,
+            &FeedCache {
+                fetched_at: now_secs() - 86_400,
+                body: ONE_AVG.to_string(),
+            },
+        )
+        .expect("writes");
+
+        let client = SecurityClient::with_base_url("http://127.0.0.1:1", ipv4());
+        let feed = load_feed(&client, false, Some(&path)).expect("falls back");
+
+        assert_eq!(feed.avgs.len(), 1);
+        assert!(feed.stale, "a fallback must be marked stale");
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[tokio::test]
+    async fn a_fresh_but_malformed_cache_is_refetched() {
+        let path = cache_file("malformed-fresh");
+        write_feed_cache(
+            &path,
+            &FeedCache {
+                fetched_at: now_secs(),
+                body: "not json".to_string(),
+            },
+        )
+        .expect("writes");
+
+        let server = serving(ONE_AVG).await;
+        let client = SecurityClient::with_base_url(&server.uri(), ipv4());
+
+        let feed = load_feed(&client, false, Some(&path)).expect("refetches");
+        assert_eq!(feed.avgs.len(), 1);
+        assert_eq!(
+            server.received_requests().await.unwrap_or_default().len(),
+            1
+        );
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[tokio::test]
+    async fn a_garbled_live_body_falls_back_to_an_old_cache() {
+        let path = cache_file("garbled-live");
+        write_feed_cache(
+            &path,
+            &FeedCache {
+                fetched_at: now_secs() - 86_400,
+                body: ONE_AVG.to_string(),
+            },
+        )
+        .expect("writes");
+
+        let server = serving("<html>maintenance</html>").await;
+        let client = SecurityClient::with_base_url(&server.uri(), ipv4());
+
+        let feed = load_feed(&client, false, Some(&path)).expect("falls back");
+        assert_eq!(feed.avgs.len(), 1);
+        assert!(feed.stale);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[tokio::test]
+    async fn a_failed_fetch_with_no_cache_is_an_error() {
+        let client = SecurityClient::with_base_url("http://127.0.0.1:1", ipv4());
+        let missing = cache_file("absent");
+        std::fs::remove_file(&missing).ok();
+
+        assert!(
+            load_feed(&client, false, Some(&missing)).is_err(),
+            "the failure must be explicit, not an empty advisory list"
+        );
     }
 }

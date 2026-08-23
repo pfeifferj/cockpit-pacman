@@ -831,6 +831,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     const SCHEDULED_UNIT: &str = include_str!("../../systemd/cockpit-pacman-scheduled.service");
     const FAILURE_UNIT: &str = include_str!("../../systemd/cockpit-pacman-failure@.service");
@@ -1034,6 +1035,32 @@ mod tests {
                 "command `{c}` is not documented in USAGE"
             );
         }
+    }
+
+    #[test]
+    fn every_dispatched_command_is_in_the_table() {
+        let source = include_str!("main.rs");
+        let body = source
+            .split_once("let result = match args[1].as_str() {")
+            .expect("the dispatch match is still shaped this way")
+            .1;
+
+        let dispatched: BTreeSet<&str> = body
+            .lines()
+            .filter_map(|line| {
+                let rest = line.strip_prefix("        \"")?;
+                if rest.starts_with(' ') {
+                    return None;
+                }
+                let (name, after) = rest.split_once('"')?;
+                after.trim_start().starts_with("=>").then_some(name)
+            })
+            .collect();
+
+        let declared: BTreeSet<&str> = COMMANDS.iter().copied().collect();
+
+        assert!(!dispatched.is_empty(), "match arm scraping found nothing");
+        assert_eq!(dispatched, declared, "dispatch match and COMMANDS disagree");
     }
 
     #[test]

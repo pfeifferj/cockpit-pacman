@@ -1579,3 +1579,70 @@ fn test_classify_error_falls_back_to_message() {
     let unknown = anyhow::anyhow!("package conflict detected");
     assert_eq!(classify_error(&unknown), None);
 }
+
+#[test]
+fn signoff_arg_rejects_what_it_cannot_put_in_a_url() {
+    use crate::validation::validate_signoff_arg;
+
+    assert!(validate_signoff_arg("linux", "pkgbase").is_ok());
+    assert!(validate_signoff_arg("gcc-libs", "pkgbase").is_ok());
+    assert!(validate_signoff_arg("x86_64", "arch").is_ok());
+
+    assert!(validate_signoff_arg("", "pkgbase").is_err());
+    assert!(validate_signoff_arg(&"a".repeat(257), "pkgbase").is_err());
+    assert!(validate_signoff_arg("core/linux", "pkgbase").is_err());
+    assert!(validate_signoff_arg("linux stable", "pkgbase").is_err());
+    assert!(validate_signoff_arg("../etc", "pkgbase").is_err());
+}
+
+#[test]
+fn signoff_arg_names_the_field_it_rejected() {
+    use crate::validation::validate_signoff_arg;
+
+    let err = validate_signoff_arg("", "arch").unwrap_err().to_string();
+    assert!(err.contains("arch"), "{err}");
+}
+
+#[test]
+fn repo_name_allows_what_pacman_conf_allows() {
+    use crate::validation::validate_repo_name;
+
+    assert!(validate_repo_name("core").is_ok());
+    assert!(validate_repo_name("extra-testing").is_ok());
+    assert!(validate_repo_name("my_repo.2").is_ok());
+
+    assert!(validate_repo_name("").is_err());
+    assert!(validate_repo_name(&"a".repeat(257)).is_err());
+    assert!(validate_repo_name("core]").is_err());
+    assert!(validate_repo_name("core\nServer = evil").is_err());
+    assert!(validate_repo_name("two words").is_err());
+}
+
+#[test]
+fn refresh_protocol_and_sort_accept_only_their_own_values() {
+    use crate::validation::{validate_refresh_protocol, validate_refresh_sort};
+
+    for ok in ["https", "http", "all"] {
+        assert!(validate_refresh_protocol(ok).is_ok(), "{ok}");
+    }
+    for bad in ["", "ftp", "HTTPS", "https "] {
+        assert!(validate_refresh_protocol(bad).is_err(), "{bad}");
+    }
+
+    for ok in ["score", "delay", "age"] {
+        assert!(validate_refresh_sort(ok).is_ok(), "{ok}");
+    }
+    for bad in ["", "speed", "Score", "score "] {
+        assert!(validate_refresh_sort(bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn the_mirror_parsers_default_instead_of_rejecting() {
+    use arch_mirror_client::{Protocol, SortBy};
+
+    assert_eq!(Protocol::parse("ftp"), Protocol::Any);
+    assert_eq!(Protocol::parse(""), Protocol::Any);
+    assert_eq!(SortBy::parse("speed"), SortBy::Score);
+    assert_eq!(SortBy::parse(""), SortBy::Score);
+}

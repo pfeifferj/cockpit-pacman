@@ -6,6 +6,10 @@ edition = "2024"
 [features]
 integration-tests = []
 
+[dev-dependencies]
+wiremock = "0.6"
+tokio = { version = "1", features = ["rt", "macros"] }
+
 [dependencies]
 alpm = "5"
 alpm-sys = "5"

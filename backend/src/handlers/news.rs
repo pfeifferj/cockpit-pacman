@@ -45,7 +45,7 @@ pub struct Dismissal {
 
 pub fn fetch_news(days: u32) -> Result<()> {
     let days = days.min(365);
-    match fetch_news_items(days) {
+    match fetch_news_items_from(ARCH_NEWS_URL, days) {
         Ok(items) => {
             let response = NewsResponse {
                 items,
@@ -91,7 +91,7 @@ fn read_news_cache(path: PathBuf) -> Option<Vec<NewsItem>> {
     Some(cached.items)
 }
 
-fn fetch_news_items(days: u32) -> Result<Vec<NewsItem>> {
+fn fetch_news_items_from(url: &str, days: u32) -> Result<Vec<NewsItem>> {
     let agent = ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(15)))
@@ -99,7 +99,7 @@ fn fetch_news_items(days: u32) -> Result<Vec<NewsItem>> {
             .build(),
     );
 
-    let mut body = agent.get(ARCH_NEWS_URL).call()?.into_body();
+    let mut body = agent.get(url).call()?.into_body();
     let mut buf = Vec::new();
     body.as_reader().take(MAX_RSS_BYTES).read_to_end(&mut buf)?;
 
@@ -360,5 +360,51 @@ fn decode_entity(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
                 .unwrap_or_else(|| format!("&{};", entity))
         }
         _ => format!("&{};", entity),
+    }
+}
+
+#[cfg(test)]
+mod fetch_tests {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    async fn serve(body: &str) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/feeds/news/"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn a_feed_that_is_not_rss_is_an_error_not_an_empty_list() {
+        let server = serve("not an rss document").await;
+        let url = format!("{}/feeds/news/", server.uri());
+
+        assert!(super::fetch_news_items_from(&url, 30).is_err());
+    }
+
+    #[tokio::test]
+    async fn an_item_older_than_the_window_is_dropped() {
+        let feed = r#"<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>
+            <link>https://archlinux.org</link><description>d</description>
+            <item><title>ancient</title><link>https://archlinux.org/news/a/</link>
+            <pubDate>Tue, 01 Jan 2019 00:00:00 +0000</pubDate><description>old</description></item>
+            </channel></rss>"#;
+        let server = serve(feed).await;
+        let url = format!("{}/feeds/news/", server.uri());
+
+        let items = super::fetch_news_items_from(&url, 30).expect("parses");
+        assert!(
+            items.is_empty(),
+            "an item from 2019 is outside a 30 day window"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_feed_is_an_error_so_the_caller_can_fall_back() {
+        assert!(super::fetch_news_items_from("http://127.0.0.1:1/feeds/news/", 30).is_err());
     }
 }
