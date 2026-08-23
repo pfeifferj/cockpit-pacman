@@ -738,9 +738,6 @@ pub const NETWORK_ERROR_KEYWORDS: &[&str] = &[
     "download library error",
 ];
 
-/// Classify an error message into a frontend ErrorCode by keyword. Returns None
-/// when nothing matches confidently. Mirrors parseErrorCode in api.ts so both
-/// ends agree on the same buckets.
 pub fn classify_message(message: &str) -> Option<&'static str> {
     let lower = message.to_lowercase();
     if lower.contains("timed out") || lower.contains("timeout") {
@@ -821,21 +818,20 @@ pub fn check_cancel(timeout: &TimeoutGuard) -> CheckResult {
     }
 }
 
-pub fn emit_cancellation_complete(reason: &CheckResult) {
+pub fn cancellation_message(reason: &CheckResult) -> Option<String> {
     match reason {
-        CheckResult::Cancelled => {
-            emit_event(&StreamEvent::Complete {
-                success: false,
-                message: Some("Operation cancelled by user".to_string()),
-            });
-        }
-        CheckResult::TimedOut(secs) => {
-            emit_event(&StreamEvent::Complete {
-                success: false,
-                message: Some(format!("Operation timed out after {} seconds", secs)),
-            });
-        }
-        CheckResult::Continue => {}
+        CheckResult::Cancelled => Some("Operation cancelled by user".to_string()),
+        CheckResult::TimedOut(secs) => Some(format!("Operation timed out after {} seconds", secs)),
+        CheckResult::Continue => None,
+    }
+}
+
+pub fn emit_cancellation_complete(reason: &CheckResult) {
+    if let Some(message) = cancellation_message(reason) {
+        emit_event(&StreamEvent::Complete {
+            success: false,
+            message: Some(message),
+        });
     }
 }
 

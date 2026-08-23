@@ -1,0 +1,11 @@
+{
+  "_comment": "Failure messages the backend puts on a streaming Complete, and the ErrorCode the frontend must derive from each. A streaming Complete carries no code, so the frontend classifies by keyword; rewording a message silently changes what the UI shows. Both suites assert against this file.",
+  "messages": [
+    { "message": "Operation cancelled by user", "code": "cancelled" },
+    { "message": "Operation timed out after 300 seconds", "code": "timeout" },
+    { "message": "Failed to commit transaction: could not commit transaction", "code": "transaction_failed" },
+    { "message": "Failed to refresh package databases: failed to retrieve some files", "code": "network_error" },
+    { "message": "unable to lock database", "code": "database_locked" },
+    { "message": "failed retrieving file 'core.db' from mirror : Connection timed out", "code": "timeout" }
+  ]
+}

@@ -2080,3 +2080,68 @@ fn the_backend_never_spawns_a_pacman_binary() {
         "use the alpm bindings instead of spawning pacman: {offenders:?}"
     );
 }
+
+/// The frontend derives ErrorCode from these strings; a reword changes what users see.
+#[test]
+fn the_messages_the_frontend_classifies_are_still_produced() {
+    use cockpit_pacman_backend::util::{CheckResult, cancellation_message};
+
+    let fixture = parse_fixture(include_str!(
+        "../../test/fixtures/stream-complete-codes.json"
+    ));
+    let pinned: Vec<&str> = fixture["messages"]
+        .as_array()
+        .expect("messages is an array")
+        .iter()
+        .map(|m| m["message"].as_str().expect("message is a string"))
+        .collect();
+
+    assert!(
+        pinned.contains(&"Operation cancelled by user"),
+        "fixture lost the cancel message"
+    );
+    assert_eq!(
+        cancellation_message(&CheckResult::Cancelled).as_deref(),
+        Some("Operation cancelled by user"),
+        "the cancel wording changed; update the fixture and the frontend test with it"
+    );
+    assert_eq!(
+        cancellation_message(&CheckResult::TimedOut(300)).as_deref(),
+        Some("Operation timed out after 300 seconds"),
+        "the timeout wording changed; update the fixture and the frontend test with it"
+    );
+    assert_eq!(cancellation_message(&CheckResult::Continue), None);
+
+    // The two the backend classifies itself must agree with the fixture, or the
+    // envelope path and the streaming path would disagree about the same text.
+    for entry in fixture["messages"].as_array().expect("array") {
+        let message = entry["message"].as_str().expect("string");
+        let code = entry["code"].as_str().expect("string");
+        if let Some(backend_code) = cockpit_pacman_backend::util::classify_message(message) {
+            assert_eq!(
+                backend_code, code,
+                "backend and frontend disagree on {message:?}"
+            );
+        }
+    }
+}
+
+/// The same list exists in api.ts; the two sides cannot share code.
+#[test]
+fn the_network_keywords_match_the_shared_list() {
+    let fixture = parse_fixture(include_str!(
+        "../../test/fixtures/network-error-keywords.json"
+    ));
+    let expected: Vec<&str> = fixture["keywords"]
+        .as_array()
+        .expect("keywords is an array")
+        .iter()
+        .map(|k| k.as_str().expect("keyword is a string"))
+        .collect();
+
+    assert_eq!(
+        cockpit_pacman_backend::util::NETWORK_ERROR_KEYWORDS,
+        expected.as_slice(),
+        "update test/fixtures/network-error-keywords.json and api.ts together"
+    );
+}
