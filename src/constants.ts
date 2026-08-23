@@ -20,7 +20,9 @@ export const NEWS_LOOKBACK_DAYS = 30;
 
 export const ARCH_STATUS_URL = "https://status.archlinux.org/";
 
+// Kept in step with the backend via test/fixtures/reboot-packages.json; both
+// sides assert against it.
 export const REBOOT_PACKAGES = new Set([
-  "linux", "linux-lts", "linux-zen", "linux-hardened",
+  "linux", "linux-lts", "linux-zen", "linux-hardened", "linux-rt", "linux-rt-lts",
   "systemd", "linux-firmware", "amd-ucode", "intel-ucode",
 ]);

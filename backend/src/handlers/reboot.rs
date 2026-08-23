@@ -6,7 +6,8 @@ use crate::alpm::get_handle;
 use crate::models::RebootStatus;
 use crate::util::emit_json;
 
-const CRITICAL_PACKAGES: &[&str] = &["systemd", "linux-firmware", "amd-ucode", "intel-ucode"];
+pub(crate) const CRITICAL_PACKAGES: &[&str] =
+    &["systemd", "linux-firmware", "amd-ucode", "intel-ucode"];
 
 fn get_running_kernel() -> Result<String> {
     let output = Command::new("uname")
@@ -49,36 +50,52 @@ fn normalize_uname_to_alpm(uname_version: &str, kernel_type: &str) -> String {
         "linux-zen" => {
             // uname: 6.17.9-zen1-1-zen -> alpm: 6.17.9.zen1-1
             let stripped = uname_version.strip_suffix("-zen").unwrap_or(uname_version);
-            replace_first_dash_after_version(stripped)
+            replace_leading_dashes(stripped, 1)
         }
         "linux-hardened" => {
             // uname: 6.17.11-hardened1-1-hardened -> alpm: 6.17.11.hardened1-1
             let stripped = uname_version
                 .strip_suffix("-hardened")
                 .unwrap_or(uname_version);
-            replace_first_dash_after_version(stripped)
+            replace_leading_dashes(stripped, 1)
+        }
+        "linux-rt" => {
+            let stripped = uname_version.strip_suffix("-rt").unwrap_or(uname_version);
+            replace_leading_dashes(stripped, 2)
+        }
+        "linux-rt-lts" => {
+            let stripped = uname_version
+                .strip_suffix("-rt-lts")
+                .unwrap_or(uname_version);
+            replace_leading_dashes(stripped, 2)
         }
         _ => {
             // linux: uname: 6.17.9-arch1-1 -> alpm: 6.17.9.arch1-1
-            replace_first_dash_after_version(uname_version)
+            replace_leading_dashes(uname_version, 1)
         }
     }
 }
 
-fn replace_first_dash_after_version(s: &str) -> String {
-    let bytes = s.as_bytes();
-    for (i, &b) in bytes.iter().enumerate() {
-        if b == b'-' {
-            let mut result = s.to_string();
-            result.replace_range(i..i + 1, ".");
-            return result;
+fn replace_leading_dashes(s: &str, count: usize) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut replaced = 0;
+    for c in s.chars() {
+        if c == '-' && replaced < count {
+            result.push('.');
+            replaced += 1;
+        } else {
+            result.push(c);
         }
     }
-    s.to_string()
+    result
 }
 
 fn detect_kernel_package(running_kernel: &str) -> Option<&'static str> {
-    if running_kernel.ends_with("-lts") {
+    if running_kernel.ends_with("-rt-lts") {
+        Some("linux-rt-lts")
+    } else if running_kernel.ends_with("-rt") {
+        Some("linux-rt")
+    } else if running_kernel.ends_with("-lts") {
         Some("linux-lts")
     } else if running_kernel.ends_with("-zen") {
         Some("linux-zen")
@@ -177,5 +194,29 @@ mod tests {
             Some("linux-hardened")
         );
         assert_eq!(detect_kernel_package("5.15.0-generic"), None);
+    }
+
+    #[test]
+    fn realtime_kernels_are_not_mistaken_for_the_kernel_they_collide_with() {
+        assert_eq!(
+            detect_kernel_package("7.1.9-rt1-arch1-2-rt"),
+            Some("linux-rt")
+        );
+        assert_eq!(
+            detect_kernel_package("6.18.45-rt6-arch1-2-rt-lts"),
+            Some("linux-rt-lts")
+        );
+    }
+
+    #[test]
+    fn realtime_releases_normalize_onto_their_package_version() {
+        assert_eq!(
+            normalize_uname_to_alpm("7.1.9-rt1-arch1-2-rt", "linux-rt"),
+            "7.1.9.rt1.arch1-2"
+        );
+        assert_eq!(
+            normalize_uname_to_alpm("6.18.45-rt6-arch1-2-rt-lts", "linux-rt-lts"),
+            "6.18.45.rt6.arch1-2"
+        );
     }
 }

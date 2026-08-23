@@ -12,11 +12,14 @@ use crate::util::emit_json;
 
 const WATCHED_PREFIXES: &[&str] = &["/usr/lib", "/usr/lib64", "/usr/bin", "/usr/sbin"];
 
+/// Owned only by these means reboot, not restart. Held to test/fixtures/reboot-packages.json.
 const REBOOT_PACKAGES: &[&str] = &[
     "linux",
     "linux-lts",
     "linux-zen",
     "linux-hardened",
+    "linux-rt",
+    "linux-rt-lts",
     "systemd",
     "linux-firmware",
     "amd-ucode",
@@ -304,6 +307,42 @@ fn services_status_with_graph<G: SystemdGraph>(graph: &G) -> Result<ServicesStat
         services,
         scan_incomplete,
     })
+}
+
+#[cfg(test)]
+mod reboot_package_agreement {
+    use super::REBOOT_PACKAGES;
+    use crate::handlers::mutation::KERNEL_PACKAGES;
+    use crate::handlers::reboot::CRITICAL_PACKAGES;
+    use std::collections::BTreeSet;
+
+    const FIXTURE: &str = include_str!("../../../test/fixtures/reboot-packages.json");
+
+    fn fixture_names() -> BTreeSet<String> {
+        let v: serde_json::Value = serde_json::from_str(FIXTURE).expect("fixture parses");
+        ["kernels", "critical"]
+            .iter()
+            .flat_map(|k| v[k].as_array().expect("array").clone())
+            .map(|n| n.as_str().expect("string").to_string())
+            .collect()
+    }
+
+    #[test]
+    fn the_reboot_set_is_exactly_the_kernels_plus_the_critical_packages() {
+        let union: BTreeSet<String> = KERNEL_PACKAGES
+            .iter()
+            .chain(CRITICAL_PACKAGES.iter())
+            .map(|s| s.to_string())
+            .collect();
+        let reboot: BTreeSet<String> = REBOOT_PACKAGES.iter().map(|s| s.to_string()).collect();
+        assert_eq!(reboot, union);
+    }
+
+    #[test]
+    fn the_reboot_set_matches_the_shared_fixture() {
+        let reboot: BTreeSet<String> = REBOOT_PACKAGES.iter().map(|s| s.to_string()).collect();
+        assert_eq!(reboot, fixture_names());
+    }
 }
 
 #[cfg(test)]
