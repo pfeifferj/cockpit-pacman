@@ -268,6 +268,50 @@ describe("SearchView", () => {
     });
   });
 
+  it("keeps the filtered rows when the search it replaced answers last", async () => {
+    const installedOnly: api.SearchResponse = {
+      results: [mockSearchResponse.results[0]],
+      total: 1,
+      total_installed: 1,
+      total_not_installed: 2,
+      repositories: ["core"],
+    };
+
+    let releaseAll: () => void = () => {};
+    const allLanded = new Promise<void>((resolve) => { releaseAll = resolve; });
+
+    mockSearchPackages.mockImplementation(async (args: { installed?: string }) => {
+      if (args.installed === "installed") return installedOnly;
+      await allLanded;
+      return mockSearchResponse;
+    });
+
+    render(<SearchView />);
+
+    const searchInput = screen.getByPlaceholderText(/Search Arch repositories/i);
+    await act(async () => {
+      fireEvent.change(searchInput, { target: { value: "linux" } });
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 400));
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^Installed/ }));
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("linux-zen")).not.toBeInTheDocument();
+    });
+
+    await act(async () => {
+      releaseAll();
+      await allLanded;
+    });
+
+    expect(screen.getByText("linux")).toBeInTheDocument();
+    expect(screen.queryByText("linux-zen")).not.toBeInTheDocument();
+  });
+
   it("shows no results message when empty", async () => {
     mockSearchPackages.mockResolvedValue({
       results: [],

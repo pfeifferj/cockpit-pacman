@@ -91,6 +91,8 @@ export const SearchView: React.FC = () => {
 
     const query = sanitizeSearchInput(searchInput);
     if (query.length < MIN_SEARCH_LENGTH) {
+      // The abort above skipped that request's setLoading(false).
+      debounceRef.current = setTimeout(() => setLoading(false), 0);
       return;
     }
 
@@ -161,6 +163,9 @@ export const SearchView: React.FC = () => {
   };
 
   const fetchResults = async (query: string, pageNum: number, pageSize: number, installed: InstalledFilterType, updateRepos = false, sortIdx: number | null = null, sortDirection: "asc" | "desc" = "asc") => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = new AbortController();
+    const currentController = abortControllerRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -173,6 +178,7 @@ export const SearchView: React.FC = () => {
         sortBy: getSortField(sortIdx),
         sortDir: sortDirection,
       });
+      if (currentController.signal.aborted) return;
       setResults(response.results);
       setTotal(response.total);
       setTotalInstalled(response.total_installed);
@@ -181,6 +187,7 @@ export const SearchView: React.FC = () => {
         setRepositories(response.repositories);
       }
     } catch (ex) {
+      if (currentController.signal.aborted) return;
       setError(ex instanceof Error ? ex.message : String(ex));
       setResults([]);
       setTotal(0);
@@ -190,7 +197,9 @@ export const SearchView: React.FC = () => {
         setRepositories([]);
       }
     } finally {
-      setLoading(false);
+      if (!currentController.signal.aborted) {
+        setLoading(false);
+      }
     }
   };
 
