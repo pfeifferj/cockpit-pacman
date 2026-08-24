@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.3.8] - 2026-08-30
+
+### Added
+- Security advisories can be turned off with `security_advisories` in `/etc/cockpit-pacman/config.json`
+- Advisories an update fixes are separated from ones with no fix available, so the count and the severity badge only reflect work you can actually do
+- Advisory groups the tracker has not triaged are reported rather than dropped, so a group carrying a real fixed version is no longer withheld
+- Scheduled runs record how long they took, why they were skipped, and whether they cleaned up after a run that was killed
+- The schedule modal shows the calendar systemd is actually on beside the configured one
+- A failed scheduled run is reported to the journal, so a run that dies before it can record anything still leaves a trace
+- Warning before leaving the page during a running upgrade
+- Warning when the open page is older than the backend it talks to, which happens when the plugin is upgraded under an open session
+- Mirror backups show which were taken by hand
+- Troubleshooting page in the documentation
+
+### Changed
+- Downgrades report progress and errors like every other package operation, and can be cancelled at a safe point
+- An interactive upgrade refreshes the package databases first and refuses to continue if a repository fails, rather than applying a partial upgrade
+- Most commands no longer ask for administrative access they do not use, so a session that has not escalated keeps the Updates and Repositories tabs
+- The Updates tab no longer re-downloads the package databases on every visit, and reuses the security tracker feed for an hour instead of fetching it on every visit
+- The orphan, cache and keyring tiles no longer wait for archlinux.org to answer before they settle
+- Listing installed packages drops from about 334ms to 60ms, the service restart check from 818ms to 18ms, and cleaning the cache no longer opens every archive it is keeping
+- An upgrade no longer floods the log viewer with alpm's own tracing, and the view stays responsive while one runs
+- The dependency graph no longer relays out on every keystroke
+
+### Fixed
+- A cancelled or interrupted upgrade is no longer reported as a successful one
+- Cancelling before anything was applied no longer warns that the system may be inconsistent
+- Logging out, or Cockpit restarting its websocket, no longer interrupts a running upgrade
+- Install, remove and orphan removal can be cancelled at a safe point
+- Saving `pacman.conf` no longer reorders sections or moves comments away from the lines they describe
+- A repository disabled and re-enabled in the UI keeps its servers instead of ending up with none
+- A save that would leave pacman with no enabled repository or mirror is refused
+- A restore no longer deletes older backups, and manual backups outrank automatic ones
+- A stale database lock is no longer removed when the check could not see who held it, and clearing one leaves a notice on the page and a line in the journal
+- The keyring view no longer offers to initialize a keyring it could not read
+- The keyring permission warning expects pacman's default 755 instead of recommending 700, and a symlinked keyring directory no longer draws a warning
+- A dismissed `.pacnew` no longer hides a later config file written to the same path
+- Realtime kernels are identified correctly and count as needing a reboot
+- The service restart check says when it could not see every process
+- A malformed `config.json` no longer silently empties the ignored-package list, letting packages you excluded come back as pending updates
+- The schedule modal and the ignored-package list load in a session that has not escalated, and a run history that cannot be read is no longer shown as an empty one
+- Choosing a filter while a search is still in flight no longer has the older results overwrite the filtered ones
+- The dependency graph holds to its node cap
+- A streaming failure shows the backend's full error context instead of only its headline
+- Applying a schedule no longer leaves the systemd timer and `config.json` disagreeing when part of the change fails
+- A scheduled run that failed during the commit records what alpm said instead of blaming the timeout
+
 ## [0.3.7] - 2026-06-15
 
 ### Added
