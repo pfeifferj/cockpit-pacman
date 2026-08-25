@@ -1,15 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
 
-/**
- * Loads a persisted dismissal signature and returns it with a dismiss
- * function that updates state optimistically and persists in the background.
- * The signature is undefined while loading, null when nothing is dismissed.
- */
-export function useDismissalSignature(
+/** The stored signature is undefined while loading, null when nothing is dismissed. */
+export function useSignatureDismissal(
   get: () => Promise<{ signature: string | null }>,
   mark: (signature: string) => Promise<void>,
   label: string,
-): [string | null | undefined, (signature: string) => void] {
+  signature: string,
+): { undismissed: boolean; dismiss: () => void } {
   const [dismissed, setDismissed] = useState<string | null | undefined>(undefined);
 
   useEffect(() => {
@@ -18,12 +15,15 @@ export function useDismissalSignature(
       .catch(() => setDismissed(null));
   }, [get]);
 
-  const dismiss = useCallback((signature: string) => {
+  const dismiss = useCallback(() => {
     setDismissed(signature);
     mark(signature).catch((err) => {
       console.error(`Failed to persist ${label} dismissal:`, err);
     });
-  }, [mark, label]);
+  }, [mark, label, signature]);
 
-  return [dismissed, dismiss];
+  return {
+    undismissed: signature !== "" && dismissed !== undefined && dismissed !== signature,
+    dismiss,
+  };
 }

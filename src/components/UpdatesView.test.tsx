@@ -35,6 +35,7 @@ vi.mock("../api", async () => {
     getKeyringStatus: vi.fn(),
     fetchNews: vi.fn(),
     checkSecurity: vi.fn(),
+    setSecurityAdvisories: vi.fn(),
     getNewsReadState: vi.fn(),
     markNewsRead: vi.fn(),
     servicesDismissal: { get: vi.fn(), mark: vi.fn() },
@@ -492,6 +493,40 @@ describe("UpdatesView", () => {
       });
       expect(screen.getByText(/ABCD1234/)).toBeInTheDocument();
       expect(screen.getByText(/Test Packager/)).toBeInTheDocument();
+    });
+
+    it("requires the acknowledgement again after the modal is dismissed and reopened", async () => {
+      mockPreflightUpgrade.mockResolvedValue(mockPreflightWithConflicts);
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("linux")).toBeInTheDocument();
+      });
+
+      const open = async () => {
+        await act(async () => {
+          fireEvent.click(screen.getByRole("button", { name: /Apply 1 Update/i }));
+        });
+        await waitFor(() => {
+          expect(screen.getByText("Confirm Upgrade")).toBeInTheDocument();
+        });
+      };
+
+      await open();
+      const acknowledge = () =>
+        screen.getByRole("dialog").querySelector('input[id="acknowledge-conflicts"]') as HTMLInputElement;
+      await act(async () => {
+        fireEvent.click(acknowledge());
+      });
+      expect(screen.getByRole("button", { name: /Proceed with Upgrade/i })).not.toBeDisabled();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /^Cancel$/i }));
+      });
+      await open();
+
+      expect(acknowledge().checked).toBe(false);
+      expect(screen.getByRole("button", { name: /Proceed with Upgrade/i })).toBeDisabled();
     });
 
     it("proceeds with upgrade after confirming modal", async () => {
@@ -1921,6 +1956,60 @@ describe("UpdatesView", () => {
 
       expect(screen.queryByText("No fix")).not.toBeInTheDocument();
       expect(screen.queryByText("High")).not.toBeInTheDocument();
+    });
+
+    it("does not report zero advisories when the feature is disabled", async () => {
+      mockCheckUpdates.mockResolvedValue(onePackage);
+      mockCheckSecurity.mockResolvedValue({ advisories: [], disabled: true });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("zzz-package")).toBeInTheDocument();
+      });
+
+      const tile = screen.getByText("Security").closest("div")!.parentElement!;
+      expect(tile).toHaveTextContent("-");
+    });
+
+    it("writes the setting and reloads when the toggle is unchecked", async () => {
+      mockCheckUpdates.mockResolvedValue(onePackage);
+      mockCheckSecurity.mockResolvedValue({ advisories: [], disabled: false });
+      const mockSetAdvisories = vi.mocked(api.setSecurityAdvisories);
+      mockSetAdvisories.mockResolvedValue({ success: true, message: "Settings saved" });
+
+      render(<UpdatesView />);
+      const toggle = await screen.findByRole("checkbox", { name: "Check advisories" });
+      expect(toggle).toBeChecked();
+
+      mockCheckSecurity.mockResolvedValue({ advisories: [], disabled: true });
+      fireEvent.click(toggle);
+
+      await waitFor(() => {
+        expect(mockSetAdvisories).toHaveBeenCalledWith(false);
+      });
+      await waitFor(() => {
+        expect(toggle).not.toBeChecked();
+      });
+    });
+
+    it("reverts the toggle when the setting cannot be written", async () => {
+      mockCheckUpdates.mockResolvedValue(onePackage);
+      mockCheckSecurity.mockResolvedValue({ advisories: [], disabled: false });
+      const mockSetAdvisories = vi.mocked(api.setSecurityAdvisories);
+      mockSetAdvisories.mockRejectedValue(new Error("write failed"));
+
+      render(<UpdatesView />);
+      const toggle = await screen.findByRole("checkbox", { name: "Check advisories" });
+      expect(toggle).toBeChecked();
+
+      fireEvent.click(toggle);
+
+      await waitFor(() => {
+        expect(mockSetAdvisories).toHaveBeenCalledWith(false);
+      });
+      await waitFor(() => {
+        expect(toggle).toBeChecked();
+      });
     });
   });
 

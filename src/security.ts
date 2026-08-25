@@ -20,6 +20,21 @@ export function partitionAdvisories(
   return { actionable, unresolved };
 }
 
+const SEVERITY_ORDER: Record<string, number> = {
+  Critical: 4,
+  High: 3,
+  Medium: 2,
+  Low: 1,
+  Unknown: 0,
+};
+
+export function highestOf(advisories: PackageSecurityAdvisory[]): PackageSecurityAdvisory | null {
+  if (advisories.length === 0) return null;
+  return advisories.reduce((a, b) =>
+    (SEVERITY_ORDER[b.severity] ?? 0) > (SEVERITY_ORDER[a.severity] ?? 0) ? b : a
+  );
+}
+
 export const NO_FIX_CAVEAT =
   "Arch's tracker lists no fixed version for these. Records can stay open after " +
   "a fix lands upstream, so an advisory may no longer apply to the installed " +

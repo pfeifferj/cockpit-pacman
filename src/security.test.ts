@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isActionable, partitionAdvisories } from "./security";
+import { highestOf, isActionable, partitionAdvisories } from "./security";
 import type { PackageSecurityAdvisory } from "./bindings";
 
 function advisory(over: Partial<PackageSecurityAdvisory> = {}): PackageSecurityAdvisory {
@@ -46,5 +46,27 @@ describe("partitionAdvisories", () => {
 
   it("copes with an empty list", () => {
     expect(partitionAdvisories([])).toEqual({ actionable: [], unresolved: [] });
+  });
+});
+
+describe("highestOf", () => {
+  it("ranks by severity, not list order", () => {
+    const low = advisory({ package: "a", severity: "Low" });
+    const critical = advisory({ package: "b", severity: "Critical" });
+    const high = advisory({ package: "c", severity: "High" });
+
+    expect(highestOf([low, critical, high])?.package).toBe("b");
+    expect(highestOf([low, high])?.package).toBe("c");
+  });
+
+  it("ranks a severity it does not know below every known one", () => {
+    const weird = advisory({ package: "a", severity: "Catastrophic" });
+    const low = advisory({ package: "b", severity: "Low" });
+
+    expect(highestOf([weird, low])?.package).toBe("b");
+  });
+
+  it("is null for an empty list", () => {
+    expect(highestOf([])).toBeNull();
   });
 });

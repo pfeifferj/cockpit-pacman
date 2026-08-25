@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { ARCH_STATUS_URL, LOG_FLUSH_MS, NEWS_LOOKBACK_DAYS, REBOOT_PACKAGES } from "../constants";
+import { ARCH_STATUS_URL, REBOOT_PACKAGES } from "../constants";
 import { useBackdropClose } from "../hooks/useBackdropClose";
 import { usePackageDetails } from "../hooks/usePackageDetails";
 import { useSortableTable } from "../hooks/useSortableTable";
 import { usePagination } from "../hooks/usePagination";
-import { useDismissalSignature } from "../hooks/useDismissalSignature";
+import { useSignatureDismissal } from "../hooks/useSignatureDismissal";
+import { useStreamingLog } from "../hooks/useStreamingLog";
+import { useArchNews } from "../hooks/useArchNews";
+import { useSecurityAdvisories } from "../hooks/useSecurityAdvisories";
 import {
 	Card,
 	CardBody,
@@ -44,7 +47,6 @@ import {
 	ModalHeader,
 	ModalBody,
 	ModalFooter,
-	Popover,
 	Tooltip,
 	Icon,
 } from '@patternfly/react-core';
@@ -52,13 +54,11 @@ import { ExpandableLogViewer, LogViewer } from './LogViewer';
 import {
   CheckCircleIcon,
   ExclamationCircleIcon,
-  ShieldAltIcon,
   SyncAltIcon,
   ArrowUpIcon,
   ArrowDownIcon,
   OutlinedQuestionCircleIcon,
   PowerOffIcon,
-  EllipsisVIcon,
 } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
@@ -70,11 +70,7 @@ import {
   ServiceRestart,
   ServicesStatus,
   KeyringStatusResponse,
-  NewsItem,
-  PackageSecurityAdvisory,
   checkUpdates,
-  checkSecurity,
-  setSecurityAdvisories,
   runUpgrade,
   syncDatabase,
   preflightUpgrade,
@@ -86,9 +82,6 @@ import {
   listOrphans,
   getCacheInfo,
   getKeyringStatus,
-  fetchNews,
-  getNewsReadState,
-  markNewsRead,
   servicesDismissal,
   rebootDismissal,
   getPacnewStatus,
@@ -97,8 +90,6 @@ import {
   scheduledDismissal,
   addIgnoredPackage,
   getSignoffList,
-  checkLock,
-  removeStaleLock,
   BackendError,
 } from "../api";
 import type { KeyringCredentials, ErrorCode, ScheduledRunEntry, StreamingHandle } from "../api";
@@ -106,48 +97,19 @@ import { NetworkErrorState } from "./NetworkErrorState";
 import { ErrorDetails } from "./ErrorDetails";
 import { CompactPagination } from "./CompactPagination";
 
-import { appendCapped, isDbLockError, sanitizeUrl } from "../utils";
-import { severityColor } from "../severity";
-import { NO_FIX_CAVEAT, partitionAdvisories } from "../security";
-import { useAdminPermission } from "../hooks/useAdminPermission";
+import { isDbLockError, sanitizeUrl } from "../utils";
 import { TimeAgo } from "./TimeAgo";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { StatBox } from "./StatBox";
+import { kebabToggle } from "./KebabToggle";
+import { SystemOverviewCard } from "./SystemOverviewCard";
+import { LockErrorBody } from "./LockErrorBody";
+import { AdvisoryPopover } from "./AdvisoryPopover";
+import { highestOf, partitionAdvisories } from "../security";
 import { IgnoredPackagesModal } from "./IgnoredPackagesModal";
 import { ScheduleModal } from "./ScheduleModal";
+import { PreflightConfirmModal } from "./PreflightConfirmModal";
 import { useNavigation } from "../contexts/NavigationContext";
-
-/// One advisory in the popover. Shows the versions side by side so the reader
-/// can judge a record for themselves rather than being told a verdict.
-const AdvisoryLine: React.FC<{ advisory: PackageSecurityAdvisory }> = ({ advisory }) => (
-  <div style={{ marginBottom: "0.5rem" }}>
-    <a
-      href={`https://security.archlinux.org/${advisory.avg_name}`}
-      target="_blank"
-      rel="noopener noreferrer"
-    >
-      {advisory.avg_name}
-    </a>
-    {" "}<Label isCompact color={severityColor(advisory.severity)}>{advisory.severity}</Label>
-    <div style={{ color: "var(--pf-t--global--text--color--subtle)", fontSize: "0.85em" }}>
-      {advisory.advisory_type}
-      {advisory.cve_ids.length > 0 && ` (${advisory.cve_ids.join(", ")})`}
-    </div>
-    <div style={{ color: "var(--pf-t--global--text--color--subtle)", fontSize: "0.85em" }}>
-      {advisory.fixed_version
-        ? `fixed in ${advisory.fixed_version}, installed ${advisory.installed_version}`
-        : `filed against ${advisory.affected_version}, installed ${advisory.installed_version}`}
-    </div>
-  </div>
-);
-
-const SEVERITY_ORDER: Record<string, number> = {
-  Critical: 4,
-  High: 3,
-  Medium: 2,
-  Low: 1,
-  Unknown: 0,
-};
 
 type PageStatus = {
   type?: "info" | "warning" | "error" | null;
@@ -182,244 +144,17 @@ type ViewState =
   | "success"
   | "error";
 
-const SystemOverviewCard: React.FC<{
-  updates: UpdateInfo[];
-  securityCount: number;
-  securityLoading: boolean;
-  securityUnavailable: boolean;
-  orphanCount: number | null;
-  cacheSize: number | null;
-  keyringStatus: KeyringStatusResponse | null;
-  summaryLoading: boolean;
-  pendingSignoffs?: number | null;
-  securityFilterActive?: boolean;
-  onToggleSecurityFilter?: () => void;
-  securityEnabled: boolean;
-  onSetSecurityEnabled: (enabled: boolean) => void;
-  securityToggleBusy: boolean;
-}> = ({ updates, securityCount, securityLoading, securityUnavailable, orphanCount, cacheSize, keyringStatus, summaryLoading, pendingSignoffs, securityFilterActive, onToggleSecurityFilter, securityEnabled, onSetSecurityEnabled, securityToggleBusy }) => {
-  const securityFilterable = securityEnabled && !!onToggleSecurityFilter && !securityLoading && !securityUnavailable && securityCount > 0;
-  const { onViewOrphans, onViewCache, onViewKeyring, onViewSignoffs } = useNavigation();
-  // Writing the setting needs root, so an unescalated session sees why it
-  // cannot, rather than a control that silently fails.
-  const isAdmin = useAdminPermission();
-  const mayToggle = isAdmin === true && !securityToggleBusy;
-  return (
-  <Card className="pf-v6-u-mb-md">
-    <CardBody>
-      <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">System Overview</CardTitle>
-      <Flex spaceItems={{ default: "spaceItemsLg" }}>
-        <FlexItem>
-          <StatBox
-            label="Updates"
-            value={(updates.length).toLocaleString()}
-            color={updates.length > 0 ? "danger" : "success"}
-          />
-        </FlexItem>
-        <FlexItem>
-          <Flex direction={{ default: "column" }} spaceItems={{ default: "spaceItemsXs" }}>
-            <FlexItem>
-          <StatBox
-            label={securityFilterActive ? "Show all" : "Security"}
-            value={
-              securityFilterActive
-                ? (updates.length).toLocaleString()
-                : securityLoading || securityUnavailable
-                  ? "-"
-                  : (securityCount).toLocaleString()
-            }
-            color={!securityFilterActive && !securityUnavailable && securityCount > 0 ? "danger" : "default"}
-            isLoading={securityLoading}
-            onClick={securityFilterable ? onToggleSecurityFilter : undefined}
-            isActive={securityFilterable ? securityFilterActive : undefined}
-            ariaLabel={securityFilterActive ? "Show all updates" : "Filter to security updates"}
-          />
-            </FlexItem>
-            <FlexItem>
-              <Tooltip
-                content={
-                  isAdmin === false
-                    ? "Not permitted to change system settings"
-                    : "Stop checking the Arch Security Tracker. Its records can stay open long after a fix ships."
-                }
-              >
-                <div>
-                  <Checkbox
-                    id="security-advisories-enabled"
-                    label="Check advisories"
-                    isChecked={securityEnabled}
-                    isDisabled={!mayToggle}
-                    onChange={(_e, checked) => onSetSecurityEnabled(checked)}
-                  />
-                </div>
-              </Tooltip>
-            </FlexItem>
-          </Flex>
-        </FlexItem>
-        <FlexItem>
-          <Tooltip content="Packages installed as dependencies that are no longer required by any other package. Usually safe to remove.">
-            <div>
-              <StatBox
-                label="Orphans"
-                value={orphanCount !== null ? (orphanCount).toLocaleString() : "-"}
-                color={orphanCount && orphanCount > 0 ? "warning" : "default"}
-                isLoading={summaryLoading}
-                onClick={onViewOrphans}
-                ariaLabel="View orphaned packages"
-              />
-            </div>
-          </Tooltip>
-        </FlexItem>
-        <FlexItem>
-          <StatBox
-            label="Cache"
-            value={cacheSize !== null ? formatSize(cacheSize) : "-"}
-            isLoading={summaryLoading}
-            onClick={onViewCache}
-            ariaLabel="View package cache"
-          />
-        </FlexItem>
-        <FlexItem>
-          <StatBox
-            label="Keyring"
-            value={keyringStatus ? `${keyringStatus.total} keys` : "-"}
-            color={keyringStatus?.warnings.length ? "warning" : "default"}
-            isLoading={summaryLoading}
-            onClick={onViewKeyring}
-            ariaLabel="View keyring"
-          />
-        </FlexItem>
-        {pendingSignoffs != null && onViewSignoffs && (
-          <FlexItem>
-            <Tooltip content="Packages in [testing] repositories waiting for Trusted User signoffs before moving to stable.">
-              <div>
-                <StatBox
-                  label="Signoffs"
-                  value={(pendingSignoffs).toLocaleString()}
-                  color={pendingSignoffs > 0 ? "info" : "default"}
-                  onClick={onViewSignoffs}
-                  ariaLabel="View package signoffs"
-                />
-              </div>
-            </Tooltip>
-          </FlexItem>
-        )}
-      </Flex>
-    </CardBody>
-  </Card>
-  );
-};
-
 interface UpdatesViewProps {
   signoffCredentials?: KeyringCredentials | null;
 }
 
 type ErrorOrigin = "check" | "sync" | "preflight" | "upgrade";
 
-const LockErrorBody: React.FC<{ onRetry: () => void; onAutoRetry: () => void; onCleared: () => void }> = ({ onRetry, onAutoRetry, onCleared }) => {
-  const [checking, setChecking] = useState(true);
-  const [removing, setRemoving] = useState(false);
-  const [lockInfo, setLockInfo] = useState<{ stale: boolean; process?: string; unknown: boolean } | null>(null);
-  const [removeError, setRemoveError] = useState<string | null>(null);
-  const [checkFailed, setCheckFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    checkLock()
-      .then((status) => {
-        if (cancelled) return;
-        if (!status.locked) {
-          onAutoRetry();
-          return;
-        }
-        setLockInfo({
-          stale: status.stale,
-          process: status.blocking_process,
-          unknown: status.holder_unknown,
-        });
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setLockInfo(null);
-        setCheckFailed(true);
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setChecking(false);
-      });
-    return () => { cancelled = true; };
-  }, [onAutoRetry]);
-
-  const handleRemoveLock = async () => {
-    setRemoving(true);
-    setRemoveError(null);
-    try {
-      const result = await removeStaleLock();
-      if (result.removed) {
-        // Raised on the page, not here: this component is replaced by the retry
-        // it triggers, and what the lock proves outlives the retry.
-        onCleared();
-        onRetry();
-      } else {
-        setRemoveError(result.error || "Failed to remove lock");
-      }
-    } catch (ex) {
-      setRemoveError(ex instanceof Error ? ex.message : String(ex));
-    } finally {
-      setRemoving(false);
-    }
-  };
-
-  if (checking) {
-    return <Content component={ContentVariants.p}>Checking lock status...</Content>;
-  }
-
-  if (lockInfo?.stale === false && lockInfo.process) {
-    return (
-      <Content component={ContentVariants.p}>
-        The database is locked by <strong>{lockInfo.process}</strong>. Wait for it to finish, then retry.
-      </Content>
-    );
-  }
-
-  // Offering removal here would be acting on a check that did not conclude.
-  // A session without administrative access cannot see root's open files, so
-  // it finds no holder for a lock a running pacman still owns.
-  if (checkFailed || lockInfo?.unknown) {
-    return (
-      <Content component={ContentVariants.p}>
-        Could not determine whether the database lock is still in use. This check needs
-        administrative access. Grant it and retry, or wait for the running operation to finish.
-      </Content>
-    );
-  }
-
-  return (
-    <>
-      <Content component={ContentVariants.p}>
-        A stale lock file is blocking database access. No package manager process is running.
-      </Content>
-      {removeError && (
-        <Content component={ContentVariants.p} className="pf-v6-u-mt-sm pf-v6-u-danger-color-100">
-          {removeError}
-        </Content>
-      )}
-      <Content component={ContentVariants.p} className="pf-v6-u-mt-sm">
-        <Button variant="primary" onClick={handleRemoveLock} isLoading={removing} isDisabled={removing}>
-          Remove stale lock and retry
-        </Button>
-      </Content>
-    </>
-  );
-};
-
 export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) => {
   const { onViewDependencies, onViewHistory } = useNavigation();
   const [state, setState] = useState<ViewState>("loading");
   const [updates, setUpdates] = useState<UpdateInfo[]>([]);
-  const [log, setLog] = useState("");
-  const logBuffer = useRef("");
-  const logFlush = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { log, appendLog, resetLog } = useStreamingLog();
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
   const [errorDetails, setErrorDetails] = useState<string | undefined>(undefined);
@@ -437,33 +172,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [state]);
-
-  // One upgrade emits tens of thousands of stream events, and a setState each
-  // re-renders this view far faster than anything can be read. Coalescing into
-  // one append per interval keeps the string concatenation off that path too.
-  const appendLog = useCallback((data: string) => {
-    logBuffer.current += data;
-    if (logFlush.current !== null) return;
-    logFlush.current = setTimeout(() => {
-      logFlush.current = null;
-      const pending = logBuffer.current;
-      logBuffer.current = "";
-      if (pending) setLog((prev) => appendCapped(prev, pending));
-    }, LOG_FLUSH_MS);
-  }, []);
-
-  const resetLog = useCallback(() => {
-    if (logFlush.current !== null) {
-      clearTimeout(logFlush.current);
-      logFlush.current = null;
-    }
-    logBuffer.current = "";
-    setLog("");
-  }, []);
-
-  useEffect(() => () => {
-    if (logFlush.current !== null) clearTimeout(logFlush.current);
-  }, []);
 
   // Consecutive errors can commit in one render batch without ever showing
   // the intermediate state, so the epoch forces LockErrorBody to remount
@@ -507,47 +215,58 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [ignoredModalOpen, setIgnoredModalOpen] = useState(false);
   const [openKebab, setOpenKebab] = useState<string | null>(null);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
-  const [acknowledgedRemovals, setAcknowledgedRemovals] = useState(false);
-  const [acknowledgedConflicts, setAcknowledgedConflicts] = useState(false);
-  const [acknowledgedKeyImports, setAcknowledgedKeyImports] = useState(false);
-  const [acknowledgedWarnings, setAcknowledgedWarnings] = useState<Set<string>>(new Set());
   const [rebootStatus, setRebootStatus] = useState<RebootStatus | null>(null);
   const [rebootOnComplete, setRebootOnComplete] = useState(false);
   const [servicesStatus, setServicesStatus] = useState<ServicesStatus | null>(null);
   const [restartServicesOnComplete, setRestartServicesOnComplete] = useState(false);
-  const [dismissedServicesSignature, dismissServices] = useDismissalSignature(servicesDismissal.get, servicesDismissal.mark, "services");
-  const [dismissedRebootSignature, dismissReboot] = useDismissalSignature(rebootDismissal.get, rebootDismissal.mark, "reboot");
   const [pacnewStatus, setPacnewStatus] = useState<PacnewStatus | null>(null);
-  const [dismissedPacnewSignature, dismissPacnew] = useDismissalSignature(pacnewDismissal.get, pacnewDismissal.mark, "pacnew");
   const [latestScheduledRun, setLatestScheduledRun] = useState<ScheduledRunEntry | null>(null);
-  const [dismissedScheduledSignature, dismissScheduled] = useDismissalSignature(scheduledDismissal.get, scheduledDismissal.mark, "scheduled");
+
+  const servicesSignature = useMemo(
+    () => (servicesStatus?.services ?? []).map((s) => s.name).sort().join(","),
+    [servicesStatus],
+  );
+  const rebootSignature = useMemo(() => {
+    if (!rebootStatus?.requires_reboot) return "";
+    if (rebootStatus.reason === "kernel_update" && rebootStatus.installed_kernel) {
+      return `kernel:${rebootStatus.installed_kernel}`;
+    }
+    if (rebootStatus.reason === "critical_packages" && rebootStatus.updated_packages.length > 0) {
+      return `critical:${[...rebootStatus.updated_packages].sort().join(",")}`;
+    }
+    return "";
+  }, [rebootStatus]);
+  const pacnewSignature = useMemo(
+    () => (pacnewStatus?.files ?? []).map((f) => `${f.path}@${f.mtime}`).sort().join(","),
+    [pacnewStatus],
+  );
+  const scheduledSignature = latestScheduledRun?.timestamp ?? "";
+
+  const { undismissed: servicesUndismissed, dismiss: dismissServices } =
+    useSignatureDismissal(servicesDismissal.get, servicesDismissal.mark, "services", servicesSignature);
+  const { undismissed: rebootUndismissed, dismiss: dismissReboot } =
+    useSignatureDismissal(rebootDismissal.get, rebootDismissal.mark, "reboot", rebootSignature);
+  const { undismissed: pacnewUndismissed, dismiss: dismissPacnew } =
+    useSignatureDismissal(pacnewDismissal.get, pacnewDismissal.mark, "pacnew", pacnewSignature);
+  const { undismissed: scheduledUndismissed, dismiss: dismissScheduled } =
+    useSignatureDismissal(scheduledDismissal.get, scheduledDismissal.mark, "scheduled", scheduledSignature);
   const [orphanCount, setOrphanCount] = useState<number | null>(null);
   const [cacheSize, setCacheSize] = useState<number | null>(null);
   const [keyringStatus, setKeyringStatus] = useState<KeyringStatusResponse | null>(null);
   const [pendingSignoffs, setPendingSignoffs] = useState<number | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
-  const [securityMap, setSecurityMap] = useState<Map<string, PackageSecurityAdvisory[]>>(new Map());
-  const [securityLoading, setSecurityLoading] = useState(true);
-  const [securityStale, setSecurityStale] = useState(false);
-  const [securityEnabled, setSecurityEnabled] = useState(true);
-  const [savingSecurityToggle, setSavingSecurityToggle] = useState(false);
-  const [securityUnavailable, setSecurityUnavailable] = useState(false);
-  const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
-  const [newsError, setNewsError] = useState(false);
-  const [newsStale, setNewsStale] = useState(false);
-  const [dismissedNews, setDismissedNews] = useState<Set<string>>(new Set<string>());
-
-  useEffect(() => {
-    let cancelled = false;
-    getNewsReadState()
-      .then((data) => {
-        if (!cancelled) {
-          setDismissedNews(new Set(data.dismissed));
-        }
-      })
-      .catch(() => { /* ignore: persistence unavailable */ });
-    return () => { cancelled = true; };
-  }, []);
+  const {
+    advisories: securityMap,
+    actionable: actionableSecurityMap,
+    loading: securityLoading,
+    stale: securityStale,
+    unavailable: securityUnavailable,
+    enabled: securityEnabled,
+    toggleBusy: savingSecurityToggle,
+    load: loadSecurityData,
+    setEnabled: handleSetSecurityEnabled,
+  } = useSecurityAdvisories();
+  const { items: visibleNews, error: newsError, stale: newsStale, dismiss: dismissNewsItem, clearError: clearNewsError } = useArchNews();
 
   const { activeSortKey, activeSortDirection, getSortParams } = useSortableTable({
     columns: { name: 1, repo: 2, download: 4, installed: 5, net: 6 },
@@ -558,20 +277,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     const repos = new Set(updates.map((u) => u.repository));
     return Array.from(repos).sort();
   }, [updates]);
-
-  // Only advisories an update can clear. An unresolved record cannot be acted
-  // on from here, and counting it turned the overview into an alarm about
-  // things the user has no way to fix.
-  const actionableSecurityMap = useMemo(() => {
-    const map = new Map<string, PackageSecurityAdvisory[]>();
-    for (const [pkg, advisories] of securityMap) {
-      const { actionable } = partitionAdvisories(advisories);
-      if (actionable.length > 0) {
-        map.set(pkg, actionable);
-      }
-    }
-    return map;
-  }, [securityMap]);
 
   const securityUpdateCount = useMemo(() => {
     return updates.filter((u) => actionableSecurityMap.has(u.name)).length;
@@ -655,37 +360,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     return updates.some((u) => selectedPackages.has(u.name) && REBOOT_PACKAGES.has(u.name));
   }, [updates, selectedPackages]);
 
-  // Check if all required acknowledgments are made for dangerous operations
-  const allDangerousActionsAcknowledged = useMemo(() => {
-    if (!preflightData) return true;
-    const needsRemovalAck = (preflightData.removals?.length ?? 0) > 0;
-    const needsConflictAck = (preflightData.conflicts?.length ?? 0) > 0;
-    const needsKeyImportAck = (preflightData.import_keys?.length ?? 0) > 0;
-    const warningsNeedingAck = (preflightData.warnings ?? []).filter(
-      (w) => w.severity === "warning" || w.severity === "danger"
-    );
-    const allWarningsAcked = warningsNeedingAck.every((w) => acknowledgedWarnings.has(w.id));
-    return (
-      (!needsRemovalAck || acknowledgedRemovals) &&
-      (!needsConflictAck || acknowledgedConflicts) &&
-      (!needsKeyImportAck || acknowledgedKeyImports) &&
-      allWarningsAcked
-    );
-  }, [preflightData, acknowledgedRemovals, acknowledgedConflicts, acknowledgedKeyImports, acknowledgedWarnings]);
-
-  const visibleNews = useMemo(
-    () => newsItems.filter((item) => !dismissedNews.has(item.link)),
-    [newsItems, dismissedNews]
-  );
-
-  const dismissNewsItem = useCallback((link: string) => {
-    setDismissedNews((prev) => {
-      const next = new Set(prev);
-      next.add(link);
-      return next;
-    });
-    void markNewsRead(link).catch(() => { /* ignore: persistence unavailable */ });
-  }, []);
 
   const togglePackageSelection = (pkgName: string) => {
     setSelectedPackages((prev) => {
@@ -729,53 +403,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     [updates]
   );
 
-  const loadSecurityData = useCallback(async (force = false) => {
-    setSecurityLoading(true);
-    try {
-      const response = await checkSecurity(force);
-      if (response.disabled) {
-        setSecurityEnabled(false);
-        setSecurityMap(new Map());
-        setSecurityStale(false);
-        setSecurityUnavailable(false);
-        return;
-      }
-      setSecurityEnabled(true);
-      const map = new Map<string, PackageSecurityAdvisory[]>();
-      for (const advisory of response.advisories) {
-        const existing = map.get(advisory.package) ?? [];
-        existing.push(advisory);
-        map.set(advisory.package, existing);
-      }
-      setSecurityMap(map);
-      setSecurityStale(response.stale ?? false);
-      setSecurityUnavailable(false);
-    } catch {
-      setSecurityMap(new Map());
-      setSecurityStale(false);
-      setSecurityUnavailable(true);
-    } finally {
-      setSecurityLoading(false);
-    }
-  }, []);
-
-  const handleSetSecurityEnabled = useCallback(
-    async (enabled: boolean) => {
-      setSavingSecurityToggle(true);
-      // Optimistic, so the tile does not sit stale while the write escalates.
-      setSecurityEnabled(enabled);
-      try {
-        await setSecurityAdvisories(enabled);
-        await loadSecurityData();
-      } catch {
-        setSecurityEnabled(!enabled);
-      } finally {
-        setSavingSecurityToggle(false);
-      }
-    },
-    [loadSecurityData]
-  );
-
   const loadUpdates = useCallback(async (force = false) => {
     setState("checking");
     setError(null);
@@ -797,14 +424,9 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     }
   }, [loadSecurityData, failWith]);
 
-  const scheduledSignature = latestScheduledRun?.timestamp ?? "";
-  const scheduledNeedsAttention =
-    latestScheduledRun?.status === "failed" || latestScheduledRun?.status === "skipped";
   const scheduledUnacked =
-    scheduledNeedsAttention &&
-    scheduledSignature !== "" &&
-    dismissedScheduledSignature !== undefined &&
-    dismissedScheduledSignature !== scheduledSignature;
+    (latestScheduledRun?.status === "failed" || latestScheduledRun?.status === "skipped") &&
+    scheduledUndismissed;
 
   // Single owner of page_status: a failed/deferred scheduled run takes
   // precedence over the update-count, then the normal check states map through.
@@ -900,28 +522,15 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
   useEffect(() => {
     let cancelled = false;
-    type NewsResult = { ok: true; items: NewsItem[]; stale: boolean } | { ok: false };
     Promise.all([
       listOrphans().catch(() => null),
       getCacheInfo().catch(() => null),
       getKeyringStatus().catch(() => null),
-      fetchNews(NEWS_LOOKBACK_DAYS)
-        .then((r): NewsResult => ({ ok: true, items: r.items, stale: r.stale ?? false }))
-        .catch((): NewsResult => ({ ok: false })),
-    ]).then(([orphans, cache, keyring, newsResult]) => {
+    ]).then(([orphans, cache, keyring]) => {
       if (cancelled) return;
       setOrphanCount(orphans?.orphans.length ?? null);
       setCacheSize(cache?.total_size ?? null);
       setKeyringStatus(keyring);
-      if (newsResult.ok) {
-        setNewsError(false);
-        setNewsStale(newsResult.stale);
-        setNewsItems(newsResult.items);
-      } else {
-        setNewsError(true);
-        setNewsStale(false);
-        setNewsItems([]);
-      }
       setSummaryLoading(false);
     });
     return () => { cancelled = true; };
@@ -1028,11 +637,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         (preflight.warnings?.some((w) => w.severity !== "info") ?? false);
 
       if (hasIssues) {
-        // Reset acknowledgments and show confirmation modal
-        setAcknowledgedRemovals(false);
-        setAcknowledgedConflicts(false);
-        setAcknowledgedKeyImports(false);
-        setAcknowledgedWarnings(new Set());
         setConfirmModalOpen(true);
         return;
       }
@@ -1217,7 +821,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     <Alert
       variant="warning"
       title="Unable to fetch Arch Linux news"
-      actionClose={<AlertActionCloseButton onClose={() => setNewsError(false)} />}
+      actionClose={<AlertActionCloseButton onClose={clearNewsError} />}
       className="pf-v6-u-mb-md"
     >
       Could not retrieve the latest news from archlinux.org. Check the host&apos;s network connection or visit the{" "}
@@ -1257,28 +861,14 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     </Alert>
   ) : null;
 
-  const rebootSignature = useMemo(() => {
-    if (!rebootStatus?.requires_reboot) return "";
-    if (rebootStatus.reason === "kernel_update" && rebootStatus.installed_kernel) {
-      return `kernel:${rebootStatus.installed_kernel}`;
-    }
-    if (rebootStatus.reason === "critical_packages" && rebootStatus.updated_packages.length > 0) {
-      return `critical:${[...rebootStatus.updated_packages].sort().join(",")}`;
-    }
-    return "";
-  }, [rebootStatus]);
-
-  const rebootAlert = rebootStatus?.requires_reboot
-    && rebootSignature !== ""
-    && dismissedRebootSignature !== undefined
-    && dismissedRebootSignature !== rebootSignature ? (
+  const rebootAlert = rebootStatus?.requires_reboot && rebootUndismissed ? (
     <Alert
       variant="warning"
       title="System reboot recommended"
       className="pf-v6-u-mb-md"
       actionClose={
         <AlertActionCloseButton
-          onClose={() => dismissReboot(rebootSignature)}
+          onClose={() => dismissReboot()}
         />
       }
       actionLinks={
@@ -1319,25 +909,14 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     </Alert>
   ) : null;
 
-  // Keyed by mtime as well as path so that merging a .pacnew away and having a
-  // later upgrade write a new one to the same path is not treated as the file
-  // the user already dismissed.
-  const pacnewSignature = useMemo(
-    () => (pacnewStatus?.files ?? []).map((f) => `${f.path}@${f.mtime}`).sort().join(","),
-    [pacnewStatus],
-  );
-
-  const pacnewAlert = pacnewStatus?.has_pacnew
-    && pacnewSignature !== ""
-    && dismissedPacnewSignature !== undefined
-    && dismissedPacnewSignature !== pacnewSignature ? (
+  const pacnewAlert = pacnewStatus?.has_pacnew && pacnewUndismissed ? (
     <Alert
       variant="warning"
       title="Configuration files need merging"
       className="pf-v6-u-mb-md"
       actionClose={
         <AlertActionCloseButton
-          onClose={() => dismissPacnew(pacnewSignature)}
+          onClose={() => dismissPacnew()}
         />
       }
     >
@@ -1379,7 +958,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       }
       className="pf-v6-u-mb-md"
       actionClose={
-        <AlertActionCloseButton onClose={() => dismissScheduled(scheduledSignature)} />
+        <AlertActionCloseButton onClose={() => dismissScheduled()} />
       }
     >
       <Content component={ContentVariants.p}>
@@ -1399,10 +978,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   );
   const safeServices = servicesStatus?.services.filter((s) => !effectiveBlock(s, isLocalCockpit)) ?? [];
   const blockedServices = servicesStatus?.services.filter((s) => effectiveBlock(s, isLocalCockpit)) ?? [];
-  const servicesSignature = useMemo(
-    () => (servicesStatus?.services ?? []).map((s) => s.name).sort().join(","),
-    [servicesStatus],
-  );
   const servicesPartialAlert = servicesStatus?.scan_incomplete ? (
     <Alert
       variant="info"
@@ -1416,17 +991,14 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     </Alert>
   ) : null;
 
-  const servicesAlert = servicesStatus?.restart_required
-    && servicesSignature !== ""
-    && dismissedServicesSignature !== undefined
-    && dismissedServicesSignature !== servicesSignature ? (
+  const servicesAlert = servicesStatus?.restart_required && servicesUndismissed ? (
     <Alert
       variant="warning"
       title="Running services need to be restarted"
       className="pf-v6-u-mb-md"
       actionClose={
         <AlertActionCloseButton
-          onClose={() => dismissServices(servicesSignature)}
+          onClose={() => dismissServices()}
         />
       }
       actionLinks={
@@ -1480,6 +1052,18 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       )}
     </Alert>
   ) : null;
+
+  const pageAlerts = (
+    <>
+      {cancelAlert}
+      {lockClearedAlert}
+      {rebootAlert}
+      {servicesPartialAlert}
+      {servicesAlert}
+      {pacnewAlert}
+      {scheduledAlert}
+    </>
+  );
 
   if (state === "loading" || state === "checking") {
     return (
@@ -1681,13 +1265,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     return (
       <Card>
         <CardBody>
-          {cancelAlert}
-          {lockClearedAlert}
-          {rebootAlert}
-          {servicesPartialAlert}
-          {servicesAlert}
-          {pacnewAlert}
-          {scheduledAlert}
+          {pageAlerts}
           <EmptyState  headingLevel="h2" icon={CheckCircleIcon}  titleText="System Updated">
             <EmptyStateBody>
               All packages have been updated successfully.
@@ -1709,13 +1287,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   if (state === "uptodate") {
     return (
       <>
-        {cancelAlert}
-        {lockClearedAlert}
-        {rebootAlert}
-        {servicesPartialAlert}
-          {servicesAlert}
-        {pacnewAlert}
-        {scheduledAlert}
+        {pageAlerts}
         {warnings.length > 0 && (
           <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
             <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">
@@ -1812,13 +1384,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
   return (
     <>
-      {cancelAlert}
-      {lockClearedAlert}
-      {rebootAlert}
-      {servicesPartialAlert}
-          {servicesAlert}
-      {pacnewAlert}
-      {scheduledAlert}
+      {pageAlerts}
       {warnings.length > 0 && (
         <Alert variant="warning" title="Warnings" className="pf-v6-u-mb-md">
           <ul className="pf-v6-u-m-0 pf-v6-u-pl-lg">
@@ -2000,18 +1566,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
               const netSize = update.new_size - update.current_size;
               const isSelected = selectedPackages.has(update.name);
               const isIgnored = update.ignored;
-              const advisories = securityMap.get(update.name);
-              const hasAdvisories = advisories && advisories.length > 0;
-              const { actionable, unresolved } = partitionAdvisories(advisories ?? []);
-              // Severity, and the stripe it drives, describe what an update can
-              // still fix. A record with no fix recorded is not an emergency and
-              // must not paint the row red.
-              const highest =
-                actionable.length > 0
-                  ? actionable.reduce((a, b) =>
-                      (SEVERITY_ORDER[b.severity] ?? 0) > (SEVERITY_ORDER[a.severity] ?? 0) ? b : a
-                    )
-                  : null;
+              const partition = partitionAdvisories(securityMap.get(update.name) ?? []);
+              const highest = highestOf(partition.actionable);
               const borderColor = highest
                 ? `var(--pf-t--global--color--status--${highest.severity === "Critical" || highest.severity === "High" ? "danger" : "warning"}--default)`
                 : undefined;
@@ -2050,45 +1606,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
                         ignored
                       </Label>
                     )}
-                    {hasAdvisories && (
-                      <Popover
-                        headerContent={<>{advisories.length} securit{advisories.length === 1 ? "y advisory" : "y advisories"}</>}
-                        bodyContent={
-                          <div onClick={(e) => e.stopPropagation()}>
-                            {actionable.length > 0 && (
-                              <div style={{ marginBottom: "0.75rem" }}>
-                                <strong>Fixed by updating</strong>
-                                {actionable.map((a) => (
-                                  <AdvisoryLine key={a.avg_name} advisory={a} />
-                                ))}
-                              </div>
-                            )}
-                            {unresolved.length > 0 && (
-                              <div>
-                                <strong>No fix recorded</strong>
-                                {unresolved.map((a) => (
-                                  <AdvisoryLine key={a.avg_name} advisory={a} />
-                                ))}
-                                <div style={{ color: "var(--pf-t--global--text--color--subtle)", fontSize: "0.85em", marginTop: "0.25rem" }}>
-                                  {NO_FIX_CAVEAT}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        }
-                      >
-                        <Label
-                          isCompact
-                          color={highest ? severityColor(highest.severity) : "grey"}
-                          icon={<ShieldAltIcon />}
-                          className="pf-v6-u-ml-sm"
-                          style={{ cursor: "pointer" }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {highest ? highest.severity : "No fix"}
-                          {advisories.length > 1 && ` +${advisories.length - 1}`}
-                        </Label>
-                      </Popover>
+                    {(partition.actionable.length > 0 || partition.unresolved.length > 0) && (
+                      <AdvisoryPopover partition={partition} />
                     )}
                   </Td>
                   <Td dataLabel="Repository">
@@ -2112,16 +1631,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
                         onOpenChange={(open: boolean) => setOpenKebab(open ? update.name : null)}
                         onSelect={() => setOpenKebab(null)}
                         popperProps={{ position: "right" }}
-                        toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
-                          <MenuToggle
-                            ref={toggleRef}
-                            variant="plain"
-                            aria-label={`Actions for ${update.name}`}
-                            isExpanded={openKebab === update.name}
-                            onClick={() => setOpenKebab(openKebab === update.name ? null : update.name)}
-                          >
-                            <EllipsisVIcon />
-                          </MenuToggle>
+                        toggle={kebabToggle(
+                          `Actions for ${update.name}`,
+                          openKebab === update.name,
+                          () => setOpenKebab(openKebab === update.name ? null : update.name),
                         )}
                       >
                         <DropdownList>
@@ -2170,172 +1683,12 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         onIgnored={loadUpdates}
       />
 
-      <Modal
-        variant={ModalVariant.medium}
+      <PreflightConfirmModal
         isOpen={confirmModalOpen}
+        preflight={preflightData}
         onClose={() => setConfirmModalOpen(false)}
-      >
-        <ModalHeader title="Confirm Upgrade" />
-        <ModalBody>
-          {preflightData && (
-            <Content>
-              <Content component={ContentVariants.p}>
-                The following actions will be performed during this upgrade:
-              </Content>
-
-              {(preflightData.removals?.length ?? 0) > 0 && (
-                <Alert variant="danger" title="Packages will be removed" isInline className="pf-v6-u-mt-md">
-                  <Content component={ContentVariants.p}>
-                    The following packages will be removed to resolve dependencies:
-                  </Content>
-                  <List>
-                    {preflightData.removals!.map((pkg) => (
-                      <ListItem key={pkg}>{pkg}</ListItem>
-                    ))}
-                  </List>
-                  <Checkbox
-                    id="acknowledge-removals"
-                    label="I understand these packages will be removed"
-                    isChecked={acknowledgedRemovals}
-                    onChange={(_event, checked) => setAcknowledgedRemovals(checked)}
-                    className="pf-v6-u-mt-sm"
-                  />
-                </Alert>
-              )}
-
-              {(preflightData.conflicts?.length ?? 0) > 0 && (
-                <Alert variant="warning" title="Package conflicts detected" isInline className="pf-v6-u-mt-md">
-                  <Content component={ContentVariants.p}>
-                    The following conflicts will be resolved automatically:
-                  </Content>
-                  <List>
-                    {preflightData.conflicts!.map((c) => (
-                      <ListItem key={`${c.package1}-${c.package2}`}>
-                        {c.package1} conflicts with {c.package2}
-                      </ListItem>
-                    ))}
-                  </List>
-                  <Checkbox
-                    id="acknowledge-conflicts"
-                    label="I understand conflicts will be resolved automatically"
-                    isChecked={acknowledgedConflicts}
-                    onChange={(_event, checked) => setAcknowledgedConflicts(checked)}
-                    className="pf-v6-u-mt-sm"
-                  />
-                </Alert>
-              )}
-
-              {(preflightData.import_keys?.length ?? 0) > 0 && (
-                <Alert variant="warning" title="PGP keys will be imported" isInline className="pf-v6-u-mt-md">
-                  <Content component={ContentVariants.p}>
-                    The following keys will be imported to verify package signatures:
-                  </Content>
-                  <List>
-                    {preflightData.import_keys!.map((k) => (
-                      <ListItem key={k.fingerprint}>
-                        {k.uid} ({k.fingerprint})
-                      </ListItem>
-                    ))}
-                  </List>
-                  <Checkbox
-                    id="acknowledge-key-imports"
-                    label="I trust these keys and want to import them"
-                    isChecked={acknowledgedKeyImports}
-                    onChange={(_event, checked) => setAcknowledgedKeyImports(checked)}
-                    className="pf-v6-u-mt-sm"
-                  />
-                </Alert>
-              )}
-
-              {preflightData.warnings?.map((w) => (
-                <Alert
-                  key={w.id}
-                  variant={w.severity === "danger" ? "danger" : w.severity === "info" ? "info" : "warning"}
-                  title={w.title}
-                  isInline
-                  className="pf-v6-u-mt-md"
-                >
-                  <Content component={ContentVariants.p}>{w.message}</Content>
-                  {w.packages.length > 0 && (
-                    <List>
-                      {w.packages.map((pkg) => (
-                        <ListItem key={`${w.id}-${pkg}`}>{pkg}</ListItem>
-                      ))}
-                    </List>
-                  )}
-                  {(w.severity === "warning" || w.severity === "danger") && (
-                    <Checkbox
-                      id={`acknowledge-warning-${w.id}`}
-                      label="I understand and want to proceed"
-                      isChecked={acknowledgedWarnings.has(w.id)}
-                      onChange={(_event, checked) => {
-                        setAcknowledgedWarnings((prev) => {
-                          const next = new Set(prev);
-                          if (checked) {
-                            next.add(w.id);
-                          } else {
-                            next.delete(w.id);
-                          }
-                          return next;
-                        });
-                      }}
-                      className="pf-v6-u-mt-sm"
-                    />
-                  )}
-                </Alert>
-              ))}
-
-              {(preflightData.replacements?.length ?? 0) > 0 && (
-                <Alert variant="info" title="Package replacements" isInline className="pf-v6-u-mt-md">
-                  <Content component={ContentVariants.p}>
-                    The following packages will be replaced:
-                  </Content>
-                  <List>
-                    {preflightData.replacements!.map((r) => (
-                      <ListItem key={`${r.old_package}-${r.new_package}`}>
-                        {r.old_package} will be replaced by {r.new_package}
-                      </ListItem>
-                    ))}
-                  </List>
-                </Alert>
-              )}
-
-              {(preflightData.providers?.length ?? 0) > 0 && (
-                <Alert variant="info" title="Provider selections" isInline className="pf-v6-u-mt-md">
-                  <Content component={ContentVariants.p}>
-                    The first available provider will be selected for the following dependencies:
-                  </Content>
-                  <List>
-                    {preflightData.providers!.map((p) => (
-                      <ListItem key={p.dependency}>
-                        {p.dependency}: {p.providers[0]} (from: {p.providers.join(", ")})
-                      </ListItem>
-                    ))}
-                  </List>
-                </Alert>
-              )}
-
-              <Content component={ContentVariants.p} className="pf-v6-u-mt-md">
-                <strong>{preflightData.packages_to_upgrade}</strong> packages will be upgraded
-                (download: {formatSize(preflightData.total_download_size)})
-              </Content>
-            </Content>
-          )}
-        </ModalBody>
-        <ModalFooter>
-          <Button
-            key="confirm"
-            variant={(preflightData?.removals?.length ?? 0) > 0 || (preflightData?.conflicts?.length ?? 0) > 0 ? "danger" : "primary"}
-            onClick={startUpgrade}
-            isDisabled={!allDangerousActionsAcknowledged}
-          >
-            Proceed with Upgrade
-          </Button>
-          <Button key="cancel" variant="link" onClick={() => setConfirmModalOpen(false)}>
-            Cancel
-          </Button>
-        </ModalFooter>
-      </Modal>
+        onProceed={startUpgrade}
+      />
 
       <IgnoredPackagesModal
         isOpen={ignoredModalOpen}
