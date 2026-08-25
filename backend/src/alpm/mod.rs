@@ -2,7 +2,7 @@ mod callbacks;
 mod sysupgrade;
 mod transaction;
 
-pub use callbacks::{interrupt_if_cancelled, setup_dl_cb, setup_log_cb};
+pub use callbacks::{Verbosity, interrupt_if_cancelled, setup_dl_cb, setup_log_cb};
 pub use sysupgrade::{InterventionFlags, SysupgradeOutcome, run_sysupgrade};
 pub use transaction::{TransactionGuard, try_interrupt};
 

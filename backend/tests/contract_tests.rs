@@ -1374,6 +1374,8 @@ fn scheduled_run_entry_error_nullable() {
         packages_upgraded: 5,
         error: None,
         details: vec!["linux upgraded".into()],
+        duration_secs: Some(42),
+        removed_stale_lock: false,
     };
     let v = to_json(&entry);
 

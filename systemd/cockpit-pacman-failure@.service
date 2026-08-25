@@ -1,0 +1,11 @@
+[Unit]
+Description=Report a failed cockpit-pacman scheduled run
+# Journal only: `journalctl -u cockpit-pacman-failure@*` shows a failure that
+# never got as far as writing a run record.
+#
+# Being a separate unit is the point: an OnFailure handler runs outside the
+# failing unit's cgroup, so unlike ExecStopPost it survives a cgroup-wide kill.
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'systemd-cat -t cockpit-pacman -p err echo "scheduled run failed: unit=%i result=$(systemctl show -p Result --value %i) status=$(systemctl show -p ExecMainStatus --value %i); see /var/log/cockpit-pacman/scheduled.jsonl and journalctl -u %i"'

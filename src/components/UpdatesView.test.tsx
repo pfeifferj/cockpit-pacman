@@ -2387,6 +2387,8 @@ describe("UpdatesView", () => {
       packages_upgraded: 0,
       error,
       details,
+      duration_secs: null,
+      removed_stale_lock: false,
     });
 
     it("shows a danger alert when the last scheduled run failed", async () => {

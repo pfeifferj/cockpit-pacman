@@ -118,13 +118,28 @@ export type SaveMirrorlistResponse = { success: boolean, backup_path: string | n
 
 export type SaveReposResponse = { success: boolean, backup_path: string | null, message: string, };
 
-export type ScheduleConfig = { enabled: boolean, mode: string, schedule: string, max_packages: number, timer_active: boolean, timer_next_run: string | null, };
+export type ScheduleConfig = { enabled: boolean, mode: string, schedule: string, max_packages: number, timer_active: boolean, timer_next_run: string | null, 
+/**
+ * What the timer is actually set to, as systemd normalises it.
+ */
+timer_calendar: string | null, };
 
 export type ScheduleMode = "check" | "upgrade";
 
 export type ScheduleSetResponse = { success: boolean, message: string, };
 
-export type ScheduledRunEntry = { timestamp: string, mode: string, success: boolean, status: string, packages_checked: number, packages_upgraded: number, error: string | null, details: Array<string>, };
+export type ScheduledRunEntry = { timestamp: string, mode: string, success: boolean, status: string, packages_checked: number, packages_upgraded: number, error: string | null, details: Array<string>, 
+/**
+ * Absent on records written before it existed, and on ExecStopPost
+ * records, which never saw the run start.
+ */
+duration_secs: number | null, 
+/**
+ * This run found a pacman lock with no holder process and reaped it, which
+ * means the run before it was killed mid-transaction. Says nothing about
+ * this run, which is why it is not folded into `status`.
+ */
+removed_stale_lock: boolean, };
 
 export type ScheduledRunsResponse = { runs: Array<ScheduledRunEntry>, total: number, };
 

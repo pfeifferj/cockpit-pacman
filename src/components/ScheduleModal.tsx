@@ -32,6 +32,7 @@ import {
 import {
   CheckCircleIcon,
   ExclamationCircleIcon,
+  ExclamationTriangleIcon,
   OutlinedClockIcon,
   ClockIcon,
 } from "@patternfly/react-icons";
@@ -40,6 +41,7 @@ import {
   ScheduleConfig,
   ScheduleMode,
   ScheduledRunEntry,
+  ScheduledRunStatus,
   getScheduleConfig,
   setScheduleConfig,
   getScheduledRuns,
@@ -47,10 +49,71 @@ import {
 import { TimeAgo } from "./TimeAgo";
 import { sanitizeErrorMessage } from "../utils";
 
+/**
+ * A run's wall-clock time. `null` means the record predates the field, or the
+ * run was killed before it could be stamped.
+ */
+function formatDuration(secs: number | null): string {
+  if (secs === null) return "-";
+  if (secs < 60) return `${secs}s`;
+  const m = Math.floor(secs / 60);
+  if (m < 60) return `${m}m ${secs % 60}s`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
 interface ScheduleModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
+
+const RUN_STATUS = {
+  ok: { Icon: CheckCircleIcon, token: "success", label: "Success" },
+  skipped: { Icon: ExclamationTriangleIcon, token: "warning", label: "Skipped" },
+  failed: { Icon: ExclamationCircleIcon, token: "danger", label: "Failed" },
+} as const;
+
+/**
+ * Keyed off `status`, never `success`: LogEntry sets success = status !=
+ * "failed", so a skipped run is truthy and rendered as a green Success.
+ * `success` is only the fallback for records written before status existed.
+ */
+const RunStatus: React.FC<{ run: ScheduledRunEntry }> = ({ run }) => {
+  const status: ScheduledRunStatus =
+    run.status === "ok" || run.status === "skipped" || run.status === "failed"
+      ? run.status
+      : run.success
+        ? "ok"
+        : "failed";
+  const { Icon, token, label } = RUN_STATUS[status];
+
+  // A skip carries its reason in details, a failure in error.
+  const reason = run.error || run.details.join(", ");
+  const cell = (
+    <Flex spaceItems={{ default: "spaceItemsSm" }} alignItems={{ default: "alignItemsCenter" }}>
+      <FlexItem>
+        <Icon color={`var(--pf-t--global--icon--color--status--${token}--default)`} />
+      </FlexItem>
+      <FlexItem>{label}</FlexItem>
+    </Flex>
+  );
+  const statusCell = reason ? <Tooltip content={reason}>{cell}</Tooltip> : cell;
+
+  if (!run.removed_stale_lock) return statusCell;
+
+  // Kept out of the reason tooltip: two nested tooltips fight over the same hover.
+  return (
+    <Flex spaceItems={{ default: "spaceItemsSm" }} alignItems={{ default: "alignItemsCenter" }}>
+      <FlexItem>{statusCell}</FlexItem>
+      <FlexItem>
+        <Tooltip content="This run cleared a leftover pacman lock that no process was holding, so the run before it was killed part way through a transaction.">
+          <Label color="orange" isCompact>
+            Recovered
+          </Label>
+        </Tooltip>
+      </FlexItem>
+    </Flex>
+  );
+};
 
 const SCHEDULE_PRESETS = [
   { value: "hourly", label: "Hourly" },
@@ -83,6 +146,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   const [maxPackages, setMaxPackages] = useState(0);
 
   const [runs, setRuns] = useState<ScheduledRunEntry[]>([]);
+  const [runsError, setRunsError] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
 
   const loadConfig = useCallback(async () => {
@@ -116,8 +180,10 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
     try {
       const response = await getScheduledRuns({ limit: 10 });
       setRuns(response.runs);
-    } catch {
-      // Ignore errors loading run history
+      setRunsError(null);
+    } catch (ex) {
+      setRuns([]);
+      setRunsError(sanitizeErrorMessage(ex instanceof Error ? ex.message : String(ex)));
     }
   }, []);
 
@@ -308,6 +374,18 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                     <DescriptionListDescription><TimeAgo timestamp={config.timer_next_run} /></DescriptionListDescription>
                   </DescriptionListGroup>
                 )}
+                {/* The schedule the timer is actually on, as systemd normalises
+                    it. Shown because a lost drop-in falls back to the unit's own
+                    OnCalendar, and the configured value above keeps claiming
+                    otherwise. */}
+                {config.timer_calendar && (
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>Timer Calendar</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      <code>{config.timer_calendar}</code>
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                )}
               </DescriptionList>
             )}
 
@@ -317,7 +395,16 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
               isExpanded={historyExpanded}
               className="pf-v6-u-mt-lg"
             >
-              {runs.length === 0 ? (
+              {runsError !== null ? (
+                <Alert
+                  variant="warning"
+                  isInline
+                  title="Could not read the run history"
+                  className="pf-v6-u-mt-sm"
+                >
+                  {runsError}
+                </Alert>
+              ) : runs.length === 0 ? (
                 <EmptyState headingLevel="h4" icon={ClockIcon} titleText="No scheduled runs yet">
                   <EmptyStateBody>
                     Scheduled upgrade history will appear here once the timer runs.
@@ -331,6 +418,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                       <Th>Mode</Th>
                       <Th>Status</Th>
                       <Th>Packages</Th>
+                      <Th>Duration</Th>
                     </Tr>
                   </Thead>
                   <Tbody>
@@ -342,41 +430,13 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                             {run.mode}
                           </Label>
                         </Td>
-                        <Td dataLabel="Status">
-                          {run.success ? (
-                            run.details.length > 0 ? (
-                              <Tooltip content={run.details.join(", ")}>
-                                <Flex spaceItems={{ default: "spaceItemsSm" }} alignItems={{ default: "alignItemsCenter" }}>
-                                  <FlexItem>
-                                    <CheckCircleIcon color="var(--pf-t--global--icon--color--status--success--default)" />
-                                  </FlexItem>
-                                  <FlexItem>Success</FlexItem>
-                                </Flex>
-                              </Tooltip>
-                            ) : (
-                              <Flex spaceItems={{ default: "spaceItemsSm" }} alignItems={{ default: "alignItemsCenter" }}>
-                                <FlexItem>
-                                  <CheckCircleIcon color="var(--pf-t--global--icon--color--status--success--default)" />
-                                </FlexItem>
-                                <FlexItem>Success</FlexItem>
-                              </Flex>
-                            )
-                          ) : (
-                            <Tooltip content={run.error || run.details.join(", ") || "Unknown error"}>
-                              <Flex spaceItems={{ default: "spaceItemsSm" }} alignItems={{ default: "alignItemsCenter" }}>
-                                <FlexItem>
-                                  <ExclamationCircleIcon color="var(--pf-t--global--icon--color--status--danger--default)" />
-                                </FlexItem>
-                                <FlexItem>Failed</FlexItem>
-                              </Flex>
-                            </Tooltip>
-                          )}
-                        </Td>
+                        <Td dataLabel="Status"><RunStatus run={run} /></Td>
                         <Td dataLabel="Packages">
                           {run.packages_upgraded > 0
                             ? `${(run.packages_upgraded).toLocaleString()} upgraded`
                             : `${(run.packages_checked).toLocaleString()} checked`}
                         </Td>
+                        <Td dataLabel="Duration">{formatDuration(run.duration_secs)}</Td>
                       </Tr>
                     ))}
                   </Tbody>

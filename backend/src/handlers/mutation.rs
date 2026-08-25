@@ -4,8 +4,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::alpm::{
-    SysupgradeOutcome, TransactionGuard, get_handle, interrupt_if_cancelled, progress_to_string,
-    run_sysupgrade, setup_dl_cb, setup_log_cb, try_interrupt,
+    SysupgradeOutcome, TransactionGuard, Verbosity, get_handle, interrupt_if_cancelled,
+    progress_to_string, run_sysupgrade, setup_dl_cb, setup_log_cb, try_interrupt,
 };
 use crate::check_cancel_early;
 use crate::db::invalidate_repo_map_cache;
@@ -406,8 +406,8 @@ pub fn sync_database(force: bool, timeout_secs: Option<u64>) -> Result<()> {
     check_cancel_early!(&timeout);
 
     let mut handle = get_handle()?;
-    setup_log_cb(&mut handle);
-    setup_dl_cb(&mut handle);
+    setup_log_cb(&mut handle, Verbosity::Streaming);
+    setup_dl_cb(&mut handle, Verbosity::Streaming);
 
     match handle.syncdbs_mut().update(force) {
         Ok(_) => {
@@ -455,8 +455,8 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
         })?;
     }
 
-    setup_log_cb(&mut handle);
-    setup_dl_cb(&mut handle);
+    setup_log_cb(&mut handle, Verbosity::Streaming);
+    setup_dl_cb(&mut handle, Verbosity::Streaming);
     setup_progress_cb(&mut handle);
     setup_event_cb(&mut handle, EventScope::Upgrade);
     setup_question_cb(&mut handle, true);
@@ -548,7 +548,7 @@ pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
         return Ok(());
     }
 
-    setup_log_cb(&mut handle);
+    setup_log_cb(&mut handle, Verbosity::Streaming);
     setup_progress_cb(&mut handle);
     setup_event_cb(&mut handle, EventScope::Remove);
 
@@ -595,8 +595,8 @@ pub fn install_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
 
     let mut handle = get_handle()?;
 
-    setup_log_cb(&mut handle);
-    setup_dl_cb(&mut handle);
+    setup_log_cb(&mut handle, Verbosity::Streaming);
+    setup_dl_cb(&mut handle, Verbosity::Streaming);
     setup_progress_cb(&mut handle);
     setup_event_cb(&mut handle, EventScope::Install);
     setup_question_cb(&mut handle, false);
@@ -660,7 +660,7 @@ pub fn remove_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
 
     let mut handle = get_handle()?;
 
-    setup_log_cb(&mut handle);
+    setup_log_cb(&mut handle, Verbosity::Streaming);
     setup_progress_cb(&mut handle);
     setup_event_cb(&mut handle, EventScope::Remove);
 
