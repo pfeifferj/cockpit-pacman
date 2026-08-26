@@ -213,15 +213,12 @@ fn prepare_failure(err_msg: &str) -> anyhow::Error {
 
 fn commit_and_complete(
     tx: &mut TransactionGuard,
-    timeout: &TimeoutGuard,
     interrupt_msg: &str,
     success_msg: Option<String>,
 ) -> Result<()> {
     let _inhibitor = ShutdownInhibitor::take("Applying package changes");
     match tx.commit().err().map(|e| e.to_string()) {
-        Some(err_msg) => {
-            handle_commit_error(&err_msg, is_cancelled(), timeout, interrupt_msg).map(|_| ())
-        }
+        Some(err_msg) => handle_commit_error(&err_msg, is_cancelled(), interrupt_msg),
         None => {
             // Invariant: enqueue the success signal immediately after commit()
             // returns Ok, before anything else. emit_event hands it to the async
@@ -490,16 +487,21 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
             });
             Ok(())
         }
-        SysupgradeOutcome::Interrupted(r @ CheckResult::TimedOut(_)) => {
-            emit_cancellation_complete(&r);
-            Ok(())
-        }
-        SysupgradeOutcome::Interrupted(_) => {
+        SysupgradeOutcome::Interrupted => {
             emit_event(&StreamEvent::Complete {
                 success: false,
                 message: Some(
                     "Operation interrupted - system may be in inconsistent state".to_string(),
                 ),
+            });
+            Ok(())
+        }
+        // Every package landed, and the view keys its "finished before the
+        // cancel took effect" notice off this success.
+        SysupgradeOutcome::CompletedDespiteCancel { .. } => {
+            emit_event(&StreamEvent::Complete {
+                success: true,
+                message: None,
             });
             Ok(())
         }
@@ -583,7 +585,6 @@ pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
 
     commit_and_complete(
         &mut tx,
-        &timeout,
         "Operation interrupted",
         Some(format!("Removed {} orphan package(s)", orphan_names.len())),
     )
@@ -648,7 +649,6 @@ pub fn install_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
 
     commit_and_complete(
         &mut tx,
-        &timeout,
         "Operation interrupted - package may be in inconsistent state",
         Some(format!("Successfully installed {}", name)),
     )
@@ -697,7 +697,6 @@ pub fn remove_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
 
     commit_and_complete(
         &mut tx,
-        &timeout,
         "Operation interrupted - package may be in inconsistent state",
         Some(format!("Successfully removed {}", name)),
     )

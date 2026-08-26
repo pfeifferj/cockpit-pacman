@@ -288,6 +288,13 @@ pub fn emit_json<T: Serialize>(response: &T) -> Result<()> {
     Ok(())
 }
 
+/// Commented entries still count toward `total`; only `enabled` says the file can serve.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EntryCounts {
+    pub enabled: usize,
+    pub total: usize,
+}
+
 /// Path of a state or cache file under ~/.config/cockpit-pacman.
 /// `file` must be a bare file name; path components are rejected.
 pub fn config_path(file: &str) -> Result<std::path::PathBuf> {
@@ -375,12 +382,21 @@ pub fn unique_backup_path(prefix: &str) -> String {
 /// the `keep` entries with the highest timestamps survive. Ranking is by the
 /// timestamp embedded in the filename, never the file's mtime, so a restored or
 /// copied backup (which gets a fresh mtime) is not mistaken for the newest.
-pub fn backups_to_prune(mut entries: Vec<(PathBuf, i64)>, keep: usize) -> Vec<PathBuf> {
+pub fn backups_to_prune(
+    mut entries: Vec<(PathBuf, i64, BackupSource)>,
+    keep: usize,
+) -> Vec<PathBuf> {
     if entries.len() <= keep {
         return Vec::new();
     }
-    entries.sort_by_key(|(_, ts)| std::cmp::Reverse(*ts));
-    entries.into_iter().skip(keep).map(|(p, _)| p).collect()
+    // Manual outranks automatic at any age.
+    entries.sort_by_key(|(_, ts, source)| {
+        (
+            !matches!(source, BackupSource::Manual),
+            std::cmp::Reverse(*ts),
+        )
+    });
+    entries.into_iter().skip(keep).map(|(p, _, _)| p).collect()
 }
 
 /// Remove all but the `keep` most recent backups in `parent` whose name starts
@@ -388,7 +404,7 @@ pub fn backups_to_prune(mut entries: Vec<(PathBuf, i64)>, keep: usize) -> Vec<Pa
 /// whose suffix is not an integer are ignored (matching the listing logic), so
 /// they neither count toward `keep` nor get deleted. Best-effort: scan and
 /// remove failures are logged, not propagated, so cleanup never fails a save.
-pub fn prune_old_backups(parent: &Path, name_prefix: &str, keep: usize) {
+pub fn prune_old_backups(parent: &Path, name_prefix: &str, keep: usize, manifest: &Path) {
     let read_dir = match std::fs::read_dir(parent) {
         Ok(rd) => rd,
         Err(e) => {
@@ -400,11 +416,19 @@ pub fn prune_old_backups(parent: &Path, name_prefix: &str, keep: usize) {
         }
     };
 
-    let entries: Vec<(PathBuf, i64)> = read_dir
+    // Unlisted backups default to Manual, as the listing renders them, so one
+    // predating the manifest is protected rather than silently evictable.
+    let provenance = read_backup_provenance(manifest);
+    let entries: Vec<(PathBuf, i64, BackupSource)> = read_dir
         .filter_map(|entry| entry.ok())
         .filter_map(|entry| {
             let name = entry.file_name().into_string().ok()?;
-            Some((entry.path(), backup_timestamp(&name, name_prefix)?))
+            let ts = backup_timestamp(&name, name_prefix)?;
+            Some((
+                entry.path(),
+                ts,
+                provenance.get(&ts).copied().unwrap_or_default(),
+            ))
         })
         .collect();
 
@@ -442,6 +466,14 @@ fn existing_backup_timestamps(parent: &Path, name_prefix: &str) -> std::collecti
 /// missing or corrupt manifest yields an empty map; callers default unlisted
 /// backups to Manual so backups predating the manifest still render.
 pub fn read_backup_provenance(manifest: &Path) -> std::collections::BTreeMap<i64, BackupSource> {
+    read_provenance_raw(manifest)
+        .into_iter()
+        .filter_map(|(ts, value)| serde_json::from_value(value).ok().map(|src| (ts, src)))
+        .collect()
+}
+
+/// Values stay uninterpreted, so an unknown source round-trips instead of being dropped.
+fn read_provenance_raw(manifest: &Path) -> std::collections::BTreeMap<i64, serde_json::Value> {
     std::fs::read_to_string(manifest)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
@@ -460,10 +492,13 @@ pub fn record_backup_provenance(
     source: BackupSource,
 ) {
     let live = existing_backup_timestamps(backup_dir, name_prefix);
-    let mut map = read_backup_provenance(manifest);
-    map.insert(timestamp, source);
+    let mut map = read_provenance_raw(manifest);
+    map.insert(
+        timestamp,
+        serde_json::to_value(source).unwrap_or(serde_json::Value::Null),
+    );
     map.retain(|ts, _| *ts == timestamp || live.contains(ts));
-    if let Err(e) = write_json_atomic_with_mode(manifest, &map, 0o600) {
+    if let Err(e) = write_json_atomic_with_mode(manifest, &map, 0o644) {
         eprintln!(
             "Warning: failed to write backup provenance {:?}: {}",
             manifest, e
@@ -475,7 +510,7 @@ pub fn record_backup_provenance(
 /// backup is deleted so the manifest doesn't retain a stale source. Best-effort.
 pub fn reconcile_backup_provenance(manifest: &Path, backup_dir: &Path, name_prefix: &str) {
     let live = existing_backup_timestamps(backup_dir, name_prefix);
-    let mut map = read_backup_provenance(manifest);
+    let mut map = read_provenance_raw(manifest);
     let before = map.len();
     map.retain(|ts, _| live.contains(ts));
     if map.len() != before {
@@ -893,30 +928,18 @@ pub(crate) fn parse_package_filename(filename: &str) -> Option<(String, String, 
     }
 }
 
-/// Classify a failed commit: Ok(false) on cancel/timeout, Err on a real
-/// failure. `cancelled` decides it, not the error text, since the abort
-/// carries no reliable keyword and sniffing would mask real failures.
+/// Ok when a cancel caused the failure, Err otherwise; only the cancel flag decides.
 pub fn handle_commit_error(
     err_msg: &str,
     cancelled: bool,
-    timeout: &TimeoutGuard,
     interrupted_message: &str,
-) -> Result<bool> {
+) -> Result<()> {
     if cancelled {
         emit_event(&StreamEvent::Complete {
             success: false,
             message: Some(interrupted_message.to_string()),
         });
-        return Ok(false);
-    } else if timeout.is_timed_out() {
-        emit_event(&StreamEvent::Complete {
-            success: false,
-            message: Some(format!(
-                "Operation timed out after {} seconds",
-                timeout.timeout_secs()
-            )),
-        });
-        return Ok(false);
+        return Ok(());
     }
 
     emit_event(&StreamEvent::Complete {
@@ -1129,6 +1152,42 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::unwrap_used)]
+    fn an_unknown_provenance_value_survives_a_write() {
+        let dir = std::env::temp_dir().join(format!("cpac-prov-unknown-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let prefix = "cfg.backup.";
+        let manifest = dir.join(".meta.json");
+        for ts in [100i64, 200, 300] {
+            std::fs::write(dir.join(format!("{prefix}{ts}")), b"x").unwrap();
+        }
+        std::fs::write(
+            &manifest,
+            br#"{"100":"manual","200":"scheduled","300":"auto"}"#,
+        )
+        .unwrap();
+
+        let map = read_backup_provenance(&manifest);
+        assert_eq!(map.get(&100), Some(&BackupSource::Manual));
+        assert_eq!(map.get(&300), Some(&BackupSource::Auto));
+        assert_eq!(map.get(&200), None, "an unreadable value is not guessed at");
+
+        record_backup_provenance(&manifest, &dir, prefix, 400, BackupSource::Auto);
+
+        let written = std::fs::read_to_string(&manifest).unwrap();
+        assert!(
+            written.contains("scheduled"),
+            "a value this build cannot read must not be dropped by writing: {written}"
+        );
+        assert_eq!(
+            read_backup_provenance(&manifest).get(&400),
+            Some(&BackupSource::Auto)
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn classify_returns_none_for_unclassifiable_error() {
         assert_eq!(classify_message("something entirely unexpected"), None);
         assert_eq!(classify_error(&anyhow::anyhow!("weird failure")), None);
@@ -1276,10 +1335,15 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
     }
 
-    fn entry(ts: i64) -> (PathBuf, i64) {
+    fn entry(ts: i64) -> (PathBuf, i64, BackupSource) {
+        sourced(ts, BackupSource::Auto)
+    }
+
+    fn sourced(ts: i64, source: BackupSource) -> (PathBuf, i64, BackupSource) {
         (
             PathBuf::from(format!("/etc/pacman.d/mirrorlist.backup.{ts}")),
             ts,
+            source,
         )
     }
 
@@ -1298,6 +1362,24 @@ mod tests {
         ];
         let pruned = backups_to_prune(entries, 5);
         assert_eq!(pruned, vec![entry(2).0, entry(1).0]);
+    }
+
+    #[test]
+    fn backups_to_prune_evicts_automatic_before_manual() {
+        let entries = vec![
+            sourced(1, BackupSource::Manual),
+            sourced(5, BackupSource::Auto),
+            sourced(6, BackupSource::Auto),
+            sourced(7, BackupSource::Auto),
+        ];
+
+        let pruned = backups_to_prune(entries, 3);
+
+        assert_eq!(
+            pruned,
+            vec![sourced(5, BackupSource::Auto).0],
+            "the oldest automatic goes, not the older manual"
+        );
     }
 
     #[test]

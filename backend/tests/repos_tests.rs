@@ -89,6 +89,7 @@ fn adding_server_directive_appends_in_correct_section() {
         kind: DirectiveKind::Server,
         value: "https://mirror.rackspace.com/archlinux/$repo/os/$arch".to_string(),
         enabled: true,
+        leading: Vec::new(),
     };
     parsed.repos[0].directives.push(new_directive);
     let output = serialize_conf(&parsed);
@@ -145,7 +146,9 @@ CacheServer = https://cache.example.com/$repo
 fn unknown_directives_and_comments_round_trip_verbatim() {
     let parsed: PacmanConf = parse_conf(FIXTURE_EXTRAS);
     assert_eq!(
-        parsed.repos[0].passthrough,
+        // They follow the last directive, so they belong to the section's tail
+        // rather than to any one line.
+        parsed.repos[0].trailing,
         vec![
             "Usage = Sync Search".to_string(),
             "CacheServer = https://cache.example.com/$repo".to_string(),
@@ -162,6 +165,34 @@ fn disabling_section_comments_passthrough_directives() {
     let output = serialize_conf(&parsed);
     assert!(output.contains("#Usage = Sync Search"));
     assert!(output.contains("#CacheServer = https://cache.example.com/$repo"));
-    assert!(output.contains("# keep this note"));
-    assert!(!output.contains("## keep this note"));
+    assert!(output.contains("## keep this note"));
+}
+
+#[test]
+fn a_disable_and_enable_cycle_restores_the_section_verbatim() {
+    let mut parsed: PacmanConf = parse_conf(FIXTURE_EXTRAS);
+    parsed.repos[0].enabled = false;
+    let disabled = serialize_conf(&parsed);
+
+    let mut reparsed: PacmanConf = parse_conf(&disabled);
+    reparsed.repos[0].enabled = true;
+    assert_eq!(serialize_conf(&reparsed), FIXTURE_EXTRAS);
+}
+
+#[test]
+fn a_directive_the_user_commented_out_stays_commented_after_a_cycle() {
+    let conf = "[core]\nServer = https://mirror.example.com/$repo\n#CacheServer = https://cache.example.com/$repo\n";
+
+    let mut parsed: PacmanConf = parse_conf(conf);
+    parsed.repos[0].enabled = false;
+    let disabled = serialize_conf(&parsed);
+
+    let mut reparsed: PacmanConf = parse_conf(&disabled);
+    reparsed.repos[0].enabled = true;
+    let output = serialize_conf(&reparsed);
+
+    assert!(
+        output.contains("#CacheServer = https://cache.example.com/$repo"),
+        "a CacheServer the user had switched off must not come back live: {output}"
+    );
 }

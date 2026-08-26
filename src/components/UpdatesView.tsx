@@ -350,6 +350,14 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [lockRetryExhausted, setLockRetryExhausted] = useState(false);
   const [errorEpoch, setErrorEpoch] = useState(0);
 
+  // alpm acts on a cancel only between packages; leaving mid-transaction half-applies the upgrade.
+  useEffect(() => {
+    if (state !== "applying") return;
+    const warn = (event: Event) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [state]);
+
   // Consecutive errors can commit in one render batch without ever showing
   // the intermediate state, so the epoch forces LockErrorBody to remount
   // (and re-check the lock) for each new error.
@@ -384,7 +392,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [isCancelling, setIsCancelling] = useState(false);
   // Ref mirror for the upgrade callbacks, which close over stale state.
   const isCancellingRef = useRef(false);
-  const [cancelOutcome, setCancelOutcome] = useState<"stopped" | "finished" | null>(null);
+  const [cancelOutcome, setCancelOutcome] = useState<{ kind: "stopped" | "finished"; detail?: string } | null>(null);
   const setCancelling = (value: boolean) => {
     isCancellingRef.current = value;
     setIsCancelling(value);
@@ -939,7 +947,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         autoResumedRef.current = false;
         if (isCancellingRef.current) {
           setCancelling(false);
-          setCancelOutcome("finished");
+          setCancelOutcome({ kind: "finished" });
         }
         setState("success");
         setUpdates([]);
@@ -964,10 +972,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       onError: (err, code) => {
         cancelRef.current = null;
         if (isCancellingRef.current) {
-          // The abort we requested: show stopped and refetch (partial upgrade).
           setCancelling(false);
-          setCancelOutcome("stopped");
-          setLog("");
+          setCancelOutcome({ kind: "stopped", detail: err });
           loadUpdates();
           loadRebootStatus();
           loadPacnewStatus();
@@ -1145,17 +1151,18 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
   const cancelAlert = cancelOutcome ? (
     <Alert
-      variant={cancelOutcome === "stopped" ? "info" : "success"}
-      title={cancelOutcome === "stopped"
-        ? "Upgrade stopped at a safe point"
+      variant={cancelOutcome.kind === "stopped" ? "warning" : "success"}
+      title={cancelOutcome.kind === "stopped"
+        ? "Upgrade cancelled"
         : "Upgrade finished before the cancel took effect"}
       className="pf-v6-u-mb-md"
       actionClose={<AlertActionCloseButton onClose={() => setCancelOutcome(null)} />}
     >
-      {cancelOutcome === "stopped" && (
-        upgradeProgress.current > 0
-          ? `${upgradeProgress.current} of ${upgradeProgress.total} packages were updated before stopping; the rest remain pending.`
-          : "No packages were installed."
+      {cancelOutcome.kind === "stopped" && (
+        <>
+          {cancelOutcome.detail}
+          {" The update list has been rechecked; what it shows now is what is still pending."}
+        </>
       )}
     </Alert>
   ) : null;

@@ -630,23 +630,21 @@ fn outcome_to_log_parts(
         SysupgradeOutcome::CancelledEarly(_) => (
             "failed",
             0,
-            Some("Operation cancelled or timed out before commit".to_string()),
+            Some("Operation cancelled or timed out with nothing applied".to_string()),
             None,
         ),
-        SysupgradeOutcome::Interrupted(CheckResult::TimedOut(secs)) => (
-            "failed",
-            0,
-            Some(format!(
-                "Upgrade timed out after {} seconds during commit",
-                secs
-            )),
-            None,
-        ),
-        SysupgradeOutcome::Interrupted(_) => (
+        SysupgradeOutcome::Interrupted => (
             "failed",
             0,
             Some("Upgrade interrupted during commit".to_string()),
             None,
+        ),
+        // The packages are on the system, so this is not a failed run.
+        SysupgradeOutcome::CompletedDespiteCancel { packages } => (
+            "ok",
+            *packages,
+            None,
+            Some("Upgrade finished before the cancel could take effect".to_string()),
         ),
         SysupgradeOutcome::SyncFailed(e) => (
             "failed",
@@ -921,8 +919,8 @@ mod tests {
             SysupgradeOutcome::PrepareFailed("e".into()),
             SysupgradeOutcome::CommitFailed("e".into()),
             SysupgradeOutcome::CancelledEarly(CheckResult::Cancelled),
-            SysupgradeOutcome::Interrupted(CheckResult::Cancelled),
-            SysupgradeOutcome::Interrupted(CheckResult::TimedOut(1800)),
+            SysupgradeOutcome::CancelledEarly(CheckResult::TimedOut(1800)),
+            SysupgradeOutcome::Interrupted,
         ];
         for outcome in cases {
             let (status, upgraded, error, _) = outcome_to_log_parts(&outcome);

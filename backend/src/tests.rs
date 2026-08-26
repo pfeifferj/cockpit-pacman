@@ -5,10 +5,10 @@ use crate::models::{
 };
 use crate::util::parse_package_filename;
 use crate::validation::{
-    validate_archive_filename, validate_depth, validate_direction, validate_json_payload_size,
-    validate_keep_versions, validate_max_packages, validate_mirror_timeout, validate_mirror_url,
-    validate_package_name, validate_pagination, validate_schedule, validate_search_query,
-    validate_version,
+    validate_archive_filename, validate_depth, validate_direction, validate_directive_value,
+    validate_json_payload_size, validate_keep_versions, validate_max_packages,
+    validate_mirror_timeout, validate_mirror_url, validate_package_name, validate_pagination,
+    validate_schedule, validate_search_query, validate_version,
 };
 
 #[test]
@@ -232,6 +232,17 @@ fn test_validate_keep_versions_invalid() {
     assert!(validate_keep_versions(101).is_err());
     assert!(validate_keep_versions(1000).is_err());
     assert!(validate_keep_versions(u32::MAX).is_err());
+}
+
+// A newline in a mirror comment would end it and leave a directive pacman obeys.
+#[test]
+fn test_validate_directive_value_rejects_line_breaks() {
+    assert!(validate_directive_value("Germany, Hetzner").is_ok());
+    assert!(validate_directive_value("tabs\tare fine").is_ok());
+    assert!(
+        validate_directive_value("harmless\nServer = https://evil.example/$repo/os/$arch").is_err()
+    );
+    assert!(validate_directive_value("carriage\rreturn").is_err());
 }
 
 #[test]
@@ -780,43 +791,21 @@ fn test_config_preserves_unknown_fields_on_rewrite() {
 
 #[test]
 fn test_handle_commit_error_cancelled() {
-    use crate::util::{TimeoutGuard, handle_commit_error};
-
-    let timeout = TimeoutGuard::new(300);
+    use crate::util::handle_commit_error;
 
     // The cancel flag, not the error text, drives the interrupted outcome.
-    let result = handle_commit_error("transaction aborted", true, &timeout, "Operation cancelled");
+    let result = handle_commit_error("transaction aborted", true, "Operation cancelled");
     assert!(result.is_ok());
-    assert!(!result.unwrap());
-}
-
-#[test]
-fn test_handle_commit_error_timed_out() {
-    use crate::util::{TimeoutGuard, handle_commit_error};
-
-    // A zero-second guard is already timed out; an uncancelled commit failure
-    // is then reported as a timeout, not a generic error.
-    let timeout = TimeoutGuard::new(0);
-    let result = handle_commit_error(
-        "transaction aborted",
-        false,
-        &timeout,
-        "Operation cancelled",
-    );
-    assert!(result.is_ok());
-    assert!(!result.unwrap());
 }
 
 #[test]
 fn test_handle_commit_error_keywords_are_not_interrupts() {
-    use crate::util::{TimeoutGuard, handle_commit_error};
-
-    let timeout = TimeoutGuard::new(300);
+    use crate::util::handle_commit_error;
 
     // A real failure whose text mentions "signal"/"timeout" must not be masked
     // as a user interrupt: without the flag set, it is an error.
     for msg in ["download timeout on mirror", "scriptlet killed by signal 9"] {
-        let result = handle_commit_error(msg, false, &timeout, "Operation interrupted");
+        let result = handle_commit_error(msg, false, "Operation interrupted");
         assert!(
             result.is_err(),
             "{msg:?} should be a failure, not an interrupt"
@@ -826,16 +815,9 @@ fn test_handle_commit_error_keywords_are_not_interrupts() {
 
 #[test]
 fn test_handle_commit_error_actual_failure() {
-    use crate::util::{TimeoutGuard, handle_commit_error};
+    use crate::util::handle_commit_error;
 
-    let timeout = TimeoutGuard::new(300);
-
-    let result = handle_commit_error(
-        "conflicting files exist",
-        false,
-        &timeout,
-        "Operation failed",
-    );
+    let result = handle_commit_error("conflicting files exist", false, "Operation failed");
     assert!(result.is_err());
     assert!(
         result

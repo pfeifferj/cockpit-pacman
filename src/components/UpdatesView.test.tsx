@@ -534,6 +534,38 @@ describe("UpdatesView", () => {
   });
 
   describe("Upgrade Progress", () => {
+    it("warns before leaving while an upgrade is applying", async () => {
+      let upgradeCallbacks: Parameters<typeof api.runUpgrade>[0] | undefined;
+      mockRunUpgrade.mockImplementation((callbacks) => {
+        upgradeCallbacks = callbacks;
+        return { cancel: vi.fn(), forceStop: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
+
+      expect(window.dispatchEvent(new Event("beforeunload", { cancelable: true }))).toBe(true);
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Apply 1 Update/i }));
+      });
+      await waitFor(() => {
+        expect(screen.getByText("Applying Updates")).toBeInTheDocument();
+      });
+
+      // dispatchEvent returns false once a listener has cancelled it, which is
+      // what makes the browser prompt.
+      expect(window.dispatchEvent(new Event("beforeunload", { cancelable: true }))).toBe(false);
+
+      await act(async () => {
+        upgradeCallbacks?.onComplete();
+      });
+
+      expect(window.dispatchEvent(new Event("beforeunload", { cancelable: true }))).toBe(true);
+    });
+
     it("shows progress during download phase", async () => {
       mockRunUpgrade.mockImplementation((callbacks) => {
         setTimeout(() => {
@@ -726,14 +758,54 @@ describe("UpdatesView", () => {
       });
 
       await act(async () => {
+        upgradeCallbacks?.onError("BACKEND_TERMINAL_DETAIL", "internal_error");
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/BACKEND_TERMINAL_DETAIL/)).toBeInTheDocument();
+      });
+      expect(mockCheckUpdates.mock.calls.length).toBeGreaterThan(checksBeforeCancel);
+      expect(screen.queryByText(/Failed to/)).not.toBeInTheDocument();
+    });
+
+    it("does not claim a package count after a cancel", async () => {
+      let upgradeCallbacks: api.UpgradeCallbacks | undefined;
+      mockRunUpgrade.mockImplementation((callbacks) => {
+        upgradeCallbacks = callbacks;
+        return { cancel: vi.fn(), forceStop: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Apply 1 Update/i }));
+      });
+      await waitFor(() => {
+        expect(screen.getByText("Applying Updates")).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        upgradeCallbacks?.onEvent?.({
+          type: "progress", operation: "upgrade", package: "linux",
+          percent: 100, current: 1, total: 1,
+        });
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Cancel Anyway/i }));
+      });
+      await act(async () => {
         upgradeCallbacks?.onError("Operation interrupted", "internal_error");
       });
 
       await waitFor(() => {
-        expect(screen.getByText("Upgrade stopped at a safe point")).toBeInTheDocument();
+        expect(screen.getByText(/Upgrade cancelled/)).toBeInTheDocument();
       });
-      expect(mockCheckUpdates.mock.calls.length).toBeGreaterThan(checksBeforeCancel);
-      expect(screen.queryByText(/Failed to/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/were updated before stopping/)).not.toBeInTheDocument();
     });
 
     it("shows the finished outcome when the upgrade completes despite the cancel", async () => {
