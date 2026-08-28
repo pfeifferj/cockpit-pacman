@@ -1,15 +1,19 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   Card,
   CardBody,
+  CardHeader,
   CardTitle,
+  Dropdown,
+  DropdownItem,
+  DropdownList,
   Flex,
   FlexItem,
-  Checkbox,
   Tooltip,
 } from "@patternfly/react-core";
 import { UpdateInfo, KeyringStatusResponse, formatSize } from "../api";
 import { StatBox } from "./StatBox";
+import { kebabToggle } from "./KebabToggle";
 import { useAdminPermission } from "../hooks/useAdminPermission";
 import { useNavigation } from "../contexts/NavigationContext";
 
@@ -33,10 +37,37 @@ export const SystemOverviewCard: React.FC<{
   const { onViewOrphans, onViewCache, onViewKeyring, onViewSignoffs } = useNavigation();
   const isAdmin = useAdminPermission();
   const mayToggle = isAdmin === true && !securityToggleBusy;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const settingsMenu = (
+    <Dropdown
+      isOpen={menuOpen}
+      onOpenChange={setMenuOpen}
+      popperProps={{ position: "right" }}
+      toggle={kebabToggle("Overview settings", menuOpen, () => setMenuOpen(!menuOpen))}
+    >
+      <DropdownList>
+        <DropdownItem
+          hasCheckbox
+          isSelected={securityEnabled}
+          isDisabled={!mayToggle}
+          description={
+            isAdmin === false
+              ? "Not permitted to change system settings"
+              : "Queries the Arch Security Tracker for installed packages"
+          }
+          onClick={() => onSetSecurityEnabled(!securityEnabled)}
+        >
+          Check security advisories
+        </DropdownItem>
+      </DropdownList>
+    </Dropdown>
+  );
   return (
   <Card className="pf-v6-u-mb-md">
+    <CardHeader actions={{ actions: settingsMenu, hasNoOffset: true }}>
+      <CardTitle>System Overview</CardTitle>
+    </CardHeader>
     <CardBody>
-      <CardTitle className="pf-v6-u-m-0 pf-v6-u-mb-md">System Overview</CardTitle>
       <Flex spaceItems={{ default: "spaceItemsLg" }}>
         <FlexItem>
           <StatBox
@@ -45,46 +76,25 @@ export const SystemOverviewCard: React.FC<{
             color={updates.length > 0 ? "danger" : "success"}
           />
         </FlexItem>
-        <FlexItem>
-          <Flex direction={{ default: "column" }} spaceItems={{ default: "spaceItemsXs" }}>
-            <FlexItem>
-          <StatBox
-            label={securityFilterActive ? "Show all" : "Security"}
-            value={
-              securityFilterActive
-                ? (updates.length).toLocaleString()
-                : securityLoading || securityUnavailable || !securityEnabled
-                  ? "-"
-                  : (securityCount).toLocaleString()
-            }
-            color={!securityFilterActive && !securityUnavailable && securityCount > 0 ? "danger" : "default"}
-            isLoading={securityLoading}
-            onClick={securityFilterable ? onToggleSecurityFilter : undefined}
-            isActive={securityFilterable ? securityFilterActive : undefined}
-            ariaLabel={securityFilterActive ? "Show all updates" : "Filter to security updates"}
-          />
-            </FlexItem>
-            <FlexItem>
-              <Tooltip
-                content={
-                  isAdmin === false
-                    ? "Not permitted to change system settings"
-                    : "Stop checking the Arch Security Tracker. Its records can stay open long after a fix ships."
-                }
-              >
-                <div>
-                  <Checkbox
-                    id="security-advisories-enabled"
-                    label="Check advisories"
-                    isChecked={securityEnabled}
-                    isDisabled={!mayToggle}
-                    onChange={(_e, checked) => onSetSecurityEnabled(checked)}
-                  />
-                </div>
-              </Tooltip>
-            </FlexItem>
-          </Flex>
-        </FlexItem>
+        {securityEnabled && (
+          <FlexItem>
+            <StatBox
+              label={securityFilterActive ? "Show all" : "Security"}
+              value={
+                securityFilterActive
+                  ? (updates.length).toLocaleString()
+                  : securityLoading || securityUnavailable
+                    ? "-"
+                    : (securityCount).toLocaleString()
+              }
+              color={!securityFilterActive && !securityUnavailable && securityCount > 0 ? "danger" : "default"}
+              isLoading={securityLoading}
+              onClick={securityFilterable ? onToggleSecurityFilter : undefined}
+              isActive={securityFilterable ? securityFilterActive : undefined}
+              ariaLabel={securityFilterActive ? "Show all updates" : "Filter to security updates"}
+            />
+          </FlexItem>
+        )}
         <FlexItem>
           <Tooltip content="Packages installed as dependencies that are no longer required by any other package. Usually safe to remove.">
             <div>

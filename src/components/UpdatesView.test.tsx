@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, act, cleanup, within } from "@testing-library/react";
 import { UpdatesView } from "./UpdatesView";
 import * as api from "../api";
-import { mockTransportControl } from "../test/setup";
+import { mockPermission, mockTransportControl } from "../test/setup";
 import {
   mockUpdatesResponse,
   mockPreflightResponse,
@@ -1958,7 +1958,7 @@ describe("UpdatesView", () => {
       expect(screen.queryByText("High")).not.toBeInTheDocument();
     });
 
-    it("does not report zero advisories when the feature is disabled", async () => {
+    it("hides the security tile when the feature is disabled", async () => {
       mockCheckUpdates.mockResolvedValue(onePackage);
       mockCheckSecurity.mockResolvedValue({ advisories: [], disabled: true });
 
@@ -1967,8 +1967,9 @@ describe("UpdatesView", () => {
         expect(screen.getByText("zzz-package")).toBeInTheDocument();
       });
 
-      const tile = screen.getByText("Security").closest("div")!.parentElement!;
-      expect(tile).toHaveTextContent("-");
+      await waitFor(() => {
+        expect(screen.queryByText("Security")).not.toBeInTheDocument();
+      });
     });
 
     it("writes the setting and reloads when the toggle is unchecked", async () => {
@@ -1978,7 +1979,8 @@ describe("UpdatesView", () => {
       mockSetAdvisories.mockResolvedValue({ success: true, message: "Settings saved" });
 
       render(<UpdatesView />);
-      const toggle = await screen.findByRole("checkbox", { name: "Check advisories" });
+      fireEvent.click(await screen.findByRole("button", { name: "Overview settings" }));
+      const toggle = await screen.findByRole("checkbox", { name: /Check security advisories/ });
       expect(toggle).toBeChecked();
 
       mockCheckSecurity.mockResolvedValue({ advisories: [], disabled: true });
@@ -1990,6 +1992,25 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(toggle).not.toBeChecked();
       });
+      await waitFor(() => {
+        expect(mockCheckSecurity.mock.calls.length).toBeGreaterThan(1);
+      });
+    });
+
+    it("offers the toggle read-only to a session without administrative access", async () => {
+      mockPermission.mockReturnValueOnce({
+        allowed: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        close: vi.fn(),
+      });
+      mockCheckUpdates.mockResolvedValue(onePackage);
+      mockCheckSecurity.mockResolvedValue({ advisories: [], disabled: false });
+
+      render(<UpdatesView />);
+      fireEvent.click(await screen.findByRole("button", { name: "Overview settings" }));
+      const toggle = await screen.findByRole("checkbox", { name: /Check security advisories/ });
+      expect(toggle).toBeDisabled();
     });
 
     it("reverts the toggle when the setting cannot be written", async () => {
@@ -1999,7 +2020,8 @@ describe("UpdatesView", () => {
       mockSetAdvisories.mockRejectedValue(new Error("write failed"));
 
       render(<UpdatesView />);
-      const toggle = await screen.findByRole("checkbox", { name: "Check advisories" });
+      fireEvent.click(await screen.findByRole("button", { name: "Overview settings" }));
+      const toggle = await screen.findByRole("checkbox", { name: /Check security advisories/ });
       expect(toggle).toBeChecked();
 
       fireEvent.click(toggle);
