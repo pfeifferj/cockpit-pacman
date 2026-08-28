@@ -725,6 +725,11 @@ export async function getPacnewStatus(): Promise<PacnewStatus> {
   return runBackend<PacnewStatus>("pacnew-status", [], { superuser: "none" });
 }
 
+export async function getBackendVersion(): Promise<string> {
+  const { version } = await runBackend<{ version: string }>("version", [], { superuser: "none" });
+  return version;
+}
+
 export function rebootSystem(): Promise<void> {
   const client = cockpit.dbus("org.freedesktop.login1", { bus: "system", superuser: "try" });
   return client

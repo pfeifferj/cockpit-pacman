@@ -28,8 +28,16 @@ Object.defineProperty(window, "localStorage", { value: localStorageMock });
 const mockSpawn = vi.fn();
 const mockTransportControl = vi.fn();
 
+const mockPermission = vi.fn(() => ({
+  allowed: true as boolean | null,
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+  close: vi.fn(),
+}));
+
 const cockpitMock = {
   spawn: mockSpawn,
+  permission: mockPermission,
   transport: {
     control: mockTransportControl,
   },
@@ -37,4 +45,4 @@ const cockpitMock = {
 
 vi.stubGlobal("cockpit", cockpitMock);
 
-export { mockSpawn, mockTransportControl };
+export { mockSpawn, mockTransportControl, mockPermission };

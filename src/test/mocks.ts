@@ -394,11 +394,13 @@ export const mockDependencyTreeResponse: DependencyTreeResponse = {
 
 export const mockServicesStatus: ServicesStatus = {
   restart_required: false,
+  scan_incomplete: false,
   services: [],
 };
 
 export const mockServicesStatusWithServices: ServicesStatus = {
   restart_required: true,
+  scan_incomplete: false,
   services: [
     {
       name: "nginx.service",
@@ -417,6 +419,7 @@ export const mockServicesStatusWithServices: ServicesStatus = {
 
 export const mockServicesStatusMixed: ServicesStatus = {
   restart_required: true,
+  scan_incomplete: false,
   services: [
     {
       name: "nginx.service",

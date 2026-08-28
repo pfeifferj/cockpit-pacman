@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild src/index.tsx --bundle --outfile=dist/index.js --minify --sourcemap --target=es2020 --loader:.tsx=tsx --loader:.ts=ts --loader:.woff2=dataurl --loader:.woff=dataurl --loader:.ttf=dataurl --loader:.svg=dataurl --loader:.eot=dataurl",
-    "watch": "esbuild src/index.tsx --bundle --outfile=dist/index.js --sourcemap --target=es2020 --loader:.tsx=tsx --loader:.ts=ts --loader:.woff2=dataurl --loader:.woff=dataurl --loader:.ttf=dataurl --loader:.svg=dataurl --loader:.eot=dataurl --watch",
+    "build": "esbuild src/index.tsx --bundle --define:__BUNDLE_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js --minify --sourcemap --target=es2020 --loader:.tsx=tsx --loader:.ts=ts --loader:.woff2=dataurl --loader:.woff=dataurl --loader:.ttf=dataurl --loader:.svg=dataurl --loader:.eot=dataurl",
+    "watch": "esbuild src/index.tsx --bundle --define:__BUNDLE_VERSION__=\"\\\"$npm_package_version\\\"\" --outfile=dist/index.js --sourcemap --target=es2020 --loader:.tsx=tsx --loader:.ts=ts --loader:.woff2=dataurl --loader:.woff=dataurl --loader:.ttf=dataurl --loader:.svg=dataurl --loader:.eot=dataurl --watch",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.e2e.json",
     "lint": "eslint src/ e2e/",
     "lint:fix": "eslint src/ --fix",

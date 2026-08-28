@@ -1,8 +1,13 @@
 # Configuration
 
 Persistent settings live in `/etc/cockpit-pacman/config.json`. The file is owned
-by root, written `0600`, and normally managed through the plugin UI. The backend
-rewrites it atomically under a lock, so hand edits are safe between operations.
+by root and written `0644`: only root may change it, but the plugin reads it as
+the logged-in user, so it has to be world-readable. It is normally managed
+through the plugin UI. The backend rewrites it atomically under a lock, so hand
+edits are safe between operations.
+
+A file written by an older version is `0600` and stays that way until the next
+save, which rewrites it `0644`.
 
 ## Schema
 

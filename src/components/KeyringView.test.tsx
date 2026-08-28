@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, act, cleanup } from "@testing-library/react";
 import { KeyringView } from "./KeyringView";
 import * as api from "../api";
+import { mockPermission } from "../test/setup";
 
 vi.mock("../api", async () => {
   const actual = await vi.importActual("../api");
@@ -43,6 +44,7 @@ const mockKeyringResponse: api.KeyringStatusResponse = {
   ],
   total: 3,
   master_key_initialized: true,
+  status: "ready",
   warnings: [],
 };
 
@@ -50,6 +52,7 @@ const mockUninitializedKeyring: api.KeyringStatusResponse = {
   keys: [],
   total: 0,
   master_key_initialized: false,
+  status: "uninitialized",
   warnings: ["Keyring not initialized"],
 };
 
@@ -282,6 +285,60 @@ describe("KeyringView", () => {
     expect(mockCancel).toHaveBeenCalled();
   });
 
+  it("does not offer to initialize a keyring it could not read", async () => {
+    mockGetKeyringStatus.mockResolvedValue({
+      keys: [],
+      total: 0,
+      master_key_initialized: false,
+      status: "undetermined",
+      warnings: ["Failed to check keyring status: permission denied (requires root)"],
+    });
+
+    render(<KeyringView />);
+
+    expect(
+      await screen.findByText(/Keyring state could not be determined/i)
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Initialize Keyring/i })
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/Keyring not initialized/i)).not.toBeInTheDocument();
+  });
+
+  it("disables initialization for a session without admin access", async () => {
+    mockPermission.mockReturnValueOnce({
+      allowed: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      close: vi.fn(),
+    });
+    mockGetKeyringStatus.mockResolvedValue(mockUninitializedKeyring);
+
+    render(<KeyringView />);
+
+    const button = await screen.findByRole("button", { name: /Initialize Keyring/i });
+    expect(button).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("ignores clicks on the disabled initialize button", async () => {
+    mockPermission.mockReturnValueOnce({
+      allowed: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      close: vi.fn(),
+    });
+    mockGetKeyringStatus.mockResolvedValue(mockUninitializedKeyring);
+
+    render(<KeyringView />);
+
+    const button = await screen.findByRole("button", { name: /Initialize Keyring/i });
+    await act(async () => {
+      fireEvent.click(button);
+    });
+
+    expect(mockInitKeyring).not.toHaveBeenCalled();
+  });
+
   it("shows initialize keyring for uninitialized keyring", async () => {
     mockGetKeyringStatus.mockResolvedValue(mockUninitializedKeyring);
 
@@ -375,6 +432,7 @@ describe("KeyringView", () => {
       keys: manyKeys,
       total: 75,
       master_key_initialized: true,
+      status: "ready",
       warnings: [],
     });
 

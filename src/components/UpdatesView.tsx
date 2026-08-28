@@ -1221,8 +1221,11 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     </Alert>
   ) : null;
 
+  // Keyed by mtime as well as path so that merging a .pacnew away and having a
+  // later upgrade write a new one to the same path is not treated as the file
+  // the user already dismissed.
   const pacnewSignature = useMemo(
-    () => (pacnewStatus?.files ?? []).map((f) => f.path).sort().join(","),
+    () => (pacnewStatus?.files ?? []).map((f) => `${f.path}@${f.mtime}`).sort().join(","),
     [pacnewStatus],
   );
 
@@ -1302,6 +1305,19 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     () => (servicesStatus?.services ?? []).map((s) => s.name).sort().join(","),
     [servicesStatus],
   );
+  const servicesPartialAlert = servicesStatus?.scan_incomplete ? (
+    <Alert
+      variant="info"
+      isInline
+      title="Service check was incomplete"
+      className="pf-v6-u-mb-md"
+    >
+      Some running processes could not be inspected, so services needing a
+      restart may be missing from this list. Turn on administrative access for a
+      complete answer.
+    </Alert>
+  ) : null;
+
   const servicesAlert = servicesStatus?.restart_required
     && servicesSignature !== ""
     && dismissedServicesSignature !== undefined
@@ -1570,6 +1586,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
           {cancelAlert}
           {lockClearedAlert}
           {rebootAlert}
+          {servicesPartialAlert}
           {servicesAlert}
           {pacnewAlert}
           {scheduledAlert}
@@ -1597,7 +1614,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         {cancelAlert}
         {lockClearedAlert}
         {rebootAlert}
-        {servicesAlert}
+        {servicesPartialAlert}
+          {servicesAlert}
         {pacnewAlert}
         {scheduledAlert}
         {warnings.length > 0 && (
@@ -1610,7 +1628,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         {newsErrorAlert}
         {securityStaleAlert}
         {newsAlerts}
-        {keyringStatus && !keyringStatus.master_key_initialized && (
+        {keyringStatus?.status === "uninitialized" && (
           <Alert variant="warning" title="Keyring not initialized" isInline className="pf-v6-u-mb-md">
             The pacman keyring is not initialized. Package signature verification may fail.
           </Alert>
@@ -1696,7 +1714,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       {cancelAlert}
       {lockClearedAlert}
       {rebootAlert}
-      {servicesAlert}
+      {servicesPartialAlert}
+          {servicesAlert}
       {pacnewAlert}
       {scheduledAlert}
       {warnings.length > 0 && (
@@ -1709,7 +1728,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       {newsErrorAlert}
       {securityStaleAlert}
       {newsAlerts}
-      {keyringStatus && !keyringStatus.master_key_initialized && (
+      {keyringStatus?.status === "uninitialized" && (
         <Alert variant="warning" title="Keyring not initialized" isInline className="pf-v6-u-mb-md">
           The pacman keyring is not initialized. Package signature verification may fail.
         </Alert>

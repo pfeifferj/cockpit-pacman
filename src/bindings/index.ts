@@ -32,7 +32,9 @@ export type IgnoredPackagesResponse = { packages: Array<string>, total: number, 
 
 export type KeyringKey = { fingerprint: string, uid: string, created: string | null, expires: string | null, trust: string, };
 
-export type KeyringStatusResponse = { keys: Array<KeyringKey>, total: number, master_key_initialized: boolean, warnings: Array<string>, };
+export type KeyringState = "ready" | "uninitialized" | "undetermined";
+
+export type KeyringStatusResponse = { keys: Array<KeyringKey>, total: number, master_key_initialized: boolean, status: KeyringState, warnings: Array<string>, };
 
 export type ListReposResponse = { repos: Array<RepoEntry>, };
 
@@ -82,7 +84,7 @@ export type PackageListResponse = { packages: Array<Package>, total: number, tot
 
 export type PackageSecurityAdvisory = { package: string, severity: string, advisory_type: string, avg_name: string, cve_ids: Array<string>, fixed_version: string | null, status: string, };
 
-export type PacnewFile = { path: string, package: string, kind: string, };
+export type PacnewFile = { path: string, package: string, kind: string, mtime: number, };
 
 export type PacnewStatus = { has_pacnew: boolean, files: Array<PacnewFile>, };
 
@@ -163,7 +165,11 @@ stale?: boolean, };
 
 export type ServiceRestart = { name: string, pid: number, affected_packages: Array<string>, reason: string, restart_blocked?: RestartBlocked | null, };
 
-export type ServicesStatus = { restart_required: boolean, services: Array<ServiceRestart>, };
+export type ServicesStatus = { restart_required: boolean, services: Array<ServiceRestart>, 
+/**
+ * The scan could not see every process, so `services` may be short.
+ */
+scan_incomplete: boolean, };
 
 /**
  * Wire mirror of archweb_client's Signoff so the type can derive TS bindings

@@ -1059,7 +1059,9 @@ fn test_parse_rss_body_decodes_hex_entity_en_dash() {
 
 #[cfg(feature = "integration-tests")]
 mod integration {
-    use crate::alpm::get_handle;
+    use crate::alpm::{get_handle, resolve_file_owners};
+    use crate::handlers::dependency::build_dependency_tree;
+    use std::collections::HashSet;
 
     #[test]
     fn test_get_handle_succeeds() {
@@ -1099,6 +1101,60 @@ mod integration {
         }
 
         assert!(found, "Expected to find 'pacman' package in sync databases");
+    }
+
+    #[test]
+    fn resolve_file_owners_answers_only_what_was_asked() {
+        let handle = get_handle().expect("Failed to get handle");
+        let owned = "/usr/lib/libsystemd.so.0";
+        let unowned = "/etc/ld.so.cache";
+
+        let wanted: HashSet<String> = [owned, unowned].iter().map(|s| s.to_string()).collect();
+        let owners = resolve_file_owners(&handle, &wanted);
+
+        assert_eq!(
+            owners.get(owned).map(String::as_str),
+            Some("systemd-libs"),
+            "a file pacman owns must resolve to its package"
+        );
+        assert!(
+            !owners.contains_key(unowned),
+            "a file no package owns must not appear"
+        );
+        assert_eq!(
+            owners.len(),
+            1,
+            "nothing beyond the asked-for paths is kept"
+        );
+    }
+
+    #[test]
+    fn a_high_fan_out_tree_stays_within_the_node_cap() {
+        let tree = build_dependency_tree("glibc", 3, "reverse").expect("tree");
+
+        assert!(
+            tree.nodes.len() <= 500,
+            "node cap exceeded: {} nodes",
+            tree.nodes.len()
+        );
+        if tree.nodes.len() == 500 {
+            assert!(
+                tree.warnings.iter().any(|w| w.contains("truncated")),
+                "a truncated graph has to say so: {:?}",
+                tree.warnings
+            );
+        }
+
+        let ids: std::collections::HashSet<&str> =
+            tree.nodes.iter().map(|n| n.id.as_str()).collect();
+        for edge in &tree.edges {
+            assert!(
+                ids.contains(edge.source.as_str()) && ids.contains(edge.target.as_str()),
+                "edge {:?} -> {:?} has no node",
+                edge.source,
+                edge.target
+            );
+        }
     }
 
     #[test]

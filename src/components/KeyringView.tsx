@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { usePagination } from "../hooks/usePagination";
 import { useSortableTable } from "../hooks/useSortableTable";
+import { useAdminPermission } from "../hooks/useAdminPermission";
 import {
   Card,
   CardBody,
@@ -45,6 +46,16 @@ import { TimeAgo } from "./TimeAgo";
 import { appendCapped, sanitizeErrorMessage } from "../utils";
 
 type ViewState = "loading" | "ready" | "refreshing" | "initializing" | "error";
+
+const KeyringWarnings: React.FC<{ warnings: string[] }> = ({ warnings }) => (
+  <>
+    {warnings.map((warning, i) => (
+      <Alert key={`${warning}-${i}`} variant="warning" title="Keyring Warning" className="pf-v6-u-mb-md">
+        {warning}
+      </Alert>
+    ))}
+  </>
+);
 
 export const KeyringView: React.FC = () => {
   const [state, setState] = useState<ViewState>("loading");
@@ -124,6 +135,8 @@ export const KeyringView: React.FC = () => {
     });
     cancelRef.current = cancel;
   };
+
+  const canAdminister = useAdminPermission();
 
   const handleInitKeyring = () => {
     setState("initializing");
@@ -318,14 +331,29 @@ export const KeyringView: React.FC = () => {
     );
   }
 
+  if (keyringData?.status === "undetermined") {
+    return (
+      <>
+        <KeyringWarnings warnings={keyringData.warnings} />
+        <Card>
+          <CardBody>
+            <EmptyState headingLevel="h2" icon={KeyIcon} titleText="Keyring state could not be determined">
+              <EmptyStateBody>
+                The keyring check did not produce a definite answer. The warning
+                above says why; a session without administrative access is the
+                most common cause.
+              </EmptyStateBody>
+            </EmptyState>
+          </CardBody>
+        </Card>
+      </>
+    );
+  }
+
   if (!keyringData?.master_key_initialized) {
     return (
       <>
-        {keyringData?.warnings.map((warning, i) => (
-          <Alert key={`${warning}-${i}`} variant="warning" title="Keyring Warning" className="pf-v6-u-mb-md">
-            {warning}
-          </Alert>
-        ))}
+        <KeyringWarnings warnings={keyringData?.warnings ?? []} />
         <Card>
           <CardBody>
             <EmptyState headingLevel="h2" icon={KeyIcon} titleText="Keyring not initialized">
@@ -334,9 +362,18 @@ export const KeyringView: React.FC = () => {
               </EmptyStateBody>
               <EmptyStateFooter>
                 <EmptyStateActions>
-                  <Button variant="primary" onClick={handleInitKeyring}>
-                    Initialize Keyring
-                  </Button>
+                  <Tooltip
+                    content="Not permitted to initialize the keyring"
+                    trigger={canAdminister === false ? "mouseenter focus" : "manual"}
+                  >
+                    <Button
+                      variant="primary"
+                      onClick={handleInitKeyring}
+                      isAriaDisabled={canAdminister === false}
+                    >
+                      Initialize Keyring
+                    </Button>
+                  </Tooltip>
                 </EmptyStateActions>
               </EmptyStateFooter>
             </EmptyState>
@@ -348,11 +385,7 @@ export const KeyringView: React.FC = () => {
 
   return (
     <>
-      {keyringData?.warnings.map((warning, i) => (
-        <Alert key={`${warning}-${i}`} variant="warning" title="Warning" className="pf-v6-u-mb-md">
-          {warning}
-        </Alert>
-      ))}
+      <KeyringWarnings warnings={keyringData?.warnings ?? []} />
 
       <Card>
         <CardBody>

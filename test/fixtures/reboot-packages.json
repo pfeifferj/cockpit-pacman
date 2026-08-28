@@ -1,0 +1,17 @@
+{
+  "_comment": "Packages whose update means a reboot, not a service restart. Shared so the frontend list (src/constants.ts) and the backend list (backend/src/handlers/services.rs) cannot drift apart.",
+  "kernels": [
+    "linux",
+    "linux-lts",
+    "linux-zen",
+    "linux-hardened",
+    "linux-rt",
+    "linux-rt-lts"
+  ],
+  "critical": [
+    "systemd",
+    "linux-firmware",
+    "amd-ucode",
+    "intel-ucode"
+  ]
+}

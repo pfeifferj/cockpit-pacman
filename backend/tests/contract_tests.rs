@@ -814,6 +814,7 @@ fn keyring_status_response_shape() {
         keys: vec![],
         total: 42,
         master_key_initialized: true,
+        status: cockpit_pacman_backend::models::KeyringState::Ready,
         warnings: vec![],
     };
     let v = to_json(&response);
@@ -1186,6 +1187,7 @@ fn pacnew_status_shape() {
             path: "/etc/pacman.conf.pacnew".into(),
             package: "pacman".into(),
             kind: "pacnew".into(),
+            mtime: 1750000000,
         }],
     };
     let v = to_json(&status);
@@ -1197,6 +1199,7 @@ fn pacnew_status_shape() {
     assert_string(file, "path");
     assert_string(file, "package");
     assert_string(file, "kind");
+    assert_number(file, "mtime");
 
     assert_eq!(v["has_pacnew"], true);
     assert_eq!(file["kind"], "pacnew");
@@ -1910,6 +1913,7 @@ fn services_status_shape() {
             reason: "deleted_mappings".into(),
             restart_blocked: None,
         }],
+        scan_incomplete: false,
     };
     let v = to_json(&status);
 

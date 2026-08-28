@@ -141,6 +141,14 @@ pub struct AppConfig {
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
+fn parse_config(content: &str) -> Result<AppConfig> {
+    if content.trim().is_empty() {
+        return Ok(AppConfig::default());
+    }
+    serde_json::from_str(content)
+        .with_context(|| format!("Failed to parse config from {}", CONFIG_PATH))
+}
+
 impl AppConfig {
     pub fn load() -> Result<Self> {
         use std::io::Read;
@@ -159,6 +167,15 @@ impl AppConfig {
             }
         };
 
+        // A config written before 0644 stays 0600 until rewritten; heal it on
+        // any root read so unprivileged reads work after an upgrade.
+        if unsafe { libc::geteuid() } == 0
+            && let Ok(meta) = file.metadata()
+            && meta.permissions().mode() & 0o777 == 0o600
+        {
+            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o644));
+        }
+
         // Lock BEFORE reading
         file.lock_shared()
             .with_context(|| format!("Failed to acquire read lock on {}", CONFIG_PATH))?;
@@ -170,9 +187,7 @@ impl AppConfig {
             .read_to_string(&mut content)
             .with_context(|| format!("Failed to read config from {}", CONFIG_PATH))?;
 
-        // Lock is automatically released when file is dropped
-        serde_json::from_str(&content)
-            .with_context(|| format!("Failed to parse config from {}", CONFIG_PATH))
+        parse_config(&content)
     }
 
     /// Read-modify-write the on-disk config under a sidecar lock. The lock is a
@@ -190,9 +205,7 @@ impl AppConfig {
 
         crate::util::with_file_lock(Path::new(CONFIG_LOCK_PATH), || {
             let mut config = match fs::read_to_string(path) {
-                Ok(content) if content.trim().is_empty() => AppConfig::default(),
-                Ok(content) => serde_json::from_str(&content)
-                    .with_context(|| format!("Failed to parse config from {}", CONFIG_PATH))?,
+                Ok(content) => parse_config(&content)?,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => AppConfig::default(),
                 Err(e) => {
                     return Err(e)
@@ -202,7 +215,7 @@ impl AppConfig {
 
             let result = mutate(&mut config)?;
 
-            crate::util::write_json_atomic_with_mode(path, &config, 0o600)
+            crate::util::write_json_atomic_with_mode(path, &config, 0o644)
                 .with_context(|| format!("Failed to write config to {}", CONFIG_PATH))?;
 
             Ok(result)
@@ -506,6 +519,23 @@ mod tests {
 
     fn temp(tag: &str) -> PathBuf {
         std::env::temp_dir().join(format!("cpac-dropin-{}-{}", tag, std::process::id()))
+    }
+
+    #[test]
+    fn an_empty_config_parses_as_defaults() {
+        assert!(super::parse_config("").unwrap().ignored_packages.is_empty());
+        assert!(
+            super::parse_config("  \n ")
+                .unwrap()
+                .ignored_packages
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_malformed_config_is_an_error() {
+        assert!(super::parse_config("{ not json").is_err());
+        assert!(super::parse_config("[]").is_err());
     }
 
     #[test]

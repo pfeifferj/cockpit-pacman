@@ -40,6 +40,8 @@ vi.mock("../api", async () => {
     servicesDismissal: { get: vi.fn(), mark: vi.fn() },
     rebootDismissal: { get: vi.fn(), mark: vi.fn() },
     scheduledDismissal: { get: vi.fn(), mark: vi.fn() },
+    pacnewDismissal: { get: vi.fn(), mark: vi.fn() },
+    getPacnewStatus: vi.fn(),
     getScheduledRuns: vi.fn(),
     checkLock: vi.fn(),
     removeStaleLock: vi.fn(),
@@ -74,6 +76,9 @@ const mockMarkRebootDismissed = vi.mocked(api.rebootDismissal.mark);
 const mockGetScheduledRuns = vi.mocked(api.getScheduledRuns);
 const mockGetScheduledDismissal = vi.mocked(api.scheduledDismissal.get);
 const mockMarkScheduledDismissed = vi.mocked(api.scheduledDismissal.mark);
+const mockGetPacnewStatus = vi.mocked(api.getPacnewStatus);
+const mockGetPacnewDismissal = vi.mocked(api.pacnewDismissal.get);
+const mockMarkPacnewDismissed = vi.mocked(api.pacnewDismissal.mark);
 
 describe("UpdatesView", () => {
   beforeEach(() => {
@@ -104,6 +109,7 @@ describe("UpdatesView", () => {
       keys: [],
       total: 10,
       master_key_initialized: true,
+      status: "ready",
       warnings: [],
     });
     mockFetchNews.mockResolvedValue(mockNewsResponseEmpty);
@@ -120,6 +126,9 @@ describe("UpdatesView", () => {
     mockGetScheduledRuns.mockResolvedValue({ runs: [], total: 0 });
     mockGetScheduledDismissal.mockResolvedValue({ signature: null });
     mockMarkScheduledDismissed.mockResolvedValue(undefined);
+    mockGetPacnewStatus.mockResolvedValue({ has_pacnew: false, files: [] });
+    mockGetPacnewDismissal.mockResolvedValue({ signature: null });
+    mockMarkPacnewDismissed.mockResolvedValue(undefined);
     mockRunUpgrade.mockReturnValue({ cancel: vi.fn(), forceStop: vi.fn() });
     mockSyncDatabase.mockImplementation((callbacks) => {
       setTimeout(() => callbacks.onComplete(), 0);
@@ -2279,6 +2288,33 @@ describe("UpdatesView", () => {
       setHostname(originalHostname);
     });
 
+    it("says so when the scan could not inspect every process", async () => {
+      mockGetServicesStatus.mockResolvedValue({
+        restart_required: false,
+        services: [],
+        scan_incomplete: true,
+      });
+      render(<UpdatesView />);
+
+      expect(
+        await screen.findByText("Service check was incomplete")
+      ).toBeInTheDocument();
+    });
+
+    it("stays quiet when the scan was complete and found nothing", async () => {
+      mockGetServicesStatus.mockResolvedValue({
+        restart_required: false,
+        services: [],
+        scan_incomplete: false,
+      });
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText("Service check was incomplete")).not.toBeInTheDocument();
+    });
+
     it("renders the alert with both sections and tags blocked rows", async () => {
       setHostname("fronker.example");
       mockGetServicesStatus.mockResolvedValue(mockServicesStatusMixed);
@@ -2621,6 +2657,71 @@ describe("UpdatesView", () => {
       await waitFor(() =>
         expect(screen.queryByText("Last scheduled upgrade failed")).not.toBeInTheDocument(),
       );
+    });
+  });
+
+  describe("Keyring status alerts", () => {
+    it("warns when the keyring is uninitialized", async () => {
+      mockGetKeyringStatus.mockResolvedValue({
+        keys: [],
+        total: 0,
+        master_key_initialized: false,
+        status: "uninitialized",
+        warnings: [],
+      });
+      render(<UpdatesView />);
+
+      expect(await screen.findByText("Keyring not initialized")).toBeInTheDocument();
+    });
+
+    it("stays quiet when the keyring state is undetermined", async () => {
+      mockGetKeyringStatus.mockResolvedValue({
+        keys: [],
+        total: 0,
+        master_key_initialized: false,
+        status: "undetermined",
+        warnings: ["Failed to check keyring status: permission denied (requires root)"],
+      });
+      render(<UpdatesView />);
+
+      expect(
+        await screen.findByText("Failed to check keyring status: permission denied (requires root)"),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Keyring not initialized")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Pacnew alerts", () => {
+    const pacnewStatus = (mtime: number) => ({
+      has_pacnew: true,
+      files: [{ path: "/etc/pacman.conf", package: "pacman", kind: "pacnew", mtime }],
+    });
+
+    it("resurfaces a dismissed alert when the same file changes again", async () => {
+      mockGetPacnewStatus.mockResolvedValue(pacnewStatus(1700000000));
+      render(<UpdatesView />);
+      expect(await screen.findByText("Configuration files need merging")).toBeInTheDocument();
+
+      const closeButtons = screen.getAllByRole("button").filter(
+        (btn) => btn.getAttribute("aria-label")?.includes("Configuration files need merging"),
+      );
+      expect(closeButtons.length).toBeGreaterThan(0);
+      await act(async () => {
+        fireEvent.click(closeButtons[0]);
+      });
+
+      await waitFor(() => {
+        expect(mockMarkPacnewDismissed).toHaveBeenCalled();
+      });
+      expect(screen.queryByText("Configuration files need merging")).not.toBeInTheDocument();
+      const dismissedSignature = mockMarkPacnewDismissed.mock.calls[0][0];
+
+      cleanup();
+      mockGetPacnewDismissal.mockResolvedValue({ signature: dismissedSignature });
+      mockGetPacnewStatus.mockResolvedValue(pacnewStatus(1700009999));
+      render(<UpdatesView />);
+
+      expect(await screen.findByText("Configuration files need merging")).toBeInTheDocument();
     });
   });
 });

@@ -20,7 +20,7 @@ use crate::util::{
     setup_signal_handler, spawn_cancel_listener,
 };
 
-const KERNEL_PACKAGES: &[&str] = &[
+pub(crate) const KERNEL_PACKAGES: &[&str] = &[
     "linux",
     "linux-lts",
     "linux-zen",

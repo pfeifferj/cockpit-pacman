@@ -53,6 +53,7 @@ export function useForceGraph(
   rootId: string,
   options: ForceGraphOptions
 ): ForceGraphResult {
+  const { width, height, onNodeClick, onNodeDoubleClick } = options;
   const svgRef = useRef<SVGSVGElement>(null!);
   const simulationRef = useRef<Simulation<ForceGraphNode, ForceGraphEdge> | null>(null);
   const zoomRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
@@ -62,9 +63,9 @@ export function useForceGraph(
     const svg = select(svgRef.current);
     svg.transition().duration(750).call(
       zoomRef.current.transform,
-      zoomIdentity.translate(options.width / 2, options.height / 2)
+      zoomIdentity.translate(width / 2, height / 2)
     );
-  }, [options.width, options.height]);
+  }, [width, height]);
 
   useEffect(() => {
     if (!svgRef.current || nodes.length === 0) return;
@@ -97,7 +98,7 @@ export function useForceGraph(
     zoomRef.current = zoomBehavior;
     svg.call(zoomBehavior);
     svg.on("dblclick.zoom", null);
-    svg.call(zoomBehavior.transform, zoomIdentity.translate(options.width / 2, options.height / 2));
+    svg.call(zoomBehavior.transform, zoomIdentity.translate(width / 2, height / 2));
 
     const simulation = forceSimulation<ForceGraphNode>(graphNodes)
       .force("link", forceLink<ForceGraphNode, ForceGraphEdge>(graphEdges)
@@ -182,7 +183,7 @@ export function useForceGraph(
       if (clickTimer) clearTimeout(clickTimer);
       clickTimer = setTimeout(() => {
         clickTimer = null;
-        options.onNodeClick?.(d);
+        onNodeClick?.(d);
       }, 250);
     });
 
@@ -191,7 +192,7 @@ export function useForceGraph(
         clearTimeout(clickTimer);
         clickTimer = null;
       }
-      options.onNodeDoubleClick?.(d);
+      onNodeDoubleClick?.(d);
     });
 
     node.append("title")
@@ -211,7 +212,7 @@ export function useForceGraph(
       if (clickTimer) clearTimeout(clickTimer);
       simulation.stop();
     };
-  }, [nodes, edges, rootId, options]);
+  }, [nodes, edges, rootId, width, height, onNodeClick, onNodeDoubleClick]);
 
   return { svgRef, resetView };
 }

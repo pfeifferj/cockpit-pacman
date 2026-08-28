@@ -316,12 +316,22 @@ pub struct KeyringKey {
     pub trust: String,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+#[serde(rename_all = "lowercase")]
+pub enum KeyringState {
+    Ready,
+    Uninitialized,
+    Undetermined,
+}
+
 #[derive(Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct KeyringStatusResponse {
     pub keys: Vec<KeyringKey>,
     pub total: usize,
     pub master_key_initialized: bool,
+    pub status: KeyringState,
     pub warnings: Vec<String>,
 }
 
@@ -447,6 +457,7 @@ pub struct ScheduledRunEntry {
     pub details: Vec<String>,
     /// Absent on records written before it existed, and on ExecStopPost
     /// records, which never saw the run start.
+    #[ts(type = "number | null")]
     pub duration_secs: Option<u64>,
     /// This run found a pacman lock with no holder process and reaped it, which
     /// means the run before it was killed mid-transaction. Says nothing about
@@ -478,6 +489,8 @@ pub struct PacnewFile {
     pub path: String,
     pub package: String,
     pub kind: String,
+    #[ts(type = "number")]
+    pub mtime: i64,
 }
 
 #[derive(Serialize, Deserialize, TS)]
@@ -512,6 +525,9 @@ pub struct ServiceRestart {
 pub struct ServicesStatus {
     pub restart_required: bool,
     pub services: Vec<ServiceRestart>,
+    #[serde(default)]
+    /// The scan could not see every process, so `services` may be short.
+    pub scan_incomplete: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, TS)]
