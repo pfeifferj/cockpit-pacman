@@ -728,6 +728,10 @@ pub struct PackageSecurityAdvisory {
     pub cve_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fixed_version: Option<String>,
+    #[serde(default)]
+    pub affected_version: String,
+    #[serde(default)]
+    pub installed_version: String,
     pub status: String,
 }
 
@@ -738,6 +742,8 @@ pub struct SecurityResponse {
     /// True when served from the on-disk cache because the live fetch failed.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stale: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disabled: bool,
 }
 
 #[derive(Serialize, Deserialize, TS)]
@@ -773,6 +779,8 @@ pub struct SecurityInfoResponse {
     pub advisories: Vec<SecurityInfoAdvisory>,
     pub groups: Vec<SecurityInfoGroup>,
     pub issues: Vec<SecurityInfoIssue>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disabled: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, TS)]

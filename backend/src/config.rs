@@ -129,12 +129,18 @@ impl Default for ScheduleConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+fn security_advisories_default() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
     pub ignored_packages: Vec<String>,
     #[serde(default)]
     pub schedule: ScheduleConfig,
+    #[serde(default = "security_advisories_default")]
+    pub security_advisories: bool,
     // Round-trip keys this binary doesn't know about (e.g. fields added by a
     // newer version) instead of dropping them on the next update() rewrite.
     #[serde(flatten)]
@@ -147,6 +153,17 @@ fn parse_config(content: &str) -> Result<AppConfig> {
     }
     serde_json::from_str(content)
         .with_context(|| format!("Failed to parse config from {}", CONFIG_PATH))
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            ignored_packages: Vec::new(),
+            schedule: ScheduleConfig::default(),
+            security_advisories: security_advisories_default(),
+            extra: serde_json::Map::new(),
+        }
+    }
 }
 
 impl AppConfig {
@@ -374,6 +391,27 @@ impl From<&AppConfig> for IgnoredPackagesResponse {
 
 #[derive(Serialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct SettingsResponse {
+    pub security_advisories: bool,
+}
+
+impl From<&AppConfig> for SettingsResponse {
+    fn from(config: &AppConfig) -> Self {
+        Self {
+            security_advisories: config.security_advisories,
+        }
+    }
+}
+
+#[derive(Serialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct SettingsSetResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+#[derive(Serialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct IgnoreOperationResponse {
     pub success: bool,
     pub package: String,
@@ -467,7 +505,8 @@ pub struct ScheduleSetResponse {
 #[cfg(test)]
 mod tests {
     use super::{
-        Budget, SYSTEMD_APPLY_BUDGET, parse_timer_calendar, restore_drop_in, timer_absent,
+        AppConfig, Budget, SYSTEMD_APPLY_BUDGET, parse_timer_calendar, restore_drop_in,
+        timer_absent,
     };
     use std::time::Duration;
 
@@ -578,5 +617,28 @@ mod tests {
         ));
         assert!(!timer_absent("Failed to disable unit: Access denied"));
         assert!(!timer_absent(""));
+    }
+
+    #[test]
+    fn a_config_without_the_security_key_still_shows_advisories() {
+        let cfg: AppConfig =
+            serde_json::from_str(r#"{"ignored_packages":["linux"]}"#).expect("parses");
+        assert!(cfg.security_advisories);
+        assert_eq!(cfg.ignored_packages, vec!["linux".to_string()]);
+    }
+
+    #[test]
+    fn the_security_flag_round_trips_when_set_false() {
+        let cfg: AppConfig =
+            serde_json::from_str(r#"{"security_advisories":false}"#).expect("parses");
+        assert!(!cfg.security_advisories);
+
+        let back = serde_json::to_string(&cfg).expect("serializes");
+        assert!(back.contains("\"security_advisories\":false"), "{back}");
+    }
+
+    #[test]
+    fn the_default_config_shows_advisories() {
+        assert!(AppConfig::default().security_advisories);
     }
 }

@@ -38,7 +38,7 @@ fn is_kernel_package(
 
 /// Which package operations and informational events a mutation streams.
 #[derive(Clone, Copy, PartialEq)]
-enum EventScope {
+pub(crate) enum EventScope {
     Upgrade,
     Install,
     Remove,
@@ -54,7 +54,7 @@ impl EventScope {
     }
 }
 
-fn setup_progress_cb(handle: &mut Alpm) {
+pub(crate) fn setup_progress_cb(handle: &mut Alpm) {
     let mut last: Option<(&'static str, String, i32, usize, usize)> = None;
 
     handle.set_progress_cb(
@@ -93,7 +93,7 @@ fn setup_progress_cb(handle: &mut Alpm) {
     );
 }
 
-fn setup_event_cb(handle: &mut Alpm, scope: EventScope) {
+pub(crate) fn setup_event_cb(handle: &mut Alpm, scope: EventScope) {
     handle.set_event_cb((), move |event: AnyEvent, _: &mut ()| {
         interrupt_if_cancelled();
         let (event_str, pkg_name) = match event.event() {
@@ -146,7 +146,7 @@ fn setup_event_cb(handle: &mut Alpm, scope: EventScope) {
 /// Auto-answers alpm questions during a streaming mutation, logging each
 /// decision. `answer_remove_pkgs` confirms dependent-removal prompts; when
 /// false the prompt keeps alpm's default answer.
-fn setup_question_cb(handle: &mut Alpm, answer_remove_pkgs: bool) {
+pub(crate) fn setup_question_cb(handle: &mut Alpm, answer_remove_pkgs: bool) {
     handle.set_question_cb(
         (),
         move |mut question: AnyQuestion, _: &mut ()| match question.question() {
@@ -217,8 +217,7 @@ fn setup_question_cb(handle: &mut Alpm, answer_remove_pkgs: bool) {
     );
 }
 
-fn prepare_failure(err_msg: &str) -> anyhow::Error {
-    let message = format!("Failed to prepare transaction: {}", err_msg);
+pub(crate) fn fail_complete(message: String) -> anyhow::Error {
     emit_event(&StreamEvent::Complete {
         success: false,
         message: Some(message.clone()),
@@ -226,7 +225,11 @@ fn prepare_failure(err_msg: &str) -> anyhow::Error {
     anyhow::anyhow!(message)
 }
 
-fn commit_and_complete(
+pub(crate) fn prepare_failure(err_msg: &str) -> anyhow::Error {
+    fail_complete(format!("Failed to prepare transaction: {}", err_msg))
+}
+
+pub(crate) fn commit_and_complete(
     tx: &mut TransactionGuard,
     interrupt_msg: &str,
     success_msg: Option<String>,
@@ -659,12 +662,10 @@ pub fn install_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
         return Err(not_found());
     };
     if let Err(e) = tx.add_pkg(pkg) {
-        let err_msg = format!("Failed to add '{}' to transaction: {}", name, e);
-        emit_event(&StreamEvent::Complete {
-            success: false,
-            message: Some(err_msg.clone()),
-        });
-        return Err(anyhow::anyhow!(err_msg));
+        return Err(fail_complete(format!(
+            "Failed to add '{}' to transaction: {}",
+            name, e
+        )));
     }
 
     check_cancel_early!(&timeout);

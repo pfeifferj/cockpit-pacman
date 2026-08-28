@@ -45,6 +45,8 @@ import type {
   SecurityInfoResponse,
   SecurityResponse,
   ServicesStatus,
+  SettingsResponse,
+  SettingsSetResponse,
   SignoffActionResponse,
   SignoffListResponse,
   StreamEvent,
@@ -290,12 +292,20 @@ export async function removeStaleLock(): Promise<LockRemoveResult> {
   return runBackend<LockRemoveResult>("remove-stale-lock", [], { superuser: "require" });
 }
 
-export async function checkSecurity(): Promise<SecurityResponse> {
-  return runBackend<SecurityResponse>("check-security", [], { superuser: "none" });
+export async function checkSecurity(force = false): Promise<SecurityResponse> {
+  return runBackend<SecurityResponse>("check-security", [String(force)], { superuser: "none" });
 }
 
 export async function getSecurityInfo(name: string): Promise<SecurityInfoResponse> {
   return runBackend<SecurityInfoResponse>("security-info", [name], { superuser: "none" });
+}
+
+export async function getSettings(): Promise<SettingsResponse> {
+  return runBackend<SettingsResponse>("get-settings", [], { superuser: "none" });
+}
+
+export async function setSecurityAdvisories(enabled: boolean): Promise<SettingsSetResponse> {
+  return runBackend<SettingsSetResponse>("set-settings", [String(enabled)]);
 }
 
 export async function getPackageInfo(name: string): Promise<PackageDetails> {
@@ -663,7 +673,7 @@ export function downgradePackage(
   name: string,
   version: string
 ): StreamingHandle {
-  return runStreamingBackend("downgrade", [sanitizeSearchInput(name), sanitizeSearchInput(version)], callbacks);
+  return runStreamingBackend("downgrade", [sanitizeSearchInput(name), sanitizeSearchInput(version)], callbacks, { gracefulCancel: true });
 }
 
 export async function listArchiveVersions(packageName: string, query?: string): Promise<DowngradeResponse> {
@@ -679,7 +689,7 @@ export function downgradeFromArchive(
   name: string,
   filename: string
 ): StreamingHandle {
-  return runStreamingBackend("downgrade-archive", [sanitizeSearchInput(name), filename], callbacks);
+  return runStreamingBackend("downgrade-archive", [sanitizeSearchInput(name), filename], callbacks, { gracefulCancel: true });
 }
 
 export interface ScheduledRunsParams {

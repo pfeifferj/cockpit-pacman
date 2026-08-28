@@ -1,0 +1,18 @@
+{
+  "_comment": "Substrings that mark an error as a network failure. Duplicated by necessity: the Rust classifier runs on the backend and parseErrorCode runs in the browser, and they cannot share code across that boundary. Both suites assert against this file.",
+  "keywords": [
+    "network",
+    "connection",
+    "could not connect",
+    "unable to connect",
+    "could not resolve",
+    "resolve host",
+    "host not found",
+    "name resolution",
+    "temporary failure in name resolution",
+    "dns",
+    "failed retrieving file",
+    "failed to retrieve",
+    "download library error"
+  ]
+}

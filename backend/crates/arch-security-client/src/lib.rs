@@ -14,6 +14,10 @@ pub struct SecurityClient {
     base_url: String,
 }
 
+pub fn parse_vulnerable(body: &str) -> Result<Vec<Avg>> {
+    serde_json::from_str(body).context("failed to parse vulnerable issues JSON")
+}
+
 impl SecurityClient {
     pub fn new(ip_family: ureq::config::IpFamily) -> Self {
         Self::with_base_url(DEFAULT_BASE_URL, ip_family)
@@ -32,11 +36,13 @@ impl SecurityClient {
     }
 
     pub fn fetch_vulnerable(&self) -> Result<Vec<Avg>> {
+        parse_vulnerable(&self.fetch_vulnerable_raw()?)
+    }
+
+    pub fn fetch_vulnerable_raw(&self) -> Result<String> {
         let url = format!("{}/issues/vulnerable.json", self.base_url);
-        let body = self
-            .get_json(&url)
-            .context("failed to fetch vulnerable issues")?;
-        serde_json::from_str(&body).context("failed to parse vulnerable issues JSON")
+        self.get_json(&url)
+            .context("failed to fetch vulnerable issues")
     }
 
     pub fn fetch_package(&self, name: &str) -> Result<PackageInfo> {

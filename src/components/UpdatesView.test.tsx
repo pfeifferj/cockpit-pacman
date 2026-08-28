@@ -1708,7 +1708,9 @@ describe("UpdatesView", () => {
       advisory_type: "security",
       avg_name: "AVG-1",
       cve_ids: ["CVE-1"],
-      fixed_version: null,
+      fixed_version: "1.1-1",
+      affected_version: "1.0-1",
+      installed_version: "1.0-1",
       status: "Vulnerable",
     };
 
@@ -1827,7 +1829,9 @@ describe("UpdatesView", () => {
       advisory_type: "security",
       avg_name: "AVG-1",
       cve_ids: ["CVE-1"],
-      fixed_version: null,
+      fixed_version: "1.1-1",
+      affected_version: "1.0-1",
+      installed_version: "1.0-1",
       status: "Vulnerable",
     };
 
@@ -1859,6 +1863,64 @@ describe("UpdatesView", () => {
       // The row's onRowClick (which opens the details modal via getPackageInfo)
       // must not fire when a link inside the portaled popover is clicked.
       expect(mockGetPackageInfo).not.toHaveBeenCalled();
+    });
+
+    const unresolved = {
+      package: "zzz-package",
+      severity: "High",
+      advisory_type: "security",
+      avg_name: "AVG-1879",
+      cve_ids: ["CVE-2021-43976"],
+      fixed_version: null,
+      affected_version: "5.15.8.arch1-1",
+      installed_version: "7.1.8.arch1-3",
+      status: "Vulnerable",
+    };
+
+    it("leaves an advisory with no recorded fix out of the security count", async () => {
+      mockCheckUpdates.mockResolvedValue(onePackage);
+      mockCheckSecurity.mockResolvedValue({ advisories: [unresolved] });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("zzz-package")).toBeInTheDocument();
+      });
+
+      expect(screen.getByText("No fix")).toBeInTheDocument();
+      expect(screen.queryByText("High")).not.toBeInTheDocument();
+    });
+
+    it("shows both versions and the caveat for an advisory with no recorded fix", async () => {
+      mockCheckUpdates.mockResolvedValue(onePackage);
+      mockCheckSecurity.mockResolvedValue({ advisories: [unresolved] });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("zzz-package")).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("No fix"));
+      });
+
+      expect(await screen.findByText("No fix recorded")).toBeInTheDocument();
+      expect(
+        screen.getByText(/filed against 5\.15\.8\.arch1-1, installed 7\.1\.8\.arch1-3/)
+      ).toBeInTheDocument();
+      expect(screen.getByText(/tracker lists no fixed version/)).toBeInTheDocument();
+    });
+
+    it("renders nothing about security when the feature is disabled", async () => {
+      mockCheckUpdates.mockResolvedValue(onePackage);
+      mockCheckSecurity.mockResolvedValue({ advisories: [], disabled: true });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText("zzz-package")).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText("No fix")).not.toBeInTheDocument();
+      expect(screen.queryByText("High")).not.toBeInTheDocument();
     });
   });
 

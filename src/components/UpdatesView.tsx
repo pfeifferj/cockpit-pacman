@@ -74,6 +74,7 @@ import {
   PackageSecurityAdvisory,
   checkUpdates,
   checkSecurity,
+  setSecurityAdvisories,
   runUpgrade,
   syncDatabase,
   preflightUpgrade,
@@ -107,12 +108,38 @@ import { CompactPagination } from "./CompactPagination";
 
 import { appendCapped, isDbLockError, sanitizeUrl } from "../utils";
 import { severityColor } from "../severity";
+import { NO_FIX_CAVEAT, partitionAdvisories } from "../security";
+import { useAdminPermission } from "../hooks/useAdminPermission";
 import { TimeAgo } from "./TimeAgo";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { StatBox } from "./StatBox";
 import { IgnoredPackagesModal } from "./IgnoredPackagesModal";
 import { ScheduleModal } from "./ScheduleModal";
 import { useNavigation } from "../contexts/NavigationContext";
+
+/// One advisory in the popover. Shows the versions side by side so the reader
+/// can judge a record for themselves rather than being told a verdict.
+const AdvisoryLine: React.FC<{ advisory: PackageSecurityAdvisory }> = ({ advisory }) => (
+  <div style={{ marginBottom: "0.5rem" }}>
+    <a
+      href={`https://security.archlinux.org/${advisory.avg_name}`}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      {advisory.avg_name}
+    </a>
+    {" "}<Label isCompact color={severityColor(advisory.severity)}>{advisory.severity}</Label>
+    <div style={{ color: "var(--pf-t--global--text--color--subtle)", fontSize: "0.85em" }}>
+      {advisory.advisory_type}
+      {advisory.cve_ids.length > 0 && ` (${advisory.cve_ids.join(", ")})`}
+    </div>
+    <div style={{ color: "var(--pf-t--global--text--color--subtle)", fontSize: "0.85em" }}>
+      {advisory.fixed_version
+        ? `fixed in ${advisory.fixed_version}, installed ${advisory.installed_version}`
+        : `filed against ${advisory.affected_version}, installed ${advisory.installed_version}`}
+    </div>
+  </div>
+);
 
 const SEVERITY_ORDER: Record<string, number> = {
   Critical: 4,
@@ -167,9 +194,16 @@ const SystemOverviewCard: React.FC<{
   pendingSignoffs?: number | null;
   securityFilterActive?: boolean;
   onToggleSecurityFilter?: () => void;
-}> = ({ updates, securityCount, securityLoading, securityUnavailable, orphanCount, cacheSize, keyringStatus, summaryLoading, pendingSignoffs, securityFilterActive, onToggleSecurityFilter }) => {
-  const securityFilterable = !!onToggleSecurityFilter && !securityLoading && !securityUnavailable && securityCount > 0;
+  securityEnabled: boolean;
+  onSetSecurityEnabled: (enabled: boolean) => void;
+  securityToggleBusy: boolean;
+}> = ({ updates, securityCount, securityLoading, securityUnavailable, orphanCount, cacheSize, keyringStatus, summaryLoading, pendingSignoffs, securityFilterActive, onToggleSecurityFilter, securityEnabled, onSetSecurityEnabled, securityToggleBusy }) => {
+  const securityFilterable = securityEnabled && !!onToggleSecurityFilter && !securityLoading && !securityUnavailable && securityCount > 0;
   const { onViewOrphans, onViewCache, onViewKeyring, onViewSignoffs } = useNavigation();
+  // Writing the setting needs root, so an unescalated session sees why it
+  // cannot, rather than a control that silently fails.
+  const isAdmin = useAdminPermission();
+  const mayToggle = isAdmin === true && !securityToggleBusy;
   return (
   <Card className="pf-v6-u-mb-md">
     <CardBody>
@@ -183,6 +217,8 @@ const SystemOverviewCard: React.FC<{
           />
         </FlexItem>
         <FlexItem>
+          <Flex direction={{ default: "column" }} spaceItems={{ default: "spaceItemsXs" }}>
+            <FlexItem>
           <StatBox
             label={securityFilterActive ? "Show all" : "Security"}
             value={
@@ -198,6 +234,27 @@ const SystemOverviewCard: React.FC<{
             isActive={securityFilterable ? securityFilterActive : undefined}
             ariaLabel={securityFilterActive ? "Show all updates" : "Filter to security updates"}
           />
+            </FlexItem>
+            <FlexItem>
+              <Tooltip
+                content={
+                  isAdmin === false
+                    ? "Not permitted to change system settings"
+                    : "Stop checking the Arch Security Tracker. Its records can stay open long after a fix ships."
+                }
+              >
+                <div>
+                  <Checkbox
+                    id="security-advisories-enabled"
+                    label="Check advisories"
+                    isChecked={securityEnabled}
+                    isDisabled={!mayToggle}
+                    onChange={(_e, checked) => onSetSecurityEnabled(checked)}
+                  />
+                </div>
+              </Tooltip>
+            </FlexItem>
+          </Flex>
         </FlexItem>
         <FlexItem>
           <Tooltip content="Packages installed as dependencies that are no longer required by any other package. Usually safe to remove.">
@@ -472,6 +529,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [securityMap, setSecurityMap] = useState<Map<string, PackageSecurityAdvisory[]>>(new Map());
   const [securityLoading, setSecurityLoading] = useState(true);
   const [securityStale, setSecurityStale] = useState(false);
+  const [securityEnabled, setSecurityEnabled] = useState(true);
+  const [savingSecurityToggle, setSavingSecurityToggle] = useState(false);
   const [securityUnavailable, setSecurityUnavailable] = useState(false);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [newsError, setNewsError] = useState(false);
@@ -500,9 +559,23 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     return Array.from(repos).sort();
   }, [updates]);
 
+  // Only advisories an update can clear. An unresolved record cannot be acted
+  // on from here, and counting it turned the overview into an alarm about
+  // things the user has no way to fix.
+  const actionableSecurityMap = useMemo(() => {
+    const map = new Map<string, PackageSecurityAdvisory[]>();
+    for (const [pkg, advisories] of securityMap) {
+      const { actionable } = partitionAdvisories(advisories);
+      if (actionable.length > 0) {
+        map.set(pkg, actionable);
+      }
+    }
+    return map;
+  }, [securityMap]);
+
   const securityUpdateCount = useMemo(() => {
-    return updates.filter((u) => securityMap.has(u.name)).length;
-  }, [updates, securityMap]);
+    return updates.filter((u) => actionableSecurityMap.has(u.name)).length;
+  }, [updates, actionableSecurityMap]);
 
   // The filter only applies while there are security updates to show, so a
   // refresh that drops the count to zero never strands the list on an empty result.
@@ -523,10 +596,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       result = result.filter((u) => u.repository === repoFilter);
     }
     if (securityFilterOn) {
-      result = result.filter((u) => securityMap.has(u.name));
+      result = result.filter((u) => actionableSecurityMap.has(u.name));
     }
     return result;
-  }, [updates, searchFilter, repoFilter, securityFilterOn, securityMap]);
+  }, [updates, searchFilter, repoFilter, securityFilterOn, actionableSecurityMap]);
 
   const sortedUpdates = useMemo(() => {
     if (activeSortKey === null) return filteredUpdates;
@@ -656,10 +729,18 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     [updates]
   );
 
-  const loadSecurityData = useCallback(async () => {
+  const loadSecurityData = useCallback(async (force = false) => {
     setSecurityLoading(true);
     try {
-      const response = await checkSecurity();
+      const response = await checkSecurity(force);
+      if (response.disabled) {
+        setSecurityEnabled(false);
+        setSecurityMap(new Map());
+        setSecurityStale(false);
+        setSecurityUnavailable(false);
+        return;
+      }
+      setSecurityEnabled(true);
       const map = new Map<string, PackageSecurityAdvisory[]>();
       for (const advisory of response.advisories) {
         const existing = map.get(advisory.package) ?? [];
@@ -678,7 +759,24 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     }
   }, []);
 
-  const loadUpdates = useCallback(async () => {
+  const handleSetSecurityEnabled = useCallback(
+    async (enabled: boolean) => {
+      setSavingSecurityToggle(true);
+      // Optimistic, so the tile does not sit stale while the write escalates.
+      setSecurityEnabled(enabled);
+      try {
+        await setSecurityAdvisories(enabled);
+        await loadSecurityData();
+      } catch {
+        setSecurityEnabled(!enabled);
+      } finally {
+        setSavingSecurityToggle(false);
+      }
+    },
+    [loadSecurityData]
+  );
+
+  const loadUpdates = useCallback(async (force = false) => {
     setState("checking");
     setError(null);
     setErrorCode(undefined);
@@ -693,7 +791,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       setUpdates(response.updates);
       setWarnings(response.warnings);
       setState(response.updates.length > 0 ? "available" : "uptodate");
-      loadSecurityData();
+      loadSecurityData(force);
     } catch (ex) {
       failWith("check", ex instanceof Error ? ex.message : String(ex), ex instanceof BackendError ? ex.code : undefined, ex instanceof BackendError ? ex.details : undefined);
     }
@@ -1435,7 +1533,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
               </EmptyStateBody>
               <EmptyStateFooter>
                 <EmptyStateActions>
-                  <Button variant="primary" onClick={showLockRecovery ? manualResumeAfterLock : loadUpdates}>Retry</Button>
+                  <Button variant="primary" onClick={showLockRecovery ? manualResumeAfterLock : () => loadUpdates(true)}>Retry</Button>
                   <Button variant="link" onClick={() => setState("uptodate")}>Dismiss</Button>
                 </EmptyStateActions>
               </EmptyStateFooter>
@@ -1596,7 +1694,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
             </EmptyStateBody>
             <EmptyStateFooter>
               <EmptyStateActions>
-                <Button variant="primary" onClick={loadUpdates}>
+                <Button variant="primary" onClick={() => loadUpdates(true)}>
                   Check Again
                 </Button>
               </EmptyStateActions>
@@ -1647,6 +1745,9 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
           keyringStatus={keyringStatus}
           summaryLoading={summaryLoading}
           pendingSignoffs={pendingSignoffs}
+          securityEnabled={securityEnabled}
+          onSetSecurityEnabled={handleSetSecurityEnabled}
+          securityToggleBusy={savingSecurityToggle}
         />
 
         <Card className="pf-v6-u-mb-md">
@@ -1754,6 +1855,9 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         pendingSignoffs={pendingSignoffs}
         securityFilterActive={securityFilterOn}
         onToggleSecurityFilter={() => setSecurityFilterActive((v) => !v)}
+        securityEnabled={securityEnabled}
+        onSetSecurityEnabled={handleSetSecurityEnabled}
+        securityToggleBusy={savingSecurityToggle}
       />
 
       <Card>
@@ -1898,11 +2002,16 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
               const isIgnored = update.ignored;
               const advisories = securityMap.get(update.name);
               const hasAdvisories = advisories && advisories.length > 0;
-              const highest = hasAdvisories
-                ? advisories.reduce((a, b) =>
-                    (SEVERITY_ORDER[b.severity] ?? 0) > (SEVERITY_ORDER[a.severity] ?? 0) ? b : a
-                  )
-                : null;
+              const { actionable, unresolved } = partitionAdvisories(advisories ?? []);
+              // Severity, and the stripe it drives, describe what an update can
+              // still fix. A record with no fix recorded is not an emergency and
+              // must not paint the row red.
+              const highest =
+                actionable.length > 0
+                  ? actionable.reduce((a, b) =>
+                      (SEVERITY_ORDER[b.severity] ?? 0) > (SEVERITY_ORDER[a.severity] ?? 0) ? b : a
+                    )
+                  : null;
               const borderColor = highest
                 ? `var(--pf-t--global--color--status--${highest.severity === "Critical" || highest.severity === "High" ? "danger" : "warning"}--default)`
                 : undefined;
@@ -1941,39 +2050,42 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
                         ignored
                       </Label>
                     )}
-                    {hasAdvisories && highest && (
+                    {hasAdvisories && (
                       <Popover
                         headerContent={<>{advisories.length} securit{advisories.length === 1 ? "y advisory" : "y advisories"}</>}
                         bodyContent={
                           <div onClick={(e) => e.stopPropagation()}>
-                            {advisories.map((a) => (
-                              <div key={a.avg_name} style={{ marginBottom: "0.5rem" }}>
-                                <a
-                                  href={`https://security.archlinux.org/${a.avg_name}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                >
-                                  {a.avg_name}
-                                </a>
-                                {" "}<Label isCompact color={severityColor(a.severity)}>{a.severity}</Label>
-                                <div style={{ color: "var(--pf-t--global--text--color--subtle)", fontSize: "0.85em" }}>
-                                  {a.advisory_type}
-                                  {a.cve_ids.length > 0 && ` (${a.cve_ids.join(", ")})`}
+                            {actionable.length > 0 && (
+                              <div style={{ marginBottom: "0.75rem" }}>
+                                <strong>Fixed by updating</strong>
+                                {actionable.map((a) => (
+                                  <AdvisoryLine key={a.avg_name} advisory={a} />
+                                ))}
+                              </div>
+                            )}
+                            {unresolved.length > 0 && (
+                              <div>
+                                <strong>No fix recorded</strong>
+                                {unresolved.map((a) => (
+                                  <AdvisoryLine key={a.avg_name} advisory={a} />
+                                ))}
+                                <div style={{ color: "var(--pf-t--global--text--color--subtle)", fontSize: "0.85em", marginTop: "0.25rem" }}>
+                                  {NO_FIX_CAVEAT}
                                 </div>
                               </div>
-                            ))}
+                            )}
                           </div>
                         }
                       >
                         <Label
                           isCompact
-                          color={severityColor(highest.severity)}
+                          color={highest ? severityColor(highest.severity) : "grey"}
                           icon={<ShieldAltIcon />}
                           className="pf-v6-u-ml-sm"
                           style={{ cursor: "pointer" }}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {highest.severity}
+                          {highest ? highest.severity : "No fix"}
                           {advisories.length > 1 && ` +${advisories.length - 1}`}
                         </Label>
                       </Popover>

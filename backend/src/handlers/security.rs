@@ -3,52 +3,163 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use arch_security_client::SecurityClient;
-use arch_security_client::models::{AvgStatus, Severity};
+use arch_security_client::models::{Avg, AvgStatus, Severity};
+use serde::{Deserialize, Serialize};
 
 use crate::alpm::get_handle;
 use crate::models::{PackageSecurityAdvisory, SecurityInfoResponse, SecurityResponse};
 use crate::util::{config_path, emit_json, write_json_atomic};
 
+const FEED_TTL_SECS: i64 = 3600;
+
+#[derive(Serialize, Deserialize)]
+struct FeedCache {
+    fetched_at: i64,
+    body: String,
+}
+
 fn security_cache_path() -> Result<PathBuf> {
-    config_path("security-cache.json")
+    config_path("security-feed.json")
 }
 
-fn read_security_cache(path: PathBuf) -> Option<Vec<PackageSecurityAdvisory>> {
-    let content = std::fs::read_to_string(&path).ok()?;
-    let cached: SecurityResponse = serde_json::from_str(&content).ok()?;
-    Some(cached.advisories)
+fn read_feed_cache(path: &Path) -> Option<FeedCache> {
+    let content = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&content).ok()
 }
 
-fn write_security_cache(path: &Path, response: &SecurityResponse) -> Result<()> {
+fn write_feed_cache(path: &Path, cache: &FeedCache) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
+        let _ = std::fs::remove_file(parent.join("security-cache.json"));
     }
-    write_json_atomic(path, response)
+    write_json_atomic(path, cache)
 }
 
-pub fn check_security() -> Result<()> {
-    let client = SecurityClient::new(crate::util::detected_ip_family());
-    let avgs = match client.fetch_vulnerable() {
-        Ok(v) => v,
-        Err(e) => {
-            // Serve cached advisories (marked stale) if we have them. With no
-            // cache, propagate the error: an empty list would be
-            // indistinguishable from "no known vulnerabilities", a false
-            // sense of safety. The frontend renders this as "unavailable".
-            if let Some(advisories) = security_cache_path().ok().and_then(read_security_cache) {
-                return emit_json(&SecurityResponse {
-                    advisories,
-                    stale: true,
-                });
-            }
-            return Err(e);
-        }
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
+}
+
+fn feed_is_fresh(fetched_at: i64, now: i64) -> bool {
+    let age = now - fetched_at;
+    (0..FEED_TTL_SECS).contains(&age)
+}
+
+fn advisories_enabled() -> bool {
+    crate::config::AppConfig::load().map_or(true, |c| c.security_advisories)
+}
+
+fn advisory_for(pkg_name: &str, installed: &str, avg: &Avg) -> Option<PackageSecurityAdvisory> {
+    if matches!(avg.status, AvgStatus::NotAffected) {
+        return None;
+    }
+
+    // alpm::vercmp goes through CString and panics on interior NULs, and the
+    // versions come from the remote feed.
+    if avg.affected.contains('\0') || avg.fixed.as_deref().is_some_and(|f| f.contains('\0')) {
+        return None;
+    }
+
+    if alpm::vercmp(installed, &avg.affected) == std::cmp::Ordering::Less {
+        return None;
+    }
+
+    if let Some(ref fixed) = avg.fixed
+        && alpm::vercmp(installed, fixed) != std::cmp::Ordering::Less
+    {
+        return None;
+    }
+
+    Some(PackageSecurityAdvisory {
+        package: pkg_name.to_string(),
+        severity: avg.severity.as_str().to_string(),
+        advisory_type: avg.advisory_type.clone(),
+        avg_name: avg.name.clone(),
+        cve_ids: avg.issues.clone(),
+        fixed_version: avg.fixed.clone(),
+        affected_version: avg.affected.clone(),
+        installed_version: installed.to_string(),
+        status: avg.status.as_str().to_string(),
+    })
+}
+
+fn is_actionable(a: &PackageSecurityAdvisory) -> bool {
+    a.fixed_version.is_some()
+}
+
+fn sort_advisories(advisories: &mut [PackageSecurityAdvisory]) {
+    advisories.sort_by(|a, b| {
+        is_actionable(b)
+            .cmp(&is_actionable(a))
+            .then_with(|| parse_severity(&b.severity).cmp(&parse_severity(&a.severity)))
+            .then_with(|| a.package.cmp(&b.package))
+    });
+}
+
+struct Feed {
+    avgs: Vec<Avg>,
+    stale: bool,
+}
+
+fn load_feed(client: &SecurityClient, force: bool, path: Option<&Path>) -> Result<Feed> {
+    let mut cached = if force {
+        None
+    } else {
+        path.and_then(read_feed_cache)
     };
+
+    if let Some(ref c) = cached
+        && feed_is_fresh(c.fetched_at, now_secs())
+        && let Ok(avgs) = arch_security_client::parse_vulnerable(&c.body)
+    {
+        return Ok(Feed { avgs, stale: false });
+    }
+
+    let stale_fallback = |cached: Option<FeedCache>| {
+        cached
+            .or_else(|| path.and_then(read_feed_cache))
+            .and_then(|c| arch_security_client::parse_vulnerable(&c.body).ok())
+            .map(|avgs| Feed { avgs, stale: true })
+    };
+
+    match client.fetch_vulnerable_raw() {
+        Ok(body) => match arch_security_client::parse_vulnerable(&body) {
+            Ok(avgs) => {
+                if let Some(p) = path {
+                    let _ = write_feed_cache(
+                        p,
+                        &FeedCache {
+                            fetched_at: now_secs(),
+                            body,
+                        },
+                    );
+                }
+                Ok(Feed { avgs, stale: false })
+            }
+            Err(e) => stale_fallback(cached.take()).ok_or(e),
+        },
+        Err(e) => stale_fallback(cached.take()).ok_or(e),
+    }
+}
+
+pub fn check_security(force: bool) -> Result<()> {
+    if !advisories_enabled() {
+        return emit_json(&SecurityResponse {
+            advisories: Vec::new(),
+            stale: false,
+            disabled: true,
+        });
+    }
+
+    let client = SecurityClient::new(crate::util::detected_ip_family());
+    let feed = load_feed(&client, force, security_cache_path().ok().as_deref())?;
+    let avgs = feed.avgs;
 
     let handle = get_handle()?;
     let localdb = handle.localdb();
 
-    let mut pkg_map: HashMap<&str, Vec<&arch_security_client::models::Avg>> = HashMap::new();
+    let mut pkg_map: HashMap<&str, Vec<&Avg>> = HashMap::new();
     for avg in &avgs {
         for pkg_name in &avg.packages {
             pkg_map.entry(pkg_name.as_str()).or_default().push(avg);
@@ -63,59 +174,32 @@ pub fn check_security() -> Result<()> {
         };
 
         for avg in matching_avgs {
-            let is_actionable = matches!(
-                avg.status,
-                AvgStatus::Vulnerable | AvgStatus::Fixed | AvgStatus::Testing
-            );
-            if !is_actionable {
-                continue;
+            if let Some(advisory) = advisory_for(pkg.name(), pkg.version().as_str(), avg) {
+                advisories.push(advisory);
             }
-
-            // "affected" is the first version known to be vulnerable.
-            // The package is affected if installed >= affected.
-            let installed_ver = pkg.version().as_str();
-            let at_or_above_affected =
-                alpm::vercmp(installed_ver, &avg.affected) != std::cmp::Ordering::Less;
-            if !at_or_above_affected {
-                continue;
-            }
-
-            // If a fix exists, the package is only vulnerable if installed < fixed.
-            if let Some(ref fixed) = avg.fixed
-                && alpm::vercmp(installed_ver, fixed) != std::cmp::Ordering::Less
-            {
-                continue;
-            }
-
-            advisories.push(PackageSecurityAdvisory {
-                package: pkg.name().to_string(),
-                severity: avg.severity.as_str().to_string(),
-                advisory_type: avg.advisory_type.clone(),
-                avg_name: avg.name.clone(),
-                cve_ids: avg.issues.clone(),
-                fixed_version: avg.fixed.clone(),
-                status: avg.status.as_str().to_string(),
-            });
         }
     }
 
-    advisories.sort_by(|a, b| {
-        let sev_a = parse_severity(&a.severity);
-        let sev_b = parse_severity(&b.severity);
-        sev_b.cmp(&sev_a).then(a.package.cmp(&b.package))
-    });
+    sort_advisories(&mut advisories);
 
-    let response = SecurityResponse {
+    emit_json(&SecurityResponse {
         advisories,
-        stale: false,
-    };
-    if let Ok(path) = security_cache_path() {
-        let _ = write_security_cache(&path, &response);
-    }
-    emit_json(&response)
+        stale: feed.stale,
+        disabled: false,
+    })
 }
 
 pub fn security_info(name: &str) -> Result<()> {
+    if !advisories_enabled() {
+        return emit_json(&SecurityInfoResponse {
+            name: name.to_string(),
+            advisories: Vec::new(),
+            groups: Vec::new(),
+            issues: Vec::new(),
+            disabled: true,
+        });
+    }
+
     let client = SecurityClient::new(crate::util::detected_ip_family());
     let info = client.fetch_package(name)?;
 
@@ -156,6 +240,7 @@ pub fn security_info(name: &str) -> Result<()> {
         advisories,
         groups,
         issues,
+        disabled: false,
     })
 }
 
@@ -166,5 +251,320 @@ fn parse_severity(s: &str) -> Severity {
         "Medium" => Severity::Medium,
         "Low" => Severity::Low,
         _ => Severity::Unknown,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{advisory_for, feed_is_fresh, is_actionable, sort_advisories};
+    use arch_security_client::models::{Avg, AvgStatus, Severity};
+
+    fn avg(status: AvgStatus, affected: &str, fixed: Option<&str>) -> Avg {
+        Avg {
+            name: "AVG-1879".to_string(),
+            packages: vec!["linux".to_string()],
+            status,
+            severity: Severity::High,
+            advisory_type: "arbitrary code execution".to_string(),
+            affected: affected.to_string(),
+            fixed: fixed.map(str::to_string),
+            issues: vec!["CVE-2021-43976".to_string()],
+            advisories: vec![],
+        }
+    }
+
+    #[test]
+    fn a_version_below_the_first_affected_one_is_not_reported() {
+        let a = avg(AvgStatus::Vulnerable, "5.15.8.arch1-1", None);
+        assert!(advisory_for("linux", "5.15.7.arch1-1", &a).is_none());
+    }
+
+    #[test]
+    fn the_first_affected_version_itself_is_reported() {
+        let a = avg(AvgStatus::Vulnerable, "5.15.8.arch1-1", None);
+        assert!(advisory_for("linux", "5.15.8.arch1-1", &a).is_some());
+    }
+
+    #[test]
+    fn an_advisory_with_no_recorded_fix_keeps_matching_far_newer_versions() {
+        let a = avg(AvgStatus::Vulnerable, "5.15.8.arch1-1", None);
+        let got = advisory_for("linux", "7.1.8.arch1-3", &a).expect("still reported");
+
+        assert!(!is_actionable(&got), "nothing to update to");
+        assert_eq!(got.affected_version, "5.15.8.arch1-1");
+        assert_eq!(got.installed_version, "7.1.8.arch1-3");
+    }
+
+    #[test]
+    fn a_version_short_of_the_fix_is_reported_as_actionable() {
+        let a = avg(AvgStatus::Vulnerable, "9.0.1224-1", Some("9.0.1225-1"));
+        let got = advisory_for("vim", "9.0.1224-1", &a).expect("reported");
+
+        assert!(is_actionable(&got));
+        assert_eq!(got.fixed_version.as_deref(), Some("9.0.1225-1"));
+    }
+
+    #[test]
+    fn reaching_the_fix_clears_the_advisory() {
+        let a = avg(AvgStatus::Vulnerable, "9.0.1224-1", Some("9.0.1225-1"));
+        assert!(advisory_for("vim", "9.0.1225-1", &a).is_none());
+        assert!(advisory_for("vim", "9.2.0849-1", &a).is_none());
+    }
+
+    #[test]
+    fn a_package_the_tracker_says_is_unaffected_is_not_reported() {
+        let a = avg(AvgStatus::NotAffected, "5.15.8.arch1-1", None);
+        assert!(advisory_for("linux", "7.1.8.arch1-3", &a).is_none());
+    }
+
+    #[test]
+    fn a_feed_inside_its_window_is_reused_and_an_older_one_is_not() {
+        let now = 1_800_000_000;
+        assert!(feed_is_fresh(now, now));
+        assert!(feed_is_fresh(now - (super::FEED_TTL_SECS - 1), now));
+        assert!(!feed_is_fresh(now - super::FEED_TTL_SECS, now));
+        assert!(!feed_is_fresh(now - 86_400, now));
+    }
+
+    #[test]
+    fn a_feed_stamped_in_the_future_is_not_reused() {
+        let now = 1_800_000_000;
+        assert!(!feed_is_fresh(now + 60, now));
+    }
+
+    #[test]
+    fn an_untriaged_group_with_a_fix_is_still_reported() {
+        let a = Avg {
+            severity: Severity::Unknown,
+            advisory_type: "unknown".to_string(),
+            ..avg(AvgStatus::Unknown, "9.0.1224-1", Some("9.0.1225-1"))
+        };
+        let got = advisory_for("vim", "9.0.1224-1", &a).expect("reported");
+
+        assert!(is_actionable(&got));
+        assert_eq!(got.fixed_version.as_deref(), Some("9.0.1225-1"));
+        assert_eq!(got.severity, "Unknown");
+    }
+
+    #[test]
+    fn an_epoch_outranks_a_higher_looking_version() {
+        let a = avg(AvgStatus::Vulnerable, "1:1.0-1", None);
+        assert!(
+            advisory_for("pkg", "2.0-1", &a).is_none(),
+            "2.0-1 < 1:1.0-1"
+        );
+        assert!(advisory_for("pkg", "1:1.0-1", &a).is_some());
+    }
+
+    #[test]
+    fn a_version_with_an_interior_nul_is_dropped_not_a_panic() {
+        let a = avg(AvgStatus::Vulnerable, "5.0-1\0", None);
+        assert!(advisory_for("bash", "5.2-1", &a).is_none());
+
+        let a = avg(AvgStatus::Vulnerable, "5.0-1", Some("5.1\0-1"));
+        assert!(advisory_for("bash", "5.2-1", &a).is_none());
+    }
+
+    #[test]
+    fn a_pkgrel_bump_is_enough_to_be_affected() {
+        let a = avg(AvgStatus::Vulnerable, "1.0-1", Some("1.0-3"));
+        assert!(advisory_for("pkg", "1.0-2", &a).is_some());
+        assert!(advisory_for("pkg", "1.0-3", &a).is_none());
+    }
+
+    #[test]
+    fn what_an_update_can_fix_sorts_above_what_it_cannot() {
+        let low_fixable = advisory_for(
+            "vim",
+            "9.0.1224-1",
+            &Avg {
+                severity: Severity::Low,
+                ..avg(AvgStatus::Vulnerable, "9.0.1224-1", Some("9.0.1225-1"))
+            },
+        )
+        .expect("reported");
+        let high_stuck = advisory_for(
+            "linux",
+            "7.1.8.arch1-3",
+            &avg(AvgStatus::Vulnerable, "5.15.8.arch1-1", None),
+        )
+        .expect("reported");
+
+        let mut list = vec![high_stuck, low_fixable];
+        sort_advisories(&mut list);
+
+        assert_eq!(
+            list[0].package, "vim",
+            "a Low one an update fixes outranks a High one it cannot"
+        );
+        assert_eq!(list[1].package, "linux");
+    }
+}
+
+#[cfg(test)]
+mod feed_tests {
+    use super::{FeedCache, load_feed, now_secs, write_feed_cache};
+    use arch_security_client::SecurityClient;
+    use wiremock::matchers::{method, path as req_path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    const ONE_AVG: &str = r#"[{"name":"AVG-1","packages":["bash"],"status":"Vulnerable",
+        "severity":"High","type":"code execution","affected":"5.0-1","fixed":null,
+        "issues":["CVE-2024-1"],"advisories":[]}]"#;
+
+    fn cache_file(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("cpac-feed-{tag}-{}", std::process::id()))
+    }
+
+    fn ipv4() -> ureq::config::IpFamily {
+        ureq::config::IpFamily::Ipv4Only
+    }
+
+    async fn serving(body: &str) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(req_path("/issues/vulnerable.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn a_fresh_cache_is_served_without_asking_upstream() {
+        let path = cache_file("fresh");
+        write_feed_cache(
+            &path,
+            &FeedCache {
+                fetched_at: now_secs(),
+                body: ONE_AVG.to_string(),
+            },
+        )
+        .expect("writes");
+
+        let server = MockServer::start().await;
+        let client = SecurityClient::with_base_url(&server.uri(), ipv4());
+
+        let feed = load_feed(&client, false, Some(&path)).expect("served from cache");
+        assert_eq!(feed.avgs.len(), 1);
+        assert!(!feed.stale, "reuse inside the window is not staleness");
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap_or_default()
+                .is_empty()
+        );
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[tokio::test]
+    async fn force_refetches_even_when_the_cache_is_fresh() {
+        let path = cache_file("force");
+        write_feed_cache(
+            &path,
+            &FeedCache {
+                fetched_at: now_secs(),
+                body: "[]".to_string(),
+            },
+        )
+        .expect("writes");
+
+        let server = serving(ONE_AVG).await;
+        let client = SecurityClient::with_base_url(&server.uri(), ipv4());
+
+        let feed = load_feed(&client, true, Some(&path)).expect("refetches");
+        assert_eq!(
+            feed.avgs.len(),
+            1,
+            "the served feed won, not the cached one"
+        );
+        assert_eq!(
+            server.received_requests().await.unwrap_or_default().len(),
+            1
+        );
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[tokio::test]
+    async fn an_old_cache_answers_when_the_fetch_fails() {
+        let path = cache_file("stale");
+        write_feed_cache(
+            &path,
+            &FeedCache {
+                fetched_at: now_secs() - 86_400,
+                body: ONE_AVG.to_string(),
+            },
+        )
+        .expect("writes");
+
+        let client = SecurityClient::with_base_url("http://127.0.0.1:1", ipv4());
+        let feed = load_feed(&client, false, Some(&path)).expect("falls back");
+
+        assert_eq!(feed.avgs.len(), 1);
+        assert!(feed.stale, "a fallback must be marked stale");
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[tokio::test]
+    async fn a_fresh_but_malformed_cache_is_refetched() {
+        let path = cache_file("malformed-fresh");
+        write_feed_cache(
+            &path,
+            &FeedCache {
+                fetched_at: now_secs(),
+                body: "not json".to_string(),
+            },
+        )
+        .expect("writes");
+
+        let server = serving(ONE_AVG).await;
+        let client = SecurityClient::with_base_url(&server.uri(), ipv4());
+
+        let feed = load_feed(&client, false, Some(&path)).expect("refetches");
+        assert_eq!(feed.avgs.len(), 1);
+        assert_eq!(
+            server.received_requests().await.unwrap_or_default().len(),
+            1
+        );
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[tokio::test]
+    async fn a_garbled_live_body_falls_back_to_an_old_cache() {
+        let path = cache_file("garbled-live");
+        write_feed_cache(
+            &path,
+            &FeedCache {
+                fetched_at: now_secs() - 86_400,
+                body: ONE_AVG.to_string(),
+            },
+        )
+        .expect("writes");
+
+        let server = serving("<html>maintenance</html>").await;
+        let client = SecurityClient::with_base_url(&server.uri(), ipv4());
+
+        let feed = load_feed(&client, false, Some(&path)).expect("falls back");
+        assert_eq!(feed.avgs.len(), 1);
+        assert!(feed.stale);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[tokio::test]
+    async fn a_failed_fetch_with_no_cache_is_an_error() {
+        let client = SecurityClient::with_base_url("http://127.0.0.1:1", ipv4());
+        let missing = cache_file("absent");
+        std::fs::remove_file(&missing).ok();
+
+        assert!(
+            load_feed(&client, false, Some(&missing)).is_err(),
+            "the failure must be explicit, not an empty advisory list"
+        );
     }
 }

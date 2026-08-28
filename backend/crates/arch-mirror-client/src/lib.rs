@@ -11,6 +11,8 @@ pub enum Error {
     Http(#[from] ureq::Error),
     #[error("parsing mirror status failed")]
     Parse(#[from] serde_json::Error),
+    #[error("reading mirror status failed")]
+    Io(#[from] std::io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -74,11 +76,23 @@ impl SortBy {
     }
 }
 
+const MAX_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
+
 /// Fetch and parse the mirror status report. The caller supplies the agent so it
 /// controls timeouts and IP family.
+pub fn fetch_from(agent: &ureq::Agent, url: &str) -> Result<Status> {
+    use std::io::Read;
+
+    let mut body = agent.get(url).call()?.into_body();
+    let mut buf = Vec::new();
+    body.as_reader()
+        .take(MAX_RESPONSE_BYTES)
+        .read_to_end(&mut buf)?;
+    Ok(serde_json::from_slice(&buf)?)
+}
+
 pub fn fetch(agent: &ureq::Agent) -> Result<Status> {
-    let body = agent.get(STATUS_URL).call()?.into_body().read_to_string()?;
-    Ok(serde_json::from_str(&body)?)
+    fetch_from(agent, STATUS_URL)
 }
 
 /// Keep active mirrors at or above `min_completion` (0.0-1.0) matching

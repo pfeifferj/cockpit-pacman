@@ -5,15 +5,16 @@ use cockpit_pacman_backend::handlers::{
     add_ignored, check_lock, check_security, check_updates, clean_cache, delete_mirror_backup,
     delete_repo_backup, downgrade_from_archive, downgrade_package, fetch_mirror_status, fetch_news,
     get_cache_info, get_dependency_tree, get_grouped_history, get_history, get_pacnew_status,
-    get_reboot_status, get_schedule_config, get_scheduled_runs, get_services_status, init_keyring,
-    install_package, keyring_status, list_archive_versions, list_downgrades, list_ignored,
-    list_installed, list_mirror_backups, list_mirrors, list_orphans, list_repo_backups, list_repos,
-    local_package_info, mark_dismissed, mark_news_read, preflight_upgrade,
-    read_credentials_from_stdin, read_dismissal, read_news_state, record_interrupted,
-    refresh_keyring, refresh_mirrors, remove_ignored, remove_orphans, remove_package,
-    remove_stale_lock, restore_mirror_backup, restore_repo_backup, run_upgrade, save_mirrorlist,
-    save_repos, scheduled_run, search, security_info, set_schedule_config, signoff_list,
-    signoff_revoke, signoff_sign, sync_database, sync_package_info, test_mirrors,
+    get_reboot_status, get_schedule_config, get_scheduled_runs, get_services_status, get_settings,
+    init_keyring, install_package, keyring_status, list_archive_versions, list_downgrades,
+    list_ignored, list_installed, list_mirror_backups, list_mirrors, list_orphans,
+    list_repo_backups, list_repos, local_package_info, mark_dismissed, mark_news_read,
+    preflight_upgrade, read_credentials_from_stdin, read_dismissal, read_news_state,
+    record_interrupted, refresh_keyring, refresh_mirrors, remove_ignored, remove_orphans,
+    remove_package, remove_stale_lock, restore_mirror_backup, restore_repo_backup, run_upgrade,
+    save_mirrorlist, save_repos, scheduled_run, search, security_info, set_schedule_config,
+    set_settings, signoff_list, signoff_revoke, signoff_sign, sync_database, sync_package_info,
+    test_mirrors,
 };
 use cockpit_pacman_backend::models::{MirrorEntry, RepoEntry, StructuredError};
 use cockpit_pacman_backend::util::{classify_error, emit_json, shutdown_event_writer};
@@ -46,6 +47,8 @@ const COMMANDS: &[&str] = &[
     "install-package",
     "remove-package",
     "list-ignored",
+    "get-settings",
+    "set-settings",
     "add-ignored",
     "remove-ignored",
     "cache-info",
@@ -144,6 +147,10 @@ Commands:
                          Remove an installed package (requires root)
                          timeout: seconds (default: 300)
   list-ignored           List packages ignored during upgrades
+  get-settings           Read the plugin settings
+  set-settings [security-advisories]
+                         Change a setting (requires root)
+                         security-advisories: true|false, empty leaves unchanged
   add-ignored NAME       Add a package to the ignored list (requires root)
   remove-ignored NAME    Remove a package from the ignored list (requires root)
   cache-info             Show package cache information and size
@@ -219,7 +226,8 @@ Commands:
   signoff-revoke PKGBASE REPO ARCH
                          Revoke a signoff
                          credentials: base64-encoded JSON {username, password} on stdin
-  check-security         Check installed packages against Arch Security Tracker
+  check-security [force] Check installed packages against Arch Security Tracker
+                         force: true refetches instead of reusing a recent copy
   security-info NAME     Get security advisory history for a package
   check-lock             Check if the pacman database lock exists and if it's stale
   version                Print the backend version, for the frontend to compare against
@@ -322,13 +330,17 @@ fn parse_refresh_mirrors(args: &[String]) -> RefreshMirrorsArgs {
     (count, arg_opt(args, 3), protocol, sort_by)
 }
 
-type SetScheduleArgs = (Option<bool>, Option<String>, Option<String>, Option<usize>);
-fn parse_set_schedule(args: &[String]) -> SetScheduleArgs {
-    let enabled = args.get(2).and_then(|s| match s.as_str() {
+fn parse_bool_arg(s: &str) -> Option<bool> {
+    match s {
         "true" => Some(true),
         "false" => Some(false),
         _ => None,
-    });
+    }
+}
+
+type SetScheduleArgs = (Option<bool>, Option<String>, Option<String>, Option<usize>);
+fn parse_set_schedule(args: &[String]) -> SetScheduleArgs {
+    let enabled = args.get(2).and_then(|s| parse_bool_arg(s));
     let max_packages = args.get(5).and_then(|s| s.parse().ok());
     (enabled, arg_opt(args, 3), arg_opt(args, 4), max_packages)
 }
@@ -449,6 +461,20 @@ fn main() {
             validate_package_name(&args[2]).and_then(|_| remove_package(&args[2], timeout))
         }
         "list-ignored" => list_ignored(),
+        "get-settings" => get_settings(),
+        "set-settings" => {
+            let security = match args.get(2) {
+                None => None,
+                Some(s) => match parse_bool_arg(s) {
+                    Some(b) => Some(b),
+                    None => {
+                        eprintln!("Error: set-settings expects true or false");
+                        std::process::exit(1);
+                    }
+                },
+            };
+            set_settings(security)
+        }
         "add-ignored" => {
             if args.len() < 3 {
                 eprintln!("Error: add-ignored requires a package name");
@@ -701,7 +727,19 @@ fn main() {
                 .and_then(|_| read_credentials_from_stdin())
                 .and_then(|creds| signoff_revoke(&creds, &args[2..]))
         }
-        "check-security" => check_security(),
+        "check-security" => {
+            let force = match args.get(2) {
+                None => false,
+                Some(s) => match parse_bool_arg(s) {
+                    Some(b) => b,
+                    None => {
+                        eprintln!("Error: check-security expects true or false");
+                        std::process::exit(1);
+                    }
+                },
+            };
+            check_security(force)
+        }
         "security-info" => {
             if args.len() < 3 {
                 eprintln!("Error: security-info requires a package name");
@@ -793,6 +831,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     const SCHEDULED_UNIT: &str = include_str!("../../systemd/cockpit-pacman-scheduled.service");
     const FAILURE_UNIT: &str = include_str!("../../systemd/cockpit-pacman-failure@.service");
@@ -996,6 +1035,32 @@ mod tests {
                 "command `{c}` is not documented in USAGE"
             );
         }
+    }
+
+    #[test]
+    fn every_dispatched_command_is_in_the_table() {
+        let source = include_str!("main.rs");
+        let body = source
+            .split_once("let result = match args[1].as_str() {")
+            .expect("the dispatch match is still shaped this way")
+            .1;
+
+        let dispatched: BTreeSet<&str> = body
+            .lines()
+            .filter_map(|line| {
+                let rest = line.strip_prefix("        \"")?;
+                if rest.starts_with(' ') {
+                    return None;
+                }
+                let (name, after) = rest.split_once('"')?;
+                after.trim_start().starts_with("=>").then_some(name)
+            })
+            .collect();
+
+        let declared: BTreeSet<&str> = COMMANDS.iter().copied().collect();
+
+        assert!(!dispatched.is_empty(), "match arm scraping found nothing");
+        assert_eq!(dispatched, declared, "dispatch match and COMMANDS disagree");
     }
 
     #[test]

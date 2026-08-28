@@ -965,6 +965,8 @@ fn security_advisory_fixed_version_absent_when_none() {
         avg_name: "AVG-2024-1234".into(),
         cve_ids: vec!["CVE-2024-0001".into()],
         fixed_version: None,
+        affected_version: "3.0.0-1".into(),
+        installed_version: "3.2.1-1".into(),
         status: "Vulnerable".into(),
     };
     let v = to_json(&advisory);
@@ -975,6 +977,8 @@ fn security_advisory_fixed_version_absent_when_none() {
     assert_string(&v, "avg_name");
     assert_array(&v, "cve_ids");
     assert_string(&v, "status");
+    assert_string(&v, "affected_version");
+    assert_string(&v, "installed_version");
     // When None, fixed_version is ABSENT (not null) due to skip_serializing_if
     assert_absent(&v, "fixed_version");
 }
@@ -988,6 +992,8 @@ fn security_advisory_fixed_version_present_when_some() {
         avg_name: "AVG-2024-5678".into(),
         cve_ids: vec![],
         fixed_version: Some("8.5.0-1".into()),
+        affected_version: "8.4.0-1".into(),
+        installed_version: "8.4.0-2".into(),
         status: "Fixed".into(),
     };
     let v = to_json(&advisory);
@@ -1012,6 +1018,16 @@ fn security_advisories_fixture_documents_absent_vs_present_fixed_version() {
     // Second advisory has fixed_version present
     let fixed = &fixture["advisories"][1];
     assert_string(fixed, "fixed_version");
+
+    let stale = fixture["advisories"]
+        .as_array()
+        .expect("advisories is an array")
+        .last()
+        .expect("fixture has entries");
+    assert_eq!(stale["package"], "linux");
+    assert!(stale.get("fixed_version").is_none());
+    assert_eq!(stale["affected_version"], "5.15.8.arch1-1");
+    assert_eq!(stale["installed_version"], "7.1.8.arch1-3");
 }
 
 // LogEntry / GroupedLogResponse
@@ -1494,6 +1510,7 @@ fn security_info_response_shape() {
             issue_type: "arbitrary code execution".into(),
             status: "Fixed".into(),
         }],
+        disabled: false,
     };
     let v = to_json(&resp);
 
@@ -2028,5 +2045,103 @@ fn error_codes_match_shared_fixture() {
     assert_eq!(
         NETWORK_ERROR_KEYWORDS.len(),
         fixture["networkKeywords"].as_array().unwrap().len()
+    );
+}
+
+#[test]
+fn the_backend_never_spawns_a_pacman_binary() {
+    let mut offenders = Vec::new();
+    let mut stack = vec![std::path::PathBuf::from("src")];
+
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).expect("backend/src is readable") {
+            let path = entry.expect("readable entry").path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let body = std::fs::read_to_string(&path).expect("source is utf-8");
+            for (n, line) in body.lines().enumerate() {
+                let spawns_pacman = line.contains("Command::new(\"pacman")
+                    || line.contains("Command::new(\"paccache")
+                    || line.contains("Command::new(\"checkupdates");
+                if spawns_pacman {
+                    offenders.push(format!("{}:{}", path.display(), n + 1));
+                }
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "use the alpm bindings instead of spawning pacman: {offenders:?}"
+    );
+}
+
+/// The frontend derives ErrorCode from these strings; a reword changes what users see.
+#[test]
+fn the_messages_the_frontend_classifies_are_still_produced() {
+    use cockpit_pacman_backend::util::{CheckResult, cancellation_message};
+
+    let fixture = parse_fixture(include_str!(
+        "../../test/fixtures/stream-complete-codes.json"
+    ));
+    let pinned: Vec<&str> = fixture["messages"]
+        .as_array()
+        .expect("messages is an array")
+        .iter()
+        .map(|m| m["message"].as_str().expect("message is a string"))
+        .collect();
+
+    assert!(
+        pinned.contains(&"Operation cancelled by user"),
+        "fixture lost the cancel message"
+    );
+    assert_eq!(
+        cancellation_message(&CheckResult::Cancelled).as_deref(),
+        Some("Operation cancelled by user"),
+        "the cancel wording changed; update the fixture and the frontend test with it"
+    );
+    assert_eq!(
+        cancellation_message(&CheckResult::TimedOut(300)).as_deref(),
+        Some("Operation timed out after 300 seconds"),
+        "the timeout wording changed; update the fixture and the frontend test with it"
+    );
+    assert_eq!(cancellation_message(&CheckResult::Continue), None);
+
+    // The two the backend classifies itself must agree with the fixture, or the
+    // envelope path and the streaming path would disagree about the same text.
+    for entry in fixture["messages"].as_array().expect("array") {
+        let message = entry["message"].as_str().expect("string");
+        let code = entry["code"].as_str().expect("string");
+        if let Some(backend_code) = cockpit_pacman_backend::util::classify_message(message) {
+            assert_eq!(
+                backend_code, code,
+                "backend and frontend disagree on {message:?}"
+            );
+        }
+    }
+}
+
+/// The same list exists in api.ts; the two sides cannot share code.
+#[test]
+fn the_network_keywords_match_the_shared_list() {
+    let fixture = parse_fixture(include_str!(
+        "../../test/fixtures/network-error-keywords.json"
+    ));
+    let expected: Vec<&str> = fixture["keywords"]
+        .as_array()
+        .expect("keywords is an array")
+        .iter()
+        .map(|k| k.as_str().expect("keyword is a string"))
+        .collect();
+
+    assert_eq!(
+        cockpit_pacman_backend::util::NETWORK_ERROR_KEYWORDS,
+        expected.as_slice(),
+        "update test/fixtures/network-error-keywords.json and api.ts together"
     );
 }

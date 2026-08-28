@@ -557,41 +557,6 @@ pub fn reconcile_backup_provenance(manifest: &Path, backup_dir: &Path, name_pref
     }
 }
 
-/// SIGINT a child (pacman traps it and defers to a safe point). `Some(grace)`
-/// escalates to SIGKILL after the grace; a pacman child passes `None` because
-/// a hard kill mid-commit corrupts the db and hooks have no safe upper bound.
-pub(crate) fn terminate_child(
-    child: &mut std::process::Child,
-    grace: Option<Duration>,
-) -> std::process::ExitStatus {
-    use std::os::unix::process::ExitStatusExt;
-
-    // SAFETY: kill(2) with a valid pid and signal number has no memory effects.
-    unsafe {
-        libc::kill(child.id() as libc::pid_t, libc::SIGINT);
-    }
-
-    let deadline = grace.map(|g| Instant::now() + g);
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => return status,
-            Ok(None) => {
-                if deadline.is_some_and(|d| Instant::now() >= d) {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(_) => break,
-        }
-    }
-
-    let _ = child.kill();
-    child.wait().unwrap_or_else(|_| {
-        // Already reaped between the loop and here; report the SIGINT we sent.
-        std::process::ExitStatus::from_raw(libc::SIGINT)
-    })
-}
-
 /// Run a command and capture its output, killing it and returning an error if it
 /// doesn't finish within `timeout`. `wait_with_output` drains stdout/stderr and
 /// reaps on a worker thread (so a hung child can't deadlock on a full pipe),
@@ -773,9 +738,6 @@ pub const NETWORK_ERROR_KEYWORDS: &[&str] = &[
     "download library error",
 ];
 
-/// Classify an error message into a frontend ErrorCode by keyword. Returns None
-/// when nothing matches confidently. Mirrors parseErrorCode in api.ts so both
-/// ends agree on the same buckets.
 pub fn classify_message(message: &str) -> Option<&'static str> {
     let lower = message.to_lowercase();
     if lower.contains("timed out") || lower.contains("timeout") {
@@ -856,21 +818,20 @@ pub fn check_cancel(timeout: &TimeoutGuard) -> CheckResult {
     }
 }
 
-pub fn emit_cancellation_complete(reason: &CheckResult) {
+pub fn cancellation_message(reason: &CheckResult) -> Option<String> {
     match reason {
-        CheckResult::Cancelled => {
-            emit_event(&StreamEvent::Complete {
-                success: false,
-                message: Some("Operation cancelled by user".to_string()),
-            });
-        }
-        CheckResult::TimedOut(secs) => {
-            emit_event(&StreamEvent::Complete {
-                success: false,
-                message: Some(format!("Operation timed out after {} seconds", secs)),
-            });
-        }
-        CheckResult::Continue => {}
+        CheckResult::Cancelled => Some("Operation cancelled by user".to_string()),
+        CheckResult::TimedOut(secs) => Some(format!("Operation timed out after {} seconds", secs)),
+        CheckResult::Continue => None,
+    }
+}
+
+pub fn emit_cancellation_complete(reason: &CheckResult) {
+    if let Some(message) = cancellation_message(reason) {
+        emit_event(&StreamEvent::Complete {
+            success: false,
+            message: Some(message),
+        });
     }
 }
 
@@ -968,7 +929,7 @@ mod tests {
     use super::{
         ERROR_CODES, backups_to_prune, classify_error, classify_message, config_path,
         enqueue_capped, list_cache_packages, output_with_timeout, read_backup_provenance,
-        reconcile_backup_provenance, record_backup_provenance, terminate_child, write_bytes_atomic,
+        reconcile_backup_provenance, record_backup_provenance, write_bytes_atomic,
         write_event_flushed, write_json_atomic_with_mode,
     };
     use crate::models::{BackupSource, StreamEvent};
@@ -1309,55 +1270,6 @@ mod tests {
             0,
             "SIGTERM not in SigCgt; ctrlc 'termination' feature missing?"
         );
-    }
-
-    #[test]
-    #[allow(clippy::unwrap_used)]
-    fn terminate_child_graceful_exit() {
-        use std::os::unix::process::ExitStatusExt;
-
-        let mut child = std::process::Command::new("sleep")
-            .arg("30")
-            .spawn()
-            .unwrap();
-        let start = std::time::Instant::now();
-        let status = terminate_child(&mut child, Some(Duration::from_secs(5)));
-        // SIGINT ended it well before the grace window, no SIGKILL escalation.
-        assert!(start.elapsed() < Duration::from_secs(5));
-        assert_eq!(status.signal(), Some(libc::SIGINT));
-    }
-
-    // The wait-forever branch (child ignoring SIGINT) is left untested: it
-    // would hang the suite.
-    #[test]
-    #[allow(clippy::unwrap_used)]
-    fn terminate_child_without_grace_waits_for_exit() {
-        use std::os::unix::process::ExitStatusExt;
-
-        let mut child = std::process::Command::new("sleep")
-            .arg("30")
-            .spawn()
-            .unwrap();
-        let status = terminate_child(&mut child, None);
-        assert_eq!(status.signal(), Some(libc::SIGINT));
-    }
-
-    #[test]
-    #[allow(clippy::unwrap_used)]
-    fn terminate_child_escalates_when_sigint_ignored() {
-        use std::os::unix::process::ExitStatusExt;
-
-        // The loop keeps the shell resident (no exec-into-sleep optimization) so
-        // it actually stays alive ignoring SIGINT, forcing the SIGKILL path.
-        let mut child = std::process::Command::new("sh")
-            .args(["-c", "trap \"\" INT; while :; do sleep 1; done"])
-            .spawn()
-            .unwrap();
-        // Let the shell install the trap before signalling, else SIGINT hits the
-        // default disposition during startup and kills it before the loop.
-        std::thread::sleep(Duration::from_millis(300));
-        let status = terminate_child(&mut child, Some(Duration::from_millis(300)));
-        assert_eq!(status.signal(), Some(libc::SIGKILL));
     }
 
     #[test]

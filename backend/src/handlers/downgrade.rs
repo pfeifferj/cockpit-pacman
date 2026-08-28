@@ -1,18 +1,20 @@
-use alpm::Alpm;
+use alpm::{Alpm, SigLevel, TransFlag};
 use anyhow::{Context, Result};
 use std::cmp::Ordering;
 use std::fs;
-use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::process::{Command, ExitStatus, Stdio};
-use std::time::{Duration, Instant};
 
-use crate::alpm::get_handle;
+use crate::alpm::{TransactionGuard, Verbosity, get_handle, setup_dl_cb, setup_log_cb};
+use crate::check_cancel_early;
+use crate::handlers::mutation::{
+    EventScope, commit_and_complete, fail_complete, prepare_failure, setup_event_cb,
+    setup_progress_cb, setup_question_cb,
+};
 use crate::inhibit::ShutdownInhibitor;
 use crate::models::{CachedVersion, DowngradeResponse, StreamEvent};
 use crate::util::{
-    DEFAULT_MUTATION_TIMEOUT_SECS, emit_event, emit_json, get_cache_dir, is_cancelled,
-    list_cache_packages, parse_package_filename, setup_signal_handler, terminate_child,
+    DEFAULT_MUTATION_TIMEOUT_SECS, TimeoutGuard, emit_event, emit_json, get_cache_dir,
+    list_cache_packages, parse_package_filename, setup_signal_handler, spawn_cancel_listener,
 };
 
 use crate::validation::{validate_package_name, validate_version};
@@ -70,7 +72,6 @@ pub fn list_downgrades(package_name: Option<&str>) -> Result<()> {
 }
 
 pub fn downgrade_package(name: &str, version: &str, timeout: Option<u64>) -> Result<()> {
-    setup_signal_handler();
     validate_package_name(name)?;
     validate_version(version)?;
 
@@ -79,174 +80,100 @@ pub fn downgrade_package(name: &str, version: &str, timeout: Option<u64>) -> Res
     let target_filename = find_package_file(cache_path, name, version)?;
     let pkg_path = cache_path.join(&target_filename);
 
-    run_pacman_upgrade(&pkg_path.to_string_lossy(), name, version, timeout)
+    install_downgrade(
+        DowngradeSource::Cached(pkg_path.to_string_lossy().into_owned()),
+        name,
+        version,
+        timeout,
+    )
 }
 
-/// Run `pacman -U` against a package target (a cache path or an archive URL),
-/// streaming its output as log events. Shared by cache and archive downgrades.
-pub(crate) fn run_pacman_upgrade(
-    target: &str,
+pub(crate) enum DowngradeSource {
+    Cached(String),
+    Url(String),
+}
+
+fn file_siglevel(level: SigLevel, default: SigLevel) -> SigLevel {
+    if level.is_empty() { default } else { level }
+}
+
+pub(crate) fn install_downgrade(
+    source: DowngradeSource,
     name: &str,
     version: &str,
-    timeout: Option<u64>,
+    timeout_secs: Option<u64>,
 ) -> Result<()> {
+    setup_signal_handler();
+    spawn_cancel_listener();
+    let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
+
+    let mut handle = get_handle()?;
+    setup_log_cb(&mut handle);
+    setup_dl_cb(&mut handle, Verbosity::Streaming);
+    setup_progress_cb(&mut handle);
+    setup_event_cb(&mut handle, EventScope::Upgrade);
+    setup_question_cb(&mut handle, false);
+
+    check_cancel_early!(&timeout);
+
     emit_event(&StreamEvent::Event {
         event: format!("Downgrading {} to version {}", name, version),
         package: Some(name.to_string()),
     });
 
-    let timeout_secs = timeout.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS);
-    let timeout_duration = std::time::Duration::from_secs(timeout_secs);
-    let start_time = Instant::now();
-
-    emit_event(&StreamEvent::Log {
-        level: "info".to_string(),
-        message: format!(
-            "Running: pacman -U --noconfirm {} (timeout: {}s)",
-            target, timeout_secs
+    let (path, siglevel) = match source {
+        DowngradeSource::Cached(path) => (
+            path,
+            file_siglevel(handle.local_file_siglevel(), handle.default_siglevel()),
         ),
-    });
+        DowngradeSource::Url(url) => {
+            let fetched = handle
+                .fetch_pkgurl([url.as_str()].into_iter())
+                .map_err(|e| {
+                    fail_complete(format!("Failed to download {} {}: {}", name, version, e))
+                })?;
+            let Some(path) = fetched.first().map(|p| p.to_string()) else {
+                return Err(fail_complete(format!(
+                    "Download of {} {} produced no file",
+                    name, version
+                )));
+            };
+            (
+                path,
+                file_siglevel(handle.remote_file_siglevel(), handle.default_siglevel()),
+            )
+        }
+    };
+
+    check_cancel_early!(&timeout);
 
     let _inhibitor = ShutdownInhibitor::take("Downgrading package");
 
-    let mut child = Command::new("pacman")
-        .args(["-U", "--noconfirm"])
-        .arg(target)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("Failed to spawn pacman")?;
+    let mut tx = TransactionGuard::new(&mut handle, TransFlag::NONE)?;
 
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-
-    let stdout_handle = std::thread::spawn(move || {
-        if let Some(stdout) = stdout {
-            let reader = BufReader::new(stdout);
-            for line_result in reader.lines() {
-                let line = match line_result {
-                    Ok(l) => l,
-                    Err(e) => {
-                        eprintln!("Warning: Failed to read stdout line: {}", e);
-                        continue;
-                    }
-                };
-                if !line.trim().is_empty() {
-                    emit_event(&StreamEvent::Log {
-                        level: "info".to_string(),
-                        message: line,
-                    });
-                }
-            }
-        }
-    });
-
-    let stderr_handle = std::thread::spawn(move || {
-        if let Some(stderr) = stderr {
-            let reader = BufReader::new(stderr);
-            for line_result in reader.lines() {
-                let line = match line_result {
-                    Ok(l) => l,
-                    Err(e) => {
-                        eprintln!("Warning: Failed to read stderr line: {}", e);
-                        continue;
-                    }
-                };
-                if !line.trim().is_empty() {
-                    emit_event(&StreamEvent::Log {
-                        level: "warning".to_string(),
-                        message: line,
-                    });
-                }
-            }
-        }
-    });
-
-    enum Outcome {
-        // pacman may defer the SIGINT and still finish; carry the real status.
-        Cancelled(ExitStatus),
-        TimedOut(ExitStatus),
-        Exited(ExitStatus),
-    }
-
-    let outcome = loop {
-        // Never SIGKILL pacman: a hard kill mid-commit corrupts the local db.
-        if is_cancelled() {
-            break Outcome::Cancelled(terminate_child(&mut child, None));
-        }
-
-        if start_time.elapsed() > timeout_duration {
-            break Outcome::TimedOut(terminate_child(&mut child, None));
-        }
-
-        match child.try_wait() {
-            Ok(Some(status)) => break Outcome::Exited(status),
-            Ok(None) => {
-                std::thread::sleep(Duration::from_millis(100));
-            }
-            Err(e) => {
-                join_readers(stdout_handle, stderr_handle);
-                emit_event(&StreamEvent::Complete {
-                    success: false,
-                    message: Some(format!("Failed to check process status: {}", e)),
-                });
-                return Err(e.into());
-            }
-        }
+    let pkg = match tx.load_pkg(&path, siglevel) {
+        Ok(pkg) => pkg,
+        Err(e) => return Err(fail_complete(format!("Failed to load {}: {}", path, e))),
     };
 
-    // Join after the child has exited so pacman's final cleanup lines reach the
-    // log, then report a status that reflects what actually happened.
-    join_readers(stdout_handle, stderr_handle);
-
-    let complete = match outcome {
-        Outcome::Cancelled(status) | Outcome::TimedOut(status) if status.success() => {
-            StreamEvent::Complete {
-                success: true,
-                message: Some(format!(
-                    "Downgrade of {} to {} finished before the cancel took effect",
-                    name, version
-                )),
-            }
-        }
-        Outcome::Cancelled(_) => StreamEvent::Complete {
-            success: false,
-            message: Some("Operation cancelled by user".to_string()),
-        },
-        Outcome::TimedOut(_) => StreamEvent::Complete {
-            success: false,
-            message: Some(format!(
-                "Operation timed out after {} seconds",
-                timeout_secs
-            )),
-        },
-        Outcome::Exited(status) if status.success() => StreamEvent::Complete {
-            success: true,
-            message: Some(format!("Successfully downgraded {} to {}", name, version)),
-        },
-        Outcome::Exited(status) => StreamEvent::Complete {
-            success: false,
-            message: Some(format!(
-                "Failed to downgrade {}: exit code {}",
-                name,
-                status.code().unwrap_or(-1)
-            )),
-        },
-    };
-    emit_event(&complete);
-    Ok(())
-}
-
-fn join_readers(
-    stdout_handle: std::thread::JoinHandle<()>,
-    stderr_handle: std::thread::JoinHandle<()>,
-) {
-    if let Err(e) = stdout_handle.join() {
-        eprintln!("Warning: stdout reader thread panicked: {:?}", e);
+    if let Err(e) = tx.add_pkg(pkg) {
+        return Err(fail_complete(format!(
+            "Failed to add '{}' to transaction: {}",
+            name, e
+        )));
     }
-    if let Err(e) = stderr_handle.join() {
-        eprintln!("Warning: stderr reader thread panicked: {:?}", e);
+
+    check_cancel_early!(&timeout);
+
+    if let Some(err_msg) = tx.prepare().err().map(|e| e.to_string()) {
+        return Err(prepare_failure(&err_msg));
     }
+
+    commit_and_complete(
+        &mut tx,
+        "Operation interrupted - package may be in inconsistent state",
+        Some(format!("Successfully downgraded {} to {}", name, version)),
+    )
 }
 
 fn find_package_file(cache_path: &Path, name: &str, version: &str) -> Result<String> {
@@ -287,4 +214,23 @@ pub(crate) fn is_version_older(cached: &str, installed: &str) -> bool {
 
 pub(crate) fn compare_versions(a: &str, b: &str) -> Ordering {
     alpm::vercmp(a, b)
+}
+
+#[cfg(test)]
+mod siglevel_tests {
+    use super::file_siglevel;
+    use alpm::SigLevel;
+
+    #[test]
+    fn an_unset_file_level_falls_back_to_the_default() {
+        let default = SigLevel::PACKAGE | SigLevel::PACKAGE_OPTIONAL;
+        assert_eq!(file_siglevel(SigLevel::NONE, default), default);
+    }
+
+    #[test]
+    fn a_configured_file_level_is_used_as_is() {
+        let configured = SigLevel::PACKAGE;
+        let default = SigLevel::PACKAGE | SigLevel::PACKAGE_OPTIONAL;
+        assert_eq!(file_siglevel(configured, default), configured);
+    }
 }

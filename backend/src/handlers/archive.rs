@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::alpm::get_handle;
 use crate::handlers::downgrade::{
-    compare_versions, get_installed_version, is_version_older, run_pacman_upgrade,
+    DowngradeSource, compare_versions, get_installed_version, install_downgrade, is_version_older,
 };
 use crate::models::{CachedVersion, DowngradeResponse};
 use crate::util::{emit_json, parse_package_filename};
@@ -14,9 +14,9 @@ const ARCHIVE_BASE_URL: &str = "https://archive.archlinux.org/packages";
 const MAX_LISTING_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_ARCHIVE_VERSIONS: usize = 100;
 
-fn archive_dir_url(name: &str) -> Option<String> {
+fn archive_dir_url_at(base: &str, name: &str) -> Option<String> {
     let first = name.chars().next()?;
-    Some(format!("{}/{}/{}/", ARCHIVE_BASE_URL, first, name))
+    Some(format!("{}/{}/{}/", base, first, name))
 }
 
 fn archive_file_url(name: &str, filename: &str) -> Option<String> {
@@ -85,13 +85,9 @@ fn system_arch() -> &'static str {
     std::env::consts::ARCH
 }
 
-pub fn list_archive_versions(name: &str, query: Option<&str>) -> Result<()> {
-    validate_package_name(name)?;
-    let alpm = get_handle()?;
-    let installed_version = get_installed_version(&alpm, name);
-    let arch = system_arch();
-
-    let url = archive_dir_url(name).ok_or_else(|| anyhow::anyhow!("Invalid package name"))?;
+fn fetch_listing(base: &str, name: &str) -> Result<Option<String>> {
+    let url =
+        archive_dir_url_at(base, name).ok_or_else(|| anyhow::anyhow!("Invalid package name"))?;
 
     let agent = ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
@@ -102,12 +98,7 @@ pub fn list_archive_versions(name: &str, query: Option<&str>) -> Result<()> {
 
     let resp = match agent.get(&url).call() {
         Ok(r) => r,
-        Err(ureq::Error::StatusCode(404)) => {
-            return emit_json(&DowngradeResponse {
-                packages: vec![],
-                total: 0,
-            });
-        }
+        Err(ureq::Error::StatusCode(404)) => return Ok(None),
         Err(e) => return Err(e.into()),
     };
 
@@ -116,7 +107,21 @@ pub fn list_archive_versions(name: &str, query: Option<&str>) -> Result<()> {
     body.as_reader()
         .take(MAX_LISTING_BYTES)
         .read_to_end(&mut buf)?;
-    let html = String::from_utf8_lossy(&buf);
+    Ok(Some(String::from_utf8_lossy(&buf).into_owned()))
+}
+
+pub fn list_archive_versions(name: &str, query: Option<&str>) -> Result<()> {
+    validate_package_name(name)?;
+    let alpm = get_handle()?;
+    let installed_version = get_installed_version(&alpm, name);
+    let arch = system_arch();
+
+    let Some(html) = fetch_listing(ARCHIVE_BASE_URL, name)? else {
+        return emit_json(&DowngradeResponse {
+            packages: vec![],
+            total: 0,
+        });
+    };
 
     let packages = build_archive_versions(&html, name, arch, installed_version.as_deref(), query);
     let total = packages.len();
@@ -169,7 +174,6 @@ fn build_archive_versions(
 }
 
 pub fn downgrade_from_archive(name: &str, filename: &str, timeout: Option<u64>) -> Result<()> {
-    crate::util::setup_signal_handler();
     validate_package_name(name)?;
     validate_archive_filename(filename, name)?;
 
@@ -178,7 +182,7 @@ pub fn downgrade_from_archive(name: &str, filename: &str, timeout: Option<u64>) 
     let url =
         archive_file_url(name, filename).ok_or_else(|| anyhow::anyhow!("Invalid package name"))?;
 
-    run_pacman_upgrade(&url, name, &version, timeout)
+    install_downgrade(DowngradeSource::Url(url), name, &version, timeout)
 }
 
 #[cfg(test)]
@@ -354,12 +358,63 @@ mod tests {
     #[test]
     fn builds_urls_from_first_char() {
         assert_eq!(
-            archive_dir_url("bash").unwrap(),
+            archive_dir_url_at(ARCHIVE_BASE_URL, "bash").unwrap(),
             "https://archive.archlinux.org/packages/b/bash/"
         );
         assert_eq!(
             archive_file_url("bash", "bash-5.1.016-1-x86_64.pkg.tar.zst").unwrap(),
             "https://archive.archlinux.org/packages/b/bash/bash-5.1.016-1-x86_64.pkg.tar.zst"
         );
+    }
+
+    #[tokio::test]
+    async fn an_unknown_package_gives_no_listing_rather_than_an_error() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/n/nosuchpackage/"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let listing =
+            super::fetch_listing(&server.uri(), "nosuchpackage").expect("404 is not an error");
+        assert!(listing.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_listing_is_returned_for_a_package_that_exists() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/b/bash/"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("<a href=\"bash-5.2-1-x86_64.pkg.tar.zst\">"),
+            )
+            .mount(&server)
+            .await;
+
+        let listing = super::fetch_listing(&server.uri(), "bash").expect("fetches");
+        assert!(listing.expect("some listing").contains("bash-5.2-1"));
+    }
+
+    #[tokio::test]
+    async fn a_server_error_is_not_mistaken_for_an_empty_archive() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/b/bash/"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+
+        assert!(super::fetch_listing(&server.uri(), "bash").is_err());
     }
 }

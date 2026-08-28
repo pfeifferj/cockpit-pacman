@@ -5,6 +5,8 @@ use models::{SignoffGroup, SignoffSpec};
 
 pub const DEFAULT_BASE_URL: &str = "https://archlinux.org";
 
+const MAX_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
+
 #[derive(serde::Deserialize)]
 struct SignoffResponse {
     signoff_groups: Vec<SignoffGroup>,
@@ -60,7 +62,15 @@ impl SignoffSession {
             .get(&login_url)
             .call()
             .context("failed to fetch login page")?;
-        let _ = resp.into_body().read_to_vec();
+        {
+            use std::io::Read;
+            let mut buf = Vec::new();
+            let _ = resp
+                .into_body()
+                .as_reader()
+                .take(MAX_RESPONSE_BYTES)
+                .read_to_end(&mut buf);
+        }
 
         let csrf_token = self
             .extract_csrf_token()
@@ -101,15 +111,21 @@ impl SignoffSession {
     }
 
     pub fn get_signoffs(&self) -> Result<Vec<SignoffGroup>> {
+        use std::io::Read;
+
         let url = format!("{}/packages/signoffs/json/", self.base_url);
-        let body = self
+        let mut resp = self
             .agent
             .get(&url)
             .call()
-            .context("failed to fetch signoffs")?
-            .body_mut()
-            .read_to_string()
+            .context("failed to fetch signoffs")?;
+        let mut buf = Vec::new();
+        resp.body_mut()
+            .as_reader()
+            .take(MAX_RESPONSE_BYTES)
+            .read_to_end(&mut buf)
             .context("failed to read signoffs response body")?;
+        let body = String::from_utf8(buf).context("signoffs response is not valid UTF-8")?;
 
         let response: SignoffResponse =
             serde_json::from_str(&body).context("failed to parse signoffs JSON")?;
