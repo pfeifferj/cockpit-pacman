@@ -555,8 +555,6 @@ describe("UpdatesView", () => {
         expect(screen.getByText("Applying Updates")).toBeInTheDocument();
       });
 
-      // dispatchEvent returns false once a listener has cancelled it, which is
-      // what makes the browser prompt.
       expect(window.dispatchEvent(new Event("beforeunload", { cancelable: true }))).toBe(false);
 
       await act(async () => {

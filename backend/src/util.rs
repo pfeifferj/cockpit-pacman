@@ -288,7 +288,6 @@ pub fn emit_json<T: Serialize>(response: &T) -> Result<()> {
     Ok(())
 }
 
-/// Commented entries still count toward `total`; only `enabled` says the file can serve.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct EntryCounts {
     pub enabled: usize,
@@ -389,7 +388,6 @@ pub fn backups_to_prune(
     if entries.len() <= keep {
         return Vec::new();
     }
-    // Manual outranks automatic at any age.
     entries.sort_by_key(|(_, ts, source)| {
         (
             !matches!(source, BackupSource::Manual),
@@ -416,8 +414,6 @@ pub fn prune_old_backups(parent: &Path, name_prefix: &str, keep: usize, manifest
         }
     };
 
-    // Unlisted backups default to Manual, as the listing renders them, so one
-    // predating the manifest is protected rather than silently evictable.
     let provenance = read_backup_provenance(manifest);
     let entries: Vec<(PathBuf, i64, BackupSource)> = read_dir
         .filter_map(|entry| entry.ok())
@@ -472,7 +468,6 @@ pub fn read_backup_provenance(manifest: &Path) -> std::collections::BTreeMap<i64
         .collect()
 }
 
-/// Values stay uninterpreted, so an unknown source round-trips instead of being dropped.
 fn read_provenance_raw(manifest: &Path) -> std::collections::BTreeMap<i64, serde_json::Value> {
     std::fs::read_to_string(manifest)
         .ok()
@@ -928,7 +923,6 @@ pub(crate) fn parse_package_filename(filename: &str) -> Option<(String, String, 
     }
 }
 
-/// Ok when a cancel caused the failure, Err otherwise; only the cancel flag decides.
 pub fn handle_commit_error(
     err_msg: &str,
     cancelled: bool,

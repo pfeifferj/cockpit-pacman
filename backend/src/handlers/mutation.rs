@@ -496,8 +496,6 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
             });
             Ok(())
         }
-        // Every package landed, and the view keys its "finished before the
-        // cancel took effect" notice off this success.
         SysupgradeOutcome::CompletedDespiteCancel { .. } => {
             emit_event(&StreamEvent::Complete {
                 success: true,

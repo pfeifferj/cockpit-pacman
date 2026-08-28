@@ -322,8 +322,6 @@ pub fn save_mirrorlist(mirrors: &[MirrorEntry]) -> Result<()> {
 
     for mirror in mirrors {
         validate_mirror_url(&mirror.url)?;
-        // A comment is written as `## {comment}`, so a newline in it ends the
-        // comment and whatever follows becomes a directive.
         if let Some(comment) = mirror.comment.as_deref().filter(|c| !c.is_empty()) {
             validate_directive_value(comment)?;
         }
@@ -360,7 +358,6 @@ pub fn save_mirrorlist(mirrors: &[MirrorEntry]) -> Result<()> {
             None
         };
 
-        // 0644 through the shared writer, not the caller's umask.
         crate::util::write_bytes_atomic_with_mode(path, content.as_bytes(), 0o644)?;
 
         // Clean up old backups, keeping only the most recent MAX_BACKUPS
@@ -569,8 +566,6 @@ mod tests {
         let path = std::env::temp_dir().join(format!("cpac-mirrors-{}", std::process::id()));
         let commented = "## Arch Linux mirrorlist\n#Server = https://a.example/$repo/os/$arch\n#Server = https://b.example/$repo/os/$arch\n";
 
-        // Two Server entries are present, so a total-based guard would let this
-        // through and restore a mirrorlist pacman cannot sync from.
         std::fs::write(&path, commented).unwrap();
         assert!(ensure_mirrors_restorable(&path).is_err());
 

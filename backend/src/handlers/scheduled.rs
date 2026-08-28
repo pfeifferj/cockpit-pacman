@@ -639,7 +639,6 @@ fn outcome_to_log_parts(
             Some("Upgrade interrupted during commit".to_string()),
             None,
         ),
-        // The packages are on the system, so this is not a failed run.
         SysupgradeOutcome::CompletedDespiteCancel { packages } => (
             "ok",
             *packages,

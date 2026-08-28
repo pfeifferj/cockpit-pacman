@@ -146,8 +146,6 @@ CacheServer = https://cache.example.com/$repo
 fn unknown_directives_and_comments_round_trip_verbatim() {
     let parsed: PacmanConf = parse_conf(FIXTURE_EXTRAS);
     assert_eq!(
-        // They follow the last directive, so they belong to the section's tail
-        // rather than to any one line.
         parsed.repos[0].trailing,
         vec![
             "Usage = Sync Search".to_string(),
