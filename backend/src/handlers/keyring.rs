@@ -22,18 +22,13 @@ pub fn keyring_status() -> Result<()> {
                 );
                 KeyringState::Uninitialized
             }
-            Ok(InitializationStatus::PathIsSymlink) => {
-                warnings.push(format!(
-                    "Security warning: keyring path ({}) is a symlink. This may be unsafe.",
-                    keyring.get_homedir()
-                ));
-                KeyringState::Undetermined
-            }
             Ok(InitializationStatus::IncorrectPermissions { actual }) => {
                 warnings.push(format!(
-                    "Keyring directory ({}) has incorrect permissions: {:o} (expected 700)",
+                    "Keyring directory ({}) has mode {:o}; pacman expects 755. \
+                     Fix with 'chmod 755 {}' or reinitialize with 'pacman-key --init'.",
                     keyring.get_homedir(),
-                    actual
+                    actual,
+                    keyring.get_homedir()
                 ));
                 KeyringState::Ready
             }
