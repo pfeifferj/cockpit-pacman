@@ -42,8 +42,38 @@ impl<'a> TransactionGuard<'a> {
         self.handle.sync_sysupgrade(enable_downgrade)
     }
 
-    pub fn prepare(&mut self) -> Result<(), alpm::PrepareError<'_>> {
-        self.handle.trans_prepare()
+    /// PrepareError's Display is only alpm's errno line ("could not satisfy
+    /// dependencies"); the packages that caused it are in the error data.
+    pub fn prepare(&mut self) -> Result<(), String> {
+        self.handle.trans_prepare().map_err(|e| {
+            let mut msg = e.to_string();
+            match e.data() {
+                Some(alpm::PrepareData::UnsatisfiedDeps(list)) => {
+                    for m in list {
+                        msg.push_str(&format!("; {} requires {}", m.target(), m.depend()));
+                        if let Some(cause) = m.causing_pkg() {
+                            msg.push_str(&format!(" (removed by {})", cause));
+                        }
+                    }
+                }
+                Some(alpm::PrepareData::ConflictingDeps(list)) => {
+                    for c in list {
+                        msg.push_str(&format!(
+                            "; {} conflicts with {}",
+                            c.package1().name(),
+                            c.package2().name()
+                        ));
+                    }
+                }
+                Some(alpm::PrepareData::PkgInvalidArch(list)) => {
+                    for p in list {
+                        msg.push_str(&format!("; {} is for another architecture", p.name()));
+                    }
+                }
+                None => {}
+            }
+            msg
+        })
     }
 
     pub fn commit(&mut self) -> Result<(), alpm::CommitError> {

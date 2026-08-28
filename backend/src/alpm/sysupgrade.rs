@@ -95,8 +95,7 @@ pub fn run_sysupgrade(
 
     checkpoint!(timeout);
 
-    // Stringify immediately: PrepareError borrows the transaction.
-    let prepare_err = tx.prepare().err().map(|e| e.to_string());
+    let prepare_err = tx.prepare().err();
 
     // The gate reads after prepare() so prepare-time questions are seen, and
     // it outranks a prepare error: a conflict both sets its flag and fails

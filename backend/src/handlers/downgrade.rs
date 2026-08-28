@@ -165,7 +165,7 @@ pub(crate) fn install_downgrade(
 
     check_cancel_early!(&timeout);
 
-    if let Some(err_msg) = tx.prepare().err().map(|e| e.to_string()) {
+    if let Some(err_msg) = tx.prepare().err() {
         return Err(prepare_failure(&err_msg));
     }
 

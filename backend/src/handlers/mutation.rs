@@ -340,15 +340,15 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
         anyhow::bail!("Operation cancelled");
     }
 
-    let prepare_success = tx.prepare().is_ok();
+    let prepare_err = tx.prepare().err();
 
     let packages_to_upgrade = tx.add().len();
     let total_download_size: i64 = tx.add().iter().map(|p| p.download_size()).sum();
 
-    if !prepare_success {
+    if let Some(err) = prepare_err {
         let s = state.borrow();
         let response = PreflightResponse {
-            error: Some("Failed to prepare transaction".to_string()),
+            error: Some(format!("Failed to prepare transaction: {}", err)),
             conflicts: s.conflicts.clone(),
             replacements: s.replacements.clone(),
             removals: s.removals.clone(),
@@ -599,7 +599,7 @@ pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
 
     check_cancel_early!(&timeout);
 
-    if let Some(err_msg) = tx.prepare().err().map(|e| e.to_string()) {
+    if let Some(err_msg) = tx.prepare().err() {
         return Err(prepare_failure(&err_msg));
     }
 
@@ -670,7 +670,7 @@ pub fn install_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
 
     check_cancel_early!(&timeout);
 
-    if let Some(err_msg) = tx.prepare().err().map(|e| e.to_string()) {
+    if let Some(err_msg) = tx.prepare().err() {
         return Err(prepare_failure(&err_msg));
     }
 
@@ -719,7 +719,7 @@ pub fn remove_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
 
     check_cancel_early!(&timeout);
 
-    if let Some(err_msg) = tx.prepare().err().map(|e| e.to_string()) {
+    if let Some(err_msg) = tx.prepare().err() {
         return Err(prepare_failure(&err_msg));
     }
 
