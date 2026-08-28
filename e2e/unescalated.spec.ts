@@ -36,11 +36,11 @@ test.describe("unescalated session", () => {
     }
   });
 
-  test("does not offer to initialize a keyring it cannot read", async ({ page }) => {
+  test("does not offer to initialize a keyring it cannot fully read", async ({ page }) => {
     const frame = await openPluginUnescalated(page);
     await frame.locator('button[role="tab"]:has-text("Keyring")').click();
 
-    await expect(frame.getByText(/could not be determined/i)).toBeVisible({ timeout: 15000 });
+    await expect(frame.getByText(/Keyring Warning/i).first()).toBeVisible({ timeout: 15000 });
     await expect(frame.getByRole("button", { name: /Initialize Keyring/i })).toHaveCount(0);
   });
 });
