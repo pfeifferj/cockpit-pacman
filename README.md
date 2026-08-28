@@ -5,7 +5,7 @@
 
 A Cockpit plugin for Arch Linux package management using direct alpm.rs integration.
 
-Mirror: https://gitlab.archlinux.org/pfeifferj/cockpit-pacman
+Mirror: https://gitlab.archlinux.org/josie/cockpit-pacman
 
 ## Features
 
