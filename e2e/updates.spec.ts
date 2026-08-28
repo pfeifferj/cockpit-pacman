@@ -6,42 +6,30 @@ test.describe("Updates Tab", () => {
   });
 
   test("displays updates tab by default", async ({ pacman }) => {
-    const updatesTab = pacman.page.locator('button[role="tab"]:has-text("Updates")');
+    const updatesTab = pacman.frame.locator('button[role="tab"]:has-text("Updates")');
     await expect(updatesTab).toHaveAttribute("aria-selected", "true");
   });
 
-  test("shows check for updates button", async ({ pacman }) => {
+  test("resolves to either a pending list or the up-to-date state", async ({ pacman }) => {
     await pacman.waitForLoading();
-    const checkButton = pacman.page.locator('button:has-text("Check for Updates")');
-    await expect(checkButton).toBeVisible();
+
+    const updateTable = pacman.panel.locator("table").first();
+    const upToDate = pacman.panel.locator('text="System is up to date"');
+
+    await expect(updateTable.or(upToDate).first()).toBeVisible({ timeout: 60000 });
   });
 
-  test("can check for updates", async ({ pacman }) => {
+  test("does not surface a permission error", async ({ pacman }) => {
     await pacman.waitForLoading();
-    const checkButton = pacman.page.locator('button:has-text("Check for Updates")');
-    await checkButton.click();
 
-    const spinner = pacman.page.locator(".pf-v6-c-spinner");
-    await expect(spinner).toBeVisible();
-
-    await spinner.waitFor({ state: "hidden", timeout: 60000 });
-
-    const content = pacman.page.locator('[class*="updates"]');
-    await expect(content).toBeVisible();
+    await expect(pacman.panel.locator('text="Not permitted to perform this action."'))
+      .toHaveCount(0);
   });
 
-  test("displays update count or no updates message", async ({ pacman }) => {
-    await pacman.waitForLoading();
-    const checkButton = pacman.page.locator('button:has-text("Check for Updates")');
-    await checkButton.click();
+  test("shows the system overview counters", async ({ pacman }) => {
     await pacman.waitForLoading();
 
-    const noUpdates = pacman.page.locator('text="System is up to date"');
-    const updateList = pacman.page.locator("table");
-
-    const hasNoUpdates = await noUpdates.isVisible().catch(() => false);
-    const hasUpdateList = await updateList.isVisible().catch(() => false);
-
-    expect(hasNoUpdates || hasUpdateList).toBe(true);
+    const overview = pacman.panel.locator('text="System Overview"');
+    await expect(overview).toBeVisible({ timeout: 30000 });
   });
 });

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { ARCH_STATUS_URL, NEWS_LOOKBACK_DAYS, REBOOT_PACKAGES } from "../constants";
+import { ARCH_STATUS_URL, LOG_FLUSH_MS, NEWS_LOOKBACK_DAYS, REBOOT_PACKAGES } from "../constants";
 import { useBackdropClose } from "../hooks/useBackdropClose";
 import { usePackageDetails } from "../hooks/usePackageDetails";
 import { useSortableTable } from "../hooks/useSortableTable";
@@ -259,11 +259,12 @@ interface UpdatesViewProps {
 
 type ErrorOrigin = "check" | "sync" | "preflight" | "upgrade";
 
-const LockErrorBody: React.FC<{ onRetry: () => void; onAutoRetry: () => void }> = ({ onRetry, onAutoRetry }) => {
+const LockErrorBody: React.FC<{ onRetry: () => void; onAutoRetry: () => void; onCleared: () => void }> = ({ onRetry, onAutoRetry, onCleared }) => {
   const [checking, setChecking] = useState(true);
   const [removing, setRemoving] = useState(false);
-  const [lockInfo, setLockInfo] = useState<{ stale: boolean; process?: string } | null>(null);
+  const [lockInfo, setLockInfo] = useState<{ stale: boolean; process?: string; unknown: boolean } | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const [checkFailed, setCheckFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -274,11 +275,16 @@ const LockErrorBody: React.FC<{ onRetry: () => void; onAutoRetry: () => void }> 
           onAutoRetry();
           return;
         }
-        setLockInfo({ stale: status.stale, process: status.blocking_process });
+        setLockInfo({
+          stale: status.stale,
+          process: status.blocking_process,
+          unknown: status.holder_unknown,
+        });
       })
       .catch(() => {
         if (cancelled) return;
         setLockInfo(null);
+        setCheckFailed(true);
       })
       .finally(() => {
         if (cancelled) return;
@@ -293,6 +299,9 @@ const LockErrorBody: React.FC<{ onRetry: () => void; onAutoRetry: () => void }> 
     try {
       const result = await removeStaleLock();
       if (result.removed) {
+        // Raised on the page, not here: this component is replaced by the retry
+        // it triggers, and what the lock proves outlives the retry.
+        onCleared();
         onRetry();
       } else {
         setRemoveError(result.error || "Failed to remove lock");
@@ -312,6 +321,18 @@ const LockErrorBody: React.FC<{ onRetry: () => void; onAutoRetry: () => void }> 
     return (
       <Content component={ContentVariants.p}>
         The database is locked by <strong>{lockInfo.process}</strong>. Wait for it to finish, then retry.
+      </Content>
+    );
+  }
+
+  // Offering removal here would be acting on a check that did not conclude.
+  // A session without administrative access cannot see root's open files, so
+  // it finds no holder for a lock a running pacman still owns.
+  if (checkFailed || lockInfo?.unknown) {
+    return (
+      <Content component={ContentVariants.p}>
+        Could not determine whether the database lock is still in use. This check needs
+        administrative access. Grant it and retry, or wait for the running operation to finish.
       </Content>
     );
   }
@@ -340,6 +361,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [state, setState] = useState<ViewState>("loading");
   const [updates, setUpdates] = useState<UpdateInfo[]>([]);
   const [log, setLog] = useState("");
+  const logBuffer = useRef("");
+  const logFlush = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
   const [errorDetails, setErrorDetails] = useState<string | undefined>(undefined);
@@ -348,15 +371,42 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [errorOrigin, setErrorOrigin] = useState<ErrorOrigin>("check");
   const autoResumedRef = useRef(false);
   const [lockRetryExhausted, setLockRetryExhausted] = useState(false);
+  const [lockCleared, setLockCleared] = useState(false);
   const [errorEpoch, setErrorEpoch] = useState(0);
 
-  // alpm acts on a cancel only between packages; leaving mid-transaction half-applies the upgrade.
   useEffect(() => {
     if (state !== "applying") return;
     const warn = (event: Event) => event.preventDefault();
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [state]);
+
+  // One upgrade emits tens of thousands of stream events, and a setState each
+  // re-renders this view far faster than anything can be read. Coalescing into
+  // one append per interval keeps the string concatenation off that path too.
+  const appendLog = useCallback((data: string) => {
+    logBuffer.current += data;
+    if (logFlush.current !== null) return;
+    logFlush.current = setTimeout(() => {
+      logFlush.current = null;
+      const pending = logBuffer.current;
+      logBuffer.current = "";
+      if (pending) setLog((prev) => appendCapped(prev, pending));
+    }, LOG_FLUSH_MS);
+  }, []);
+
+  const resetLog = useCallback(() => {
+    if (logFlush.current !== null) {
+      clearTimeout(logFlush.current);
+      logFlush.current = null;
+    }
+    logBuffer.current = "";
+    setLog("");
+  }, []);
+
+  useEffect(() => () => {
+    if (logFlush.current !== null) clearTimeout(logFlush.current);
+  }, []);
 
   // Consecutive errors can commit in one render batch without ever showing
   // the intermediate state, so the epoch forces LockErrorBody to remount
@@ -699,12 +749,12 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
   useEffect(() => {
     const { cancel } = syncDatabase({
-      onData: (data) => setLog((prev) => appendCapped(prev, data)),
+      onData: appendLog,
       onComplete: () => loadUpdates(),
-      onError: (err, code) => failWith("sync", err, code),
+      onError: (err, code, details) => failWith("sync", err, code, details),
     });
     return () => cancel();
-  }, [loadUpdates, failWith]);
+  }, [loadUpdates, failWith, appendLog]);
 
   const loadRebootStatus = useCallback(async () => {
     try {
@@ -836,14 +886,17 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     // Hard close so the old op releases db.lck before the new spawn takes it.
     cancelRef.current?.forceStop();
     setState("checking");
-    setLog("");
+    resetLog();
     setSelectedPackages(new Set());
     setLockRetryExhausted(false);
-    cancelRef.current = syncDatabase({
-      onData: (data) => setLog((prev) => appendCapped(prev, data)),
-      onComplete: () => loadUpdates(),
-      onError: (err, code) => failWith("sync", err, code),
-    });
+    cancelRef.current = syncDatabase(
+      {
+        onData: appendLog,
+        onComplete: () => loadUpdates(),
+        onError: (err, code, details) => failWith("sync", err, code, details),
+      },
+      true,
+    );
   };
 
   const handleApplyUpdates = async () => {
@@ -897,7 +950,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const startUpgrade = () => {
     setConfirmModalOpen(false);
     setState("applying");
-    setLog("");
+    resetLog();
     setLockRetryExhausted(false);
     setCancelling(false);
     setCancelOutcome(null);
@@ -911,14 +964,15 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
     const handleEvent = (event: StreamEvent) => {
       if (event.type === "download") {
-        setUpgradeProgress((prev) => ({
-          ...prev,
-          phase: "downloading",
-          currentPackage: event.filename,
-          percent: event.downloaded && event.total
+        setUpgradeProgress((prev) => {
+          const percent = event.downloaded && event.total
             ? Math.round((event.downloaded / event.total) * 100)
-            : prev.percent,
-        }));
+            : prev.percent;
+          if (prev.phase === "downloading" && prev.currentPackage === event.filename && prev.percent === percent) {
+            return prev;
+          }
+          return { ...prev, phase: "downloading", currentPackage: event.filename, percent };
+        });
       } else if (event.type === "progress") {
         const phase = event.operation.includes("hook") ? "hooks" : "installing";
         setUpgradeProgress((prev) => ({
@@ -942,7 +996,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
     cancelRef.current = runUpgrade({
       onEvent: handleEvent,
-      onData: (data) => setLog((prev) => appendCapped(prev, data)),
+      onData: appendLog,
       onComplete: () => {
         autoResumedRef.current = false;
         if (isCancellingRef.current) {
@@ -969,7 +1023,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
           }
         });
       },
-      onError: (err, code) => {
+      onError: (err, code, details) => {
         cancelRef.current = null;
         if (isCancellingRef.current) {
           setCancelling(false);
@@ -979,7 +1033,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
           loadPacnewStatus();
           return;
         }
-        failWith("upgrade", err, code);
+        failWith("upgrade", err, code, details);
       },
     }, ignoredPackages);
   };
@@ -1201,6 +1255,19 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     </Alert>
   ) : null;
 
+  const lockClearedAlert = lockCleared ? (
+    <Alert
+      variant="info"
+      isInline
+      title="Cleared a leftover database lock"
+      className="pf-v6-u-mb-md"
+      actionClose={<AlertActionCloseButton onClose={() => setLockCleared(false)} />}
+    >
+      A package transaction was interrupted before it could finish. If an earlier upgrade looks
+      incomplete, check the package list.
+    </Alert>
+  ) : null;
+
   const scheduledAlert = scheduledUnacked && latestScheduledRun ? (
     <Alert
       variant={latestScheduledRun.status === "failed" ? "danger" : "warning"}
@@ -1346,7 +1413,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
             >
               <EmptyStateBody>
                 {showLockRecovery
-                  ? <LockErrorBody key={errorEpoch} onRetry={manualResumeAfterLock} onAutoRetry={autoResumeAfterLock} />
+                  ? <LockErrorBody key={errorEpoch} onRetry={manualResumeAfterLock} onAutoRetry={autoResumeAfterLock} onCleared={() => setLockCleared(true)} />
                   : error}
                 {!showLockRecovery && <ErrorDetails details={errorDetails} />}
               </EmptyStateBody>
@@ -1501,6 +1568,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       <Card>
         <CardBody>
           {cancelAlert}
+          {lockClearedAlert}
           {rebootAlert}
           {servicesAlert}
           {pacnewAlert}
@@ -1527,6 +1595,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     return (
       <>
         {cancelAlert}
+        {lockClearedAlert}
         {rebootAlert}
         {servicesAlert}
         {pacnewAlert}
@@ -1625,6 +1694,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   return (
     <>
       {cancelAlert}
+      {lockClearedAlert}
       {rebootAlert}
       {servicesAlert}
       {pacnewAlert}

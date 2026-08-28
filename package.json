@@ -6,8 +6,8 @@
   "scripts": {
     "build": "esbuild src/index.tsx --bundle --outfile=dist/index.js --minify --sourcemap --target=es2020 --loader:.tsx=tsx --loader:.ts=ts --loader:.woff2=dataurl --loader:.woff=dataurl --loader:.ttf=dataurl --loader:.svg=dataurl --loader:.eot=dataurl",
     "watch": "esbuild src/index.tsx --bundle --outfile=dist/index.js --sourcemap --target=es2020 --loader:.tsx=tsx --loader:.ts=ts --loader:.woff2=dataurl --loader:.woff=dataurl --loader:.ttf=dataurl --loader:.svg=dataurl --loader:.eot=dataurl --watch",
-    "typecheck": "tsc --noEmit",
-    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.e2e.json",
+    "lint": "eslint src/ e2e/",
     "lint:fix": "eslint src/ --fix",
     "test": "LC_ALL=C.UTF-8 vitest run",
     "test:watch": "vitest",
@@ -37,6 +37,7 @@
     "@types/d3-selection": "^3.0.11",
     "@types/d3-transition": "^3.0.9",
     "@types/d3-zoom": "^3.0.8",
+    "@types/node": "^26.2.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@typescript-eslint/eslint-plugin": "^8.59.2",

@@ -16,6 +16,7 @@ pub struct LockStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub blocking_process: Option<String>,
+    pub holder_unknown: bool,
 }
 
 #[derive(Serialize, TS)]
@@ -36,34 +37,71 @@ fn db_path() -> PathBuf {
     )
 }
 
-// alpm holds an open fd to db.lck while locked, so the owner is whichever
-// process has that exact file open; matching anything under the db dir would
-// misreport read-only queries (and our own backend) as the holder. `lock` must
-// be canonical since /proc fd links resolve fully.
-fn find_lock_holder(lock: &Path) -> Option<String> {
-    for entry in fs::read_dir("/proc").ok()?.flatten() {
-        let pid = entry.file_name().to_str()?.to_string();
+enum Holder {
+    Process(String),
+    None,
+    Unknown,
+}
+
+fn scan_error_hides_a_holder(e: &std::io::Error) -> bool {
+    e.kind() != std::io::ErrorKind::NotFound
+}
+
+fn find_lock_holder(lock: &Path) -> Holder {
+    let Ok(meta) = fs::metadata(lock) else {
+        return Holder::Unknown;
+    };
+    let target = (meta.dev(), meta.ino());
+
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return Holder::Unknown;
+    };
+
+    let mut hidden_from_us = false;
+    for entry in entries {
+        let Ok(entry) = entry else {
+            hidden_from_us = true;
+            continue;
+        };
+        let name = entry.file_name();
+        let Some(pid) = name.to_str() else {
+            hidden_from_us = true;
+            continue;
+        };
         if !pid.chars().all(|c| c.is_ascii_digit()) {
             continue;
         }
-        let fd_dir = entry.path().join("fd");
-        let fds = match fs::read_dir(&fd_dir) {
+        let fds = match fs::read_dir(entry.path().join("fd")) {
             Ok(fds) => fds,
-            Err(_) => continue,
+            Err(e) => {
+                hidden_from_us |= scan_error_hides_a_holder(&e);
+                continue;
+            }
         };
-        for fd in fds.flatten() {
-            if let Ok(target) = fs::read_link(fd.path())
-                && target == lock
-            {
-                let comm = fs::read_to_string(entry.path().join("comm"))
-                    .unwrap_or_default()
-                    .trim()
-                    .to_string();
-                return Some(format!("{} (pid {})", comm, pid));
+        for fd in fds {
+            let Ok(fd) = fd else {
+                hidden_from_us = true;
+                continue;
+            };
+            match fs::metadata(fd.path()) {
+                Ok(m) if (m.dev(), m.ino()) == target => {
+                    let comm = fs::read_to_string(entry.path().join("comm"))
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string();
+                    return Holder::Process(format!("{} (pid {})", comm, pid));
+                }
+                Ok(_) => {}
+                Err(e) => hidden_from_us |= scan_error_hides_a_holder(&e),
             }
         }
     }
-    None
+
+    if hidden_from_us {
+        Holder::Unknown
+    } else {
+        Holder::None
+    }
 }
 
 /// Identify a specific file instance: (dev, ino, ctime_secs, ctime_nsec). ctime
@@ -85,24 +123,30 @@ pub fn check_lock() -> Result<()> {
     } else {
         None
     };
-    let blocking = canonical.as_deref().and_then(find_lock_holder);
-    let stale = canonical.is_some() && blocking.is_none();
+
+    let (blocking, holder_unknown) = match canonical.as_deref().map(find_lock_holder) {
+        Some(Holder::Process(name)) => (Some(name), false),
+        Some(Holder::None) => (None, false),
+        Some(Holder::Unknown) => (None, true),
+        None => (None, locked),
+    };
 
     emit_json(&LockStatus {
         locked,
-        stale,
+        stale: canonical.is_some() && blocking.is_none() && !holder_unknown,
         lock_path: lock.to_string_lossy().to_string(),
         blocking_process: blocking,
+        holder_unknown,
     })
 }
 
 /// Remove db.lck only if no process holds it open. Ok(true) if removed,
 /// Ok(false) if no lock existed, Err with the refusal reason otherwise.
 pub(crate) fn try_remove_stale_lock() -> Result<bool, String> {
-    try_remove_stale_lock_at(&db_path().join("db.lck"))
+    remove_if_holderless(&db_path().join("db.lck"), find_lock_holder)
 }
 
-fn try_remove_stale_lock_at(lock: &Path) -> Result<bool, String> {
+fn remove_if_holderless(lock: &Path, scan: impl Fn(&Path) -> Holder) -> Result<bool, String> {
     if !lock.exists() {
         return Ok(false);
     }
@@ -115,8 +159,14 @@ fn try_remove_stale_lock_at(lock: &Path) -> Result<bool, String> {
 
     let before = lock_identity(&canonical).ok_or("Could not stat lock file")?;
 
-    if let Some(proc) = find_lock_holder(&canonical) {
-        return Err(format!("Database in use by {}", proc));
+    match scan(&canonical) {
+        Holder::Process(proc) => return Err(format!("Database in use by {}", proc)),
+        Holder::Unknown => {
+            return Err(
+                "Could not determine whether the database is in use; not removing".to_string(),
+            );
+        }
+        Holder::None => {}
     }
 
     // db.lck is an O_EXCL presence lock: it can't be acquired while it exists, so
@@ -138,10 +188,16 @@ fn try_remove_stale_lock_at(lock: &Path) -> Result<bool, String> {
 
 pub fn remove_stale_lock() -> Result<()> {
     let result = match try_remove_stale_lock() {
-        Ok(true) => LockRemoveResult {
-            removed: true,
-            error: None,
-        },
+        Ok(true) => {
+            crate::util::journal_note(
+                "cleared stale pacman database lock: a package transaction was interrupted \
+                 before it could finish",
+            );
+            LockRemoveResult {
+                removed: true,
+                error: None,
+            }
+        }
         Ok(false) => LockRemoveResult {
             removed: false,
             error: Some("No lock file exists".to_string()),
@@ -157,23 +213,81 @@ pub fn remove_stale_lock() -> Result<()> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::{find_lock_holder, lock_identity, try_remove_stale_lock_at};
+    use super::{
+        Holder, find_lock_holder, lock_identity, remove_if_holderless, scan_error_hides_a_holder,
+    };
     use std::fs::File;
+
+    #[test]
+    fn only_a_vanished_process_proves_it_is_not_the_holder() {
+        use std::io::{Error, ErrorKind};
+
+        assert!(!scan_error_hides_a_holder(&Error::from(
+            ErrorKind::NotFound
+        )));
+
+        for kind in [
+            ErrorKind::PermissionDenied,
+            ErrorKind::OutOfMemory,
+            ErrorKind::Other,
+        ] {
+            assert!(
+                scan_error_hides_a_holder(&Error::from(kind)),
+                "{kind:?} leaves the scan unable to tell"
+            );
+        }
+    }
 
     #[test]
     fn try_remove_reaps_only_a_holderless_lock() {
         let path = std::env::temp_dir().join(format!("db-lck-reap-{}", std::process::id()));
 
-        assert_eq!(try_remove_stale_lock_at(&path), Ok(false));
+        assert_eq!(remove_if_holderless(&path, find_lock_holder), Ok(false));
 
         let file = File::create(&path).unwrap();
-        let err = try_remove_stale_lock_at(&path).unwrap_err();
+        let err = remove_if_holderless(&path, find_lock_holder).unwrap_err();
         assert!(err.contains(&format!("(pid {})", std::process::id())));
         assert!(path.exists(), "a held lock must not be removed");
 
         drop(file);
-        assert_eq!(try_remove_stale_lock_at(&path), Ok(true));
+        assert_eq!(remove_if_holderless(&path, |_| Holder::None), Ok(true));
         assert!(!path.exists(), "a holderless lock must be removed");
+    }
+
+    #[test]
+    fn finds_a_holder_that_opened_the_lock_by_another_path() {
+        let path = std::env::temp_dir().join(format!("db-lck-alias-{}", std::process::id()));
+        let alias = std::env::temp_dir().join(format!("db-lck-alias-{}-2", std::process::id()));
+        File::create(&path).unwrap();
+        std::fs::hard_link(&path, &alias).unwrap();
+
+        let held = File::open(&alias).unwrap();
+        let found = find_lock_holder(&path.canonicalize().unwrap());
+
+        drop(held);
+        std::fs::remove_file(&alias).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        match found {
+            Holder::Process(name) => {
+                assert!(name.contains(&format!("(pid {})", std::process::id())))
+            }
+            _ => panic!("a holder that opened the same file by another path must still be found"),
+        }
+    }
+
+    #[test]
+    fn a_scan_that_saw_nothing_is_not_a_holderless_lock() {
+        let path = std::env::temp_dir().join(format!("db-lck-blind-{}", std::process::id()));
+        File::create(&path).unwrap();
+
+        let err = remove_if_holderless(&path, |_| Holder::Unknown).unwrap_err();
+
+        assert!(err.contains("Could not determine"));
+        assert!(
+            path.exists(),
+            "a lock that could not be checked must survive"
+        );
+        std::fs::remove_file(&path).unwrap();
     }
 
     #[test]
@@ -212,16 +326,15 @@ mod tests {
         let file = File::create(&path).unwrap();
         let canonical = path.canonicalize().unwrap();
 
-        let holder = find_lock_holder(&canonical);
-        assert!(holder.is_some());
-        assert!(
-            holder
-                .unwrap()
-                .contains(&format!("(pid {})", std::process::id()))
-        );
+        match find_lock_holder(&canonical) {
+            Holder::Process(name) => {
+                assert!(name.contains(&format!("(pid {})", std::process::id())))
+            }
+            _ => panic!("the scan must name the process holding the file open"),
+        }
 
         drop(file);
-        assert!(find_lock_holder(&canonical).is_none());
+        assert!(!matches!(find_lock_holder(&canonical), Holder::Process(_)));
         std::fs::remove_file(&path).unwrap();
     }
 }

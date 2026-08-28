@@ -50,13 +50,8 @@ pub enum SysupgradeOutcome {
     Upgraded {
         packages: usize,
     },
-    /// Stopped with nothing applied: either at a checkpoint before the commit
-    /// started, or by a commit that reached the system with none of it.
     CancelledEarly(CheckResult),
-    /// A cancel landed part way: some packages are applied and some are not,
-    /// which is the only case that can leave the system inconsistent.
     Interrupted,
-    /// A cancel was pending but everything landed: alpm refuses interrupts during post-transaction hooks.
     CompletedDespiteCancel {
         packages: usize,
     },
@@ -150,8 +145,6 @@ enum Applied {
 
 fn applied_state(handle: &Alpm, targets: &[String]) -> Applied {
     let local = handle.localdb();
-    // "Landed" is the same test find_available_updates makes: installed, and no
-    // syncdb offering anything newer.
     let landed = targets
         .iter()
         .filter(|name| match local.pkg(name.as_str()) {
@@ -169,9 +162,8 @@ fn applied_state(handle: &Alpm, targets: &[String]) -> Applied {
 
 fn applied_from_counts(landed: usize, planned: usize) -> Applied {
     match landed {
-        _ if planned == 0 => Applied::None,
-        n if n == planned => Applied::All,
         0 => Applied::None,
+        n if n == planned => Applied::All,
         _ => Applied::Some,
     }
 }
@@ -194,7 +186,6 @@ fn classify_commit_ok(
     }
 }
 
-/// Cancel outranks intervention outranks plain failure.
 fn classify_commit_error(
     check: CheckResult,
     intervention: Option<Vec<&'static str>>,

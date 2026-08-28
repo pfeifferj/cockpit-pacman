@@ -29,8 +29,6 @@ pub struct Directive {
     pub kind: DirectiveKind,
     pub value: String,
     pub enabled: bool,
-    /// Comments and lines this tool does not model that sat directly above,
-    /// kept with it because that is what they describe.
     pub leading: Vec<String>,
 }
 
@@ -59,8 +57,6 @@ pub fn parse_conf(input: &str) -> PacmanConf {
     let mut preamble = String::new();
     let mut repos: Vec<RepoSection> = Vec::new();
     let mut in_repo = false;
-    // Lines seen since the last recognised directive. They describe whatever
-    // comes next, so they are held until that arrives.
     let mut pending: Vec<String> = Vec::new();
 
     for line in input.lines() {
@@ -113,7 +109,6 @@ pub fn parse_conf(input: &str) -> PacmanConf {
         let content = trimmed[hashes..].trim();
         let commented = hashes > 0;
 
-        // Inside a disabled section the serializer's own hash says nothing about what the user wanted.
         let ours = !repo.enabled && commented;
         // One hash inside a disabled section is the serializer's; a second is
         // the user's own switch for that mirror.
@@ -164,7 +159,6 @@ fn uncomment_once(trimmed: &str) -> &str {
     }
 }
 
-/// Tells a directive the serializer commented out from a comment the user typed.
 fn reads_as_setting(content: &str) -> bool {
     content.split_once('=').is_some_and(|(key, _)| {
         let key = key.trim();
@@ -210,8 +204,6 @@ pub fn serialize_conf(conf: &PacmanConf) -> String {
             output.push_str(&format!("#[{}]\n", repo.name));
         }
 
-        // A disabled section's header is commented, so any live line under it
-        // would bind to the section above; comment these too.
         let emit_raw = |output: &mut String, raw: &str| {
             if !repo.enabled {
                 output.push('#');
@@ -253,7 +245,6 @@ pub fn serialize_conf(conf: &PacmanConf) -> String {
                 DirectiveKind::Server => "Server",
                 DirectiveKind::Include => "Include",
             };
-            // Two states, two hashes: disabling the section must not erase which mirrors were off.
             if !repo.enabled {
                 output.push('#');
             }
@@ -339,7 +330,6 @@ pub fn list_repos() -> Result<()> {
     emit_json(&ListReposResponse { repos })
 }
 
-/// A section counts only when enabled with a live Server or Include.
 fn ensure_repos_usable(repos: &[RepoEntry]) -> Result<()> {
     let usable = repos
         .iter()
@@ -381,7 +371,6 @@ pub fn save_repos(repos: &[RepoEntry]) -> Result<()> {
         let original = fs::read_to_string(path)?;
         let mut conf = parse_conf(&original);
 
-        // Matched by kind and value, not position, so toggling a mirror keeps its comment.
         let mut preserved: std::collections::HashMap<String, RepoSection> =
             conf.repos.drain(..).map(|r| (r.name.clone(), r)).collect();
 
@@ -407,7 +396,6 @@ pub fn save_repos(repos: &[RepoEntry]) -> Result<()> {
                 }
             }
 
-            // A deleted directive's comment lands at the section end instead of being dropped.
             for (_, orphaned) in by_value {
                 section.trailing.extend(orphaned);
             }
@@ -423,7 +411,6 @@ pub fn save_repos(repos: &[RepoEntry]) -> Result<()> {
             None
         };
 
-        // 0644 through the shared writer, not the caller's umask.
         crate::util::write_bytes_atomic_with_mode(path, new_content.as_bytes(), 0o644)?;
 
         cleanup_old_backups();
@@ -664,8 +651,6 @@ mod save_guard {
         );
     }
 
-    /// An enabled section whose directives are all commented is just as dead:
-    /// pacman reports no servers configured for the repository.
     #[test]
     fn an_enabled_repo_with_no_live_directive_is_refused() {
         assert!(ensure_repos_usable(&[repo("core", true, false)]).is_err());
@@ -721,8 +706,6 @@ mod round_trip {
         );
     }
 
-    /// SigLevel may sit anywhere in a section. pacman does not care, but moving
-    /// it is still an unasked-for edit to someone's file.
     #[test]
     fn a_section_round_trips_unchanged_when_nothing_is_edited() {
         for conf in [
@@ -796,8 +779,6 @@ mod tests {
         let path = std::env::temp_dir().join(format!("cpac-repos-{}", std::process::id()));
         let commented = "[options]\nHoldPkg = pacman glibc\n\n#[core]\n#Include = /etc/pacman.d/mirrorlist\n\n#[extra]\n#Include = /etc/pacman.d/mirrorlist\n";
 
-        // Both sections still parse as repos, so a total-based guard would let
-        // this through and restore a pacman.conf with no package source.
         std::fs::write(&path, commented).unwrap();
         assert!(ensure_repos_restorable(&path).is_err());
 

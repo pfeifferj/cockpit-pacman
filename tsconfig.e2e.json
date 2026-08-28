@@ -1,0 +1,9 @@
+{
+  // Separate from the app's tsconfig: the specs run under Node, the app runs in
+  // a browser. Folding them together would put node globals in scope for src/.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["e2e/**/*"]
+}

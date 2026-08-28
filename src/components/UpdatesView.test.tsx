@@ -108,7 +108,7 @@ describe("UpdatesView", () => {
     });
     mockFetchNews.mockResolvedValue(mockNewsResponseEmpty);
     mockCheckSecurity.mockResolvedValue({ advisories: [] });
-    mockCheckLock.mockResolvedValue({ locked: true, stale: true, lock_path: "/var/lib/pacman/db.lck" });
+    mockCheckLock.mockResolvedValue({ locked: true, stale: true, lock_path: "/var/lib/pacman/db.lck", holder_unknown: false });
     mockRemoveStaleLock.mockResolvedValue({ removed: true });
     mockAddIgnoredPackage.mockResolvedValue({ success: true, package: "linux", message: "Package ignored" });
     mockGetNewsReadState.mockResolvedValue({ dismissed: [] });
@@ -555,8 +555,6 @@ describe("UpdatesView", () => {
         expect(screen.getByText("Applying Updates")).toBeInTheDocument();
       });
 
-      // dispatchEvent returns false once a listener has cancelled it, which is
-      // what makes the browser prompt.
       expect(window.dispatchEvent(new Event("beforeunload", { cancelable: true }))).toBe(false);
 
       await act(async () => {
@@ -883,6 +881,7 @@ describe("UpdatesView", () => {
         locked: true,
         stale: false,
         lock_path: "/var/lib/pacman/db.lck",
+        holder_unknown: false,
         blocking_process: "pacman (pid 1234)",
       });
       render(<UpdatesView />);
@@ -895,6 +894,33 @@ describe("UpdatesView", () => {
       });
     });
 
+    it("does not offer removal when the holder could not be determined", async () => {
+      mockCheckUpdates.mockRejectedValue(new Error("Unable to lock database"));
+      mockCheckLock.mockResolvedValue({
+        locked: true,
+        stale: false,
+        lock_path: "/var/lib/pacman/db.lck",
+        holder_unknown: true,
+      });
+      render(<UpdatesView />);
+
+      expect(
+        await screen.findByText(/Could not determine whether the database lock/)
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Remove stale lock/ })).not.toBeInTheDocument();
+    });
+
+    it("does not offer removal when the lock check itself failed", async () => {
+      mockCheckUpdates.mockRejectedValue(new Error("Unable to lock database"));
+      mockCheckLock.mockRejectedValue(new Error("Not permitted"));
+      render(<UpdatesView />);
+
+      expect(
+        await screen.findByText(/Could not determine whether the database lock/)
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Remove stale lock/ })).not.toBeInTheDocument();
+    });
+
     it("auto-retries when lock is already cleared", async () => {
       mockCheckUpdates.mockRejectedValueOnce(new Error("Unable to lock database"));
       mockCheckUpdates.mockResolvedValueOnce(mockUpdatesResponse);
@@ -902,6 +928,7 @@ describe("UpdatesView", () => {
         locked: false,
         stale: false,
         lock_path: "/var/lib/pacman/db.lck",
+        holder_unknown: false,
       });
       render(<UpdatesView />);
 
@@ -935,6 +962,50 @@ describe("UpdatesView", () => {
         expect(screen.getByText("Applying Updates")).toBeInTheDocument();
       });
       expect(mockCheckUpdates).toHaveBeenCalledTimes(1);
+    });
+
+    it("says a transaction was interrupted once the retry it triggered settles", async () => {
+      mockPreflightUpgrade.mockRejectedValueOnce(new Error("Unable to lock database"));
+      let upgradeCallbacks: Parameters<typeof api.runUpgrade>[0] | undefined;
+      mockRunUpgrade.mockImplementation((callbacks) => {
+        upgradeCallbacks = callbacks;
+        return { cancel: vi.fn(), forceStop: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Apply 1 Update/i }));
+      });
+
+      const removeButton = await screen.findByRole("button", { name: /Remove stale lock/ });
+      await act(async () => {
+        fireEvent.click(removeButton);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("Applying Updates")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("Cleared a leftover database lock")).not.toBeInTheDocument();
+
+      await act(async () => {
+        upgradeCallbacks?.onComplete();
+      });
+
+      expect(
+        await screen.findByText("Cleared a leftover database lock")
+      ).toBeInTheDocument();
+    });
+
+    it("does not claim a lock was cleared when none was", async () => {
+      render(<UpdatesView />);
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 update/)).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText("Cleared a leftover database lock")).not.toBeInTheDocument();
     });
 
     it("re-runs preflight before restarting an upgrade interrupted by a lock", async () => {
@@ -1067,6 +1138,7 @@ describe("UpdatesView", () => {
         locked: false,
         stale: false,
         lock_path: "/var/lib/pacman/db.lck",
+        holder_unknown: false,
       });
       mockRunUpgrade.mockImplementation((callbacks) => {
         setTimeout(() => callbacks.onError("Failed to initialize transaction: invalid or corrupted database"), 0);
@@ -1778,6 +1850,43 @@ describe("UpdatesView", () => {
       // The row's onRowClick (which opens the details modal via getPackageInfo)
       // must not fire when a link inside the portaled popover is clicked.
       expect(mockGetPackageInfo).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Error details", () => {
+    it("shows the backend's context chain when a sync fails", async () => {
+      mockSyncDatabase.mockImplementation((callbacks) => {
+        setTimeout(
+          () =>
+            callbacks.onError(
+              "Failed to prepare transaction",
+              "transaction_failed",
+              "caused by: conflicting files in /usr/bin"
+            ),
+          0
+        );
+        return { cancel: vi.fn(), forceStop: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/conflicting files in \/usr\/bin/)).toBeInTheDocument();
+      });
+    });
+
+    it("shows nothing extra when the failure carries no chain", async () => {
+      mockSyncDatabase.mockImplementation((callbacks) => {
+        setTimeout(() => callbacks.onError("Failed to prepare transaction", "transaction_failed"), 0);
+        return { cancel: vi.fn(), forceStop: vi.fn() };
+      });
+
+      render(<UpdatesView />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText(/Failed to prepare transaction/).length).toBeGreaterThan(0);
+      });
+      expect(screen.queryByText(/caused by/)).not.toBeInTheDocument();
     });
   });
 

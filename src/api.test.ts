@@ -8,6 +8,7 @@ import {
   createMockSpawnPromise,
   createMockStreamingProcess,
 } from "./test/mocks";
+import { STREAM_FIRST_OUTPUT_TIMEOUT_MS } from "./constants";
 import {
   formatSize,
   listInstalled,
@@ -77,7 +78,7 @@ describe("listInstalled", () => {
         "",
         "",
       ],
-      { superuser: "try", err: "message" }
+      { err: "message" }
     );
     expect(result.packages).toHaveLength(2);
     expect(result.total).toBe(2);
@@ -110,7 +111,7 @@ describe("listInstalled", () => {
         "name",
         "desc",
       ],
-      { superuser: "try", err: "message" }
+      { err: "message" }
     );
   });
 
@@ -199,7 +200,7 @@ describe("checkUpdates", () => {
         "/usr/libexec/cockpit-pacman/cockpit-pacman-backend",
         "check-updates",
       ],
-      { superuser: "try", err: "message" }
+      { err: "message" }
     );
     expect(result.updates).toHaveLength(1);
     expect(result.updates[0].name).toBe("linux");
@@ -224,7 +225,7 @@ describe("getPackageInfo", () => {
         "local-package-info",
         "linux",
       ],
-      { superuser: "try", err: "message" }
+      { err: "message" }
     );
     expect(result.name).toBe("linux");
     expect(result.licenses).toContain("GPL-2.0-only");
@@ -254,7 +255,7 @@ describe("searchPackages", () => {
         "",
         "",
       ],
-      { superuser: "try", err: "message" }
+      { err: "message" }
     );
     expect(result.results).toHaveLength(2);
     expect(result.total).toBe(2);
@@ -287,6 +288,49 @@ describe("runUpgrade", () => {
     expect(callbacks.onError).not.toHaveBeenCalled();
   });
 
+  it("fails a stream that never produces any output", () => {
+    vi.useFakeTimers();
+    try {
+      const mockProc = createMockStreamingProcess();
+      const close = vi.fn();
+      mockProc.close = close;
+      mockSpawn.mockReturnValue(mockProc);
+
+      const callbacks = { onComplete: vi.fn(), onError: vi.fn() };
+      runUpgrade(callbacks);
+
+      vi.advanceTimersByTime(STREAM_FIRST_OUTPUT_TIMEOUT_MS + 1);
+
+      expect(callbacks.onError).toHaveBeenCalledTimes(1);
+      expect(callbacks.onError.mock.calls[0][1]).toBe("timeout");
+      expect(close).toHaveBeenCalled();
+      expect(callbacks.onComplete).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not time out once the stream has produced output", () => {
+    vi.useFakeTimers();
+    try {
+      const mockProc = createMockStreamingProcess();
+      mockSpawn.mockReturnValue(mockProc);
+
+      const callbacks = { onComplete: vi.fn(), onError: vi.fn(), onData: vi.fn() };
+      runUpgrade(callbacks);
+
+      mockProc._emit(JSON.stringify({ type: "log", level: "info", message: "working" }) + "\n");
+      vi.advanceTimersByTime(STREAM_FIRST_OUTPUT_TIMEOUT_MS * 10);
+
+      expect(callbacks.onError).not.toHaveBeenCalled();
+
+      mockProc._emit(JSON.stringify({ type: "complete", success: true }) + "\n");
+      expect(callbacks.onComplete).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("calls onError when receiving failed complete event", () => {
     const mockProc = createMockStreamingProcess();
     mockSpawn.mockReturnValue(mockProc);
@@ -305,7 +349,7 @@ describe("runUpgrade", () => {
     };
     mockProc._emit(JSON.stringify(completeEvent) + "\n");
 
-    expect(callbacks.onError).toHaveBeenCalledWith("Package conflict", "internal_error");
+    expect(callbacks.onError).toHaveBeenCalledWith("Package conflict", "internal_error", undefined);
     expect(callbacks.onComplete).not.toHaveBeenCalled();
   });
 
@@ -326,8 +370,34 @@ describe("runUpgrade", () => {
       JSON.stringify({ code: "network_error", message: "failed retrieving file" }) + "\n"
     );
 
-    expect(callbacks.onError).toHaveBeenCalledWith("failed retrieving file", "network_error");
+    expect(callbacks.onError).toHaveBeenCalledWith("failed retrieving file", "network_error", undefined);
     expect(callbacks.onComplete).not.toHaveBeenCalled();
+  });
+
+  it("carries the envelope's details through to onError", () => {
+    const mockProc = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(mockProc);
+
+    const callbacks = {
+      onComplete: vi.fn(),
+      onError: vi.fn(),
+    };
+
+    runUpgrade(callbacks);
+
+    mockProc._emit(
+      JSON.stringify({
+        code: "network_error",
+        message: "failed to refresh package databases",
+        details: "failed to refresh package databases: could not resolve host mirror.example",
+      }) + "\n"
+    );
+
+    expect(callbacks.onError).toHaveBeenCalledWith(
+      "failed to refresh package databases",
+      "network_error",
+      "failed to refresh package databases: could not resolve host mirror.example"
+    );
   });
 
   it("surfaces a streaming envelope with an unrecognized code instead of dropping it", () => {
@@ -343,7 +413,7 @@ describe("runUpgrade", () => {
 
     mockProc._emit(JSON.stringify({ code: "some_future_code", message: "unexpected" }) + "\n");
 
-    expect(callbacks.onError).toHaveBeenCalledWith("unexpected", "internal_error");
+    expect(callbacks.onError).toHaveBeenCalledWith("unexpected", "internal_error", undefined);
     expect(callbacks.onComplete).not.toHaveBeenCalled();
   });
 
@@ -468,7 +538,7 @@ describe("runUpgrade", () => {
 
     mockProc._fail({ message: "Permission denied" });
 
-    expect(callbacks.onError).toHaveBeenCalledWith("Permission denied", "permission_denied");
+    expect(callbacks.onError).toHaveBeenCalledWith("Permission denied", "permission_denied", undefined);
     expect(callbacks.onComplete).not.toHaveBeenCalled();
   });
 
@@ -572,7 +642,8 @@ describe("runUpgrade", () => {
 
     expect(callbacks.onError).toHaveBeenCalledWith(
       "Backend process ended without sending completion status",
-      "internal_error"
+      "internal_error",
+      undefined
     );
     expect(callbacks.onComplete).not.toHaveBeenCalled();
   });
@@ -604,18 +675,20 @@ describe("syncDatabase", () => {
     vi.clearAllMocks();
   });
 
-  it("spawns sync-database command with force flag", () => {
-    const mockProc = createMockStreamingProcess();
-    mockSpawn.mockReturnValue(mockProc);
+  it("only forces a re-download when asked to", () => {
+    const callbacks = { onComplete: vi.fn(), onError: vi.fn() };
 
-    const callbacks = {
-      onComplete: vi.fn(),
-      onError: vi.fn(),
-    };
-
+    mockSpawn.mockReturnValue(createMockStreamingProcess());
     syncDatabase(callbacks);
-
     expect(mockSpawn).toHaveBeenCalledWith(
+      expect.arrayContaining(["sync-database", "false"]),
+      expect.any(Object)
+    );
+
+    mockSpawn.mockReturnValue(createMockStreamingProcess());
+    syncDatabase(callbacks, true);
+
+    expect(mockSpawn).toHaveBeenLastCalledWith(
       expect.arrayContaining(["sync-database", "true"]),
       expect.any(Object)
     );

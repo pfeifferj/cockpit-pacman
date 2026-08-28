@@ -234,7 +234,6 @@ fn test_validate_keep_versions_invalid() {
     assert!(validate_keep_versions(u32::MAX).is_err());
 }
 
-// A newline in a mirror comment would end it and leave a directive pacman obeys.
 #[test]
 fn test_validate_directive_value_rejects_line_breaks() {
     assert!(validate_directive_value("Germany, Hetzner").is_ok());

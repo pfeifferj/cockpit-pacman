@@ -21,6 +21,7 @@ export default defineConfig({
     },
     {
       name: "chromium",
+      testIgnore: /shots\.spec\.ts/,
       use: {
         ...devices["Desktop Chrome"],
         storageState: ".auth/session.json",

@@ -36,13 +36,30 @@ pub fn detected_ip_family() -> IpFamily {
 }
 
 static CANCELLED: AtomicBool = AtomicBool::new(false);
+static CHANNEL_LOST: AtomicBool = AtomicBool::new(false);
 
 pub fn is_cancelled() -> bool {
     CANCELLED.load(AtomicOrdering::SeqCst)
 }
 
+pub fn channel_lost() -> bool {
+    CHANNEL_LOST.load(AtomicOrdering::SeqCst)
+}
+
+pub fn may_interrupt_transaction() -> bool {
+    is_cancelled() && !channel_lost()
+}
+
+fn note_channel_lost() {
+    if !is_cancelled() {
+        CHANNEL_LOST.store(true, AtomicOrdering::SeqCst);
+    }
+    request_cancel();
+}
+
 pub fn reset_cancelled() {
     CANCELLED.store(false, AtomicOrdering::SeqCst);
+    CHANNEL_LOST.store(false, AtomicOrdering::SeqCst);
 }
 
 /// Only sets the flag; the alpm callbacks re-issue the interrupt on the commit
@@ -51,8 +68,6 @@ pub fn request_cancel() {
     CANCELLED.store(true, AtomicOrdering::SeqCst);
 }
 
-/// Watch stdin for a "cancel" line; EOF or read error also cancels (the
-/// channel is gone). Runs until process exit.
 pub fn spawn_cancel_listener() {
     // Off fd 0 so a libalpm scriptlet inheriting stdin can't steal the cancel
     // line; scriptlets get /dev/null, we keep a private close-on-exec dup.
@@ -79,7 +94,12 @@ pub fn spawn_cancel_listener() {
             line.clear();
             match reader.read_line(&mut line) {
                 Ok(0) | Err(_) => {
-                    request_cancel();
+                    note_channel_lost();
+                    journal_note(
+                        "control channel closed with no cancel request; \
+                         work not yet applied will stop, an upgrade already \
+                         applying will run to completion",
+                    );
                     return;
                 }
                 Ok(_) => {
@@ -90,6 +110,23 @@ pub fn spawn_cancel_listener() {
             }
         }
     });
+}
+
+pub fn journal_note(message: &str) {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let Ok(mut child) = Command::new("systemd-cat")
+        .args(["-t", "cockpit-pacman", "-p", "warning"])
+        .stdin(Stdio::piped())
+        .spawn()
+    else {
+        return;
+    };
+    if let Some(stdin) = child.stdin.as_mut() {
+        let _ = writeln!(stdin, "{}", message);
+    }
+    let _ = child.wait();
 }
 
 pub const DEFAULT_MUTATION_TIMEOUT_SECS: u64 = 300;
@@ -288,7 +325,6 @@ pub fn emit_json<T: Serialize>(response: &T) -> Result<()> {
     Ok(())
 }
 
-/// Commented entries still count toward `total`; only `enabled` says the file can serve.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct EntryCounts {
     pub enabled: usize,
@@ -389,7 +425,6 @@ pub fn backups_to_prune(
     if entries.len() <= keep {
         return Vec::new();
     }
-    // Manual outranks automatic at any age.
     entries.sort_by_key(|(_, ts, source)| {
         (
             !matches!(source, BackupSource::Manual),
@@ -416,8 +451,6 @@ pub fn prune_old_backups(parent: &Path, name_prefix: &str, keep: usize, manifest
         }
     };
 
-    // Unlisted backups default to Manual, as the listing renders them, so one
-    // predating the manifest is protected rather than silently evictable.
     let provenance = read_backup_provenance(manifest);
     let entries: Vec<(PathBuf, i64, BackupSource)> = read_dir
         .filter_map(|entry| entry.ok())
@@ -472,7 +505,6 @@ pub fn read_backup_provenance(manifest: &Path) -> std::collections::BTreeMap<i64
         .collect()
 }
 
-/// Values stay uninterpreted, so an unknown source round-trips instead of being dropped.
 fn read_provenance_raw(manifest: &Path) -> std::collections::BTreeMap<i64, serde_json::Value> {
     std::fs::read_to_string(manifest)
         .ok()
@@ -514,7 +546,7 @@ pub fn reconcile_backup_provenance(manifest: &Path, backup_dir: &Path, name_pref
     let before = map.len();
     map.retain(|ts, _| live.contains(ts));
     if map.len() != before {
-        let _ = write_json_atomic_with_mode(manifest, &map, 0o600);
+        let _ = write_json_atomic_with_mode(manifest, &map, 0o644);
     }
 }
 
@@ -928,7 +960,6 @@ pub(crate) fn parse_package_filename(filename: &str) -> Option<(String, String, 
     }
 }
 
-/// Ok when a cancel caused the failure, Err otherwise; only the cancel flag decides.
 pub fn handle_commit_error(
     err_msg: &str,
     cancelled: bool,
@@ -1197,6 +1228,14 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_database_refresh_reads_as_a_network_error() {
+        assert_eq!(
+            classify_message("Failed to refresh package databases: failed to retrieve some files"),
+            Some("network_error")
+        );
+    }
+
+    #[test]
     fn every_classified_code_is_in_the_shared_vocabulary() {
         // classify_* return bare literals; this pins them to ERROR_CODES so the
         // backend can't emit a code the frontend doesn't know.
@@ -1231,6 +1270,48 @@ mod tests {
         super::reset_cancelled();
         super::request_cancel();
         assert!(super::is_cancelled());
+        super::reset_cancelled();
+    }
+
+    #[test]
+    fn a_user_cancel_may_interrupt_a_running_transaction() {
+        super::reset_cancelled();
+        super::request_cancel();
+        assert!(super::may_interrupt_transaction());
+        super::reset_cancelled();
+    }
+
+    #[test]
+    fn a_lost_channel_may_not_interrupt_a_running_transaction() {
+        super::reset_cancelled();
+        super::CHANNEL_LOST.store(true, super::AtomicOrdering::SeqCst);
+        super::request_cancel();
+
+        assert!(super::is_cancelled(), "still cancels work not yet applied");
+        assert!(!super::may_interrupt_transaction());
+
+        super::reset_cancelled();
+        assert!(!super::channel_lost(), "reset clears the reason too");
+    }
+
+    #[test]
+    fn a_channel_lost_after_a_user_cancel_still_may_interrupt() {
+        super::reset_cancelled();
+        super::request_cancel();
+        super::note_channel_lost();
+
+        assert!(super::may_interrupt_transaction());
+        assert!(!super::channel_lost());
+        super::reset_cancelled();
+    }
+
+    #[test]
+    fn a_channel_lost_on_its_own_may_not_interrupt() {
+        super::reset_cancelled();
+        super::note_channel_lost();
+
+        assert!(super::is_cancelled());
+        assert!(!super::may_interrupt_transaction());
         super::reset_cancelled();
     }
 

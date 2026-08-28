@@ -450,7 +450,7 @@ pub fn scheduled_run() -> Result<()> {
         handle.add_ignorepkg(pkg_name.as_str())?;
     }
 
-    setup_log_cb(&mut handle, Verbosity::Journal);
+    setup_log_cb(&mut handle);
     setup_dl_cb(&mut handle, Verbosity::Journal);
 
     eprintln!("Syncing package databases...");
@@ -639,7 +639,6 @@ fn outcome_to_log_parts(
             Some("Upgrade interrupted during commit".to_string()),
             None,
         ),
-        // The packages are on the system, so this is not a failed run.
         SysupgradeOutcome::CompletedDespiteCancel { packages } => (
             "ok",
             *packages,

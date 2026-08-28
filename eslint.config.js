@@ -65,6 +65,31 @@ export default [
     },
   },
   {
+    files: ["e2e/**/*.ts"],
+    languageOptions: {
+      parser: tsparser,
+      parserOptions: {
+        ecmaVersion: "latest",
+        sourceType: "module",
+      },
+      globals: {
+        console: "readonly",
+        process: "readonly",
+      },
+    },
+    plugins: {
+      "@typescript-eslint": tseslint,
+    },
+    rules: {
+      ...tseslint.configs.recommended.rules,
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_" },
+      ],
+      "no-unused-vars": "off",
+    },
+  },
+  {
     ignores: ["dist/", "node_modules/", "*.config.js", "src/bindings/", "backend/"],
   },
 ];
