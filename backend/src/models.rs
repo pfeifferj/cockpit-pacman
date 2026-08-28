@@ -457,6 +457,7 @@ pub struct ScheduledRunEntry {
     pub details: Vec<String>,
     /// Absent on records written before it existed, and on ExecStopPost
     /// records, which never saw the run start.
+    #[ts(type = "number | null")]
     pub duration_secs: Option<u64>,
     /// This run found a pacman lock with no holder process and reaped it, which
     /// means the run before it was killed mid-transaction. Says nothing about
