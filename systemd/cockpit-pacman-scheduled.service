@@ -28,9 +28,9 @@ OOMPolicy=continue
 # A dropped line here is a lost diagnostic with nowhere else to appear.
 LogRateLimitIntervalSec=0
 
-# Security hardening
+# Security hardening. No ProtectKernelModules: it mounts /usr/lib/modules
+# read only, and a kernel upgrade writes its modules there.
 ProtectKernelTunables=yes
-ProtectKernelModules=yes
 ProtectControlGroups=yes
 RestrictRealtime=yes
 LockPersonality=yes
