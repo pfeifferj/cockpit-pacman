@@ -92,14 +92,8 @@ const COMMANDS: &[&str] = &[
     "list-repo-backups",
     "restore-repo-backup",
     "delete-repo-backup",
-    "reboot-dismissal-state",
-    "reboot-mark-dismissed",
-    "services-dismissal-state",
-    "services-mark-dismissed",
-    "pacnew-dismissal-state",
-    "pacnew-mark-dismissed",
-    "scheduled-dismissal-state",
-    "scheduled-mark-dismissed",
+    "dismissal-state",
+    "mark-dismissed",
 ];
 
 const USAGE: &str = r#"Usage: cockpit-pacman-backend <command> [args]
@@ -240,14 +234,9 @@ Commands:
                          Restore a pacman.conf backup (requires root)
   delete-repo-backup <timestamp>
                          Delete a pacman.conf backup (requires root)
-  reboot-dismissal-state         Get the dismissed-alert signature for reboot
-  reboot-mark-dismissed SIG      Dismiss the reboot alert
-  services-dismissal-state       Get the dismissed-alert signature for services
-  services-mark-dismissed SIG    Dismiss the services-restart alert
-  pacnew-dismissal-state         Get the dismissed-alert signature for pacnew
-  pacnew-mark-dismissed SIG      Dismiss the pacnew alert
-  scheduled-dismissal-state      Get the dismissed-alert signature for scheduled runs
-  scheduled-mark-dismissed SIG   Dismiss the scheduled-run alert
+  dismissal-state KIND           Get the dismissed-alert signature for KIND
+                         KIND: reboot|services|pacnew|scheduled
+  mark-dismissed KIND SIG        Dismiss the KIND alert
 "#;
 
 fn print_usage() {
@@ -685,37 +674,19 @@ fn main() {
             }
             validate_mirror_url(&args[2]).and_then(|_| mark_news_read(&args[2]))
         }
-        "services-dismissal-state" => read_dismissal("services"),
-        "services-mark-dismissed" => {
+        "dismissal-state" => {
             if args.len() < 3 {
-                eprintln!("Error: services-mark-dismissed requires a SIGNATURE");
+                eprintln!("Error: dismissal-state requires a KIND");
                 std::process::exit(1);
             }
-            mark_dismissed("services", &args[2])
+            read_dismissal(&args[2])
         }
-        "reboot-dismissal-state" => read_dismissal("reboot"),
-        "reboot-mark-dismissed" => {
-            if args.len() < 3 {
-                eprintln!("Error: reboot-mark-dismissed requires a SIGNATURE");
+        "mark-dismissed" => {
+            if args.len() < 4 {
+                eprintln!("Error: mark-dismissed requires a KIND and SIGNATURE");
                 std::process::exit(1);
             }
-            mark_dismissed("reboot", &args[2])
-        }
-        "pacnew-dismissal-state" => read_dismissal("pacnew"),
-        "pacnew-mark-dismissed" => {
-            if args.len() < 3 {
-                eprintln!("Error: pacnew-mark-dismissed requires a SIGNATURE");
-                std::process::exit(1);
-            }
-            mark_dismissed("pacnew", &args[2])
-        }
-        "scheduled-dismissal-state" => read_dismissal("scheduled"),
-        "scheduled-mark-dismissed" => {
-            if args.len() < 3 {
-                eprintln!("Error: scheduled-mark-dismissed requires a SIGNATURE");
-                std::process::exit(1);
-            }
-            mark_dismissed("scheduled", &args[2])
+            mark_dismissed(&args[2], &args[3])
         }
         "signoff-list" => read_credentials_from_stdin().and_then(|creds| signoff_list(&creds)),
         "signoff-sign" => {

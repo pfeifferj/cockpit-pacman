@@ -14,7 +14,10 @@ fn stdout_of(output: &Output) -> String {
 }
 
 fn expect_error_envelope(args: &[&str]) -> serde_json::Value {
-    let output = run(args);
+    error_envelope(args, run(args))
+}
+
+fn error_envelope(args: &[&str], output: Output) -> serde_json::Value {
     let stdout = stdout_of(&output);
 
     assert_eq!(
@@ -73,6 +76,55 @@ fn a_missing_required_argument_exits_non_zero() {
             Some(1),
             "{args:?} should refuse to run without its arguments"
         );
+    }
+}
+
+#[test]
+fn dismissal_commands_require_the_kind_and_signature() {
+    for (args, message) in [
+        (
+            vec!["dismissal-state"],
+            "Error: dismissal-state requires a KIND",
+        ),
+        (
+            vec!["mark-dismissed"],
+            "Error: mark-dismissed requires a KIND and SIGNATURE",
+        ),
+        (
+            vec!["mark-dismissed", "reboot"],
+            "Error: mark-dismissed requires a KIND and SIGNATURE",
+        ),
+    ] {
+        let output = run(&args);
+        let stderr = String::from_utf8(output.stderr.clone()).expect("stderr is utf-8");
+
+        assert_eq!(output.status.code(), Some(1), "{args:?}");
+        assert_eq!(stderr.trim(), message, "{args:?}");
+        assert!(stdout_of(&output).is_empty(), "{args:?}");
+    }
+}
+
+#[test]
+fn unknown_dismissal_kinds_are_refused_before_resolving_the_state_directory() {
+    for kind in ["news", "../etc/passwd", "", "/tmp", "reboot/../services"] {
+        for args in [
+            vec!["dismissal-state", kind],
+            vec!["mark-dismissed", kind, "alert-signature"],
+        ] {
+            let output = Command::new(BIN)
+                .args(&args)
+                .env_remove("HOME")
+                .output()
+                .expect("the backend binary builds and runs");
+            let envelope = error_envelope(&args, output);
+
+            assert_eq!(envelope["code"], "internal_error", "{args:?}");
+            assert_eq!(
+                envelope["message"],
+                format!("Unknown dismissal kind: {kind}"),
+                "{args:?}"
+            );
+        }
     }
 }
 

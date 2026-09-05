@@ -174,7 +174,12 @@ fn news_state_path() -> Result<PathBuf> {
     config_path("news-read.json")
 }
 
+const DISMISSAL_KINDS: &[&str] = &["reboot", "services", "pacnew", "scheduled"];
+
 fn dismissal_path(kind: &str) -> Result<PathBuf> {
+    if !DISMISSAL_KINDS.contains(&kind) {
+        anyhow::bail!("Unknown dismissal kind: {}", kind);
+    }
     config_path(&format!("{}-dismissed.json", kind))
 }
 
@@ -406,5 +411,26 @@ mod fetch_tests {
     #[tokio::test]
     async fn an_unreachable_feed_is_an_error_so_the_caller_can_fall_back() {
         assert!(super::fetch_news_items_from("http://127.0.0.1:1/feeds/news/", 30).is_err());
+    }
+}
+
+#[cfg(test)]
+mod dismissal_kind_tests {
+    #[test]
+    fn a_known_kind_resolves_to_a_path() {
+        for kind in super::DISMISSAL_KINDS {
+            let path = super::dismissal_path(kind).unwrap();
+            assert_eq!(
+                path.file_name().unwrap().to_str().unwrap(),
+                format!("{kind}-dismissed.json")
+            );
+            assert!(path.parent().unwrap().ends_with(".config/cockpit-pacman"));
+        }
+    }
+
+    #[test]
+    fn an_unknown_kind_is_rejected() {
+        assert!(super::dismissal_path("../etc/passwd").is_err());
+        assert!(super::dismissal_path("news").is_err());
     }
 }

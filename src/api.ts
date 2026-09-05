@@ -870,12 +870,12 @@ export async function markNewsRead(link: string): Promise<void> {
   await runBackend<NewsReadState>("news-mark-read", [link], { superuser: "none" });
 }
 
-function makeDismissalApi(prefix: string) {
+function makeDismissalApi(kind: string) {
   return {
     get: (): Promise<DismissalState> =>
-      runBackend<DismissalState>(`${prefix}-dismissal-state`, [], { superuser: "none" }),
+      runBackend<DismissalState>("dismissal-state", [kind], { superuser: "none" }),
     mark: async (signature: string): Promise<void> => {
-      await runBackend<DismissalState>(`${prefix}-mark-dismissed`, [signature], { superuser: "none" });
+      await runBackend<DismissalState>("mark-dismissed", [kind, signature], { superuser: "none" });
     },
   };
 }

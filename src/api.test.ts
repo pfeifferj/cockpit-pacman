@@ -22,10 +22,50 @@ import {
   syncDatabase,
   listArchiveVersions,
   downgradeFromArchive,
+  servicesDismissal,
+  rebootDismissal,
+  pacnewDismissal,
+  scheduledDismissal,
   StreamEvent,
   BackendError,
   isNetworkErrorCode,
 } from "./api";
+
+describe.each([
+  { kind: "services", api: servicesDismissal },
+  { kind: "reboot", api: rebootDismissal },
+  { kind: "pacnew", api: pacnewDismissal },
+  { kind: "scheduled", api: scheduledDismissal },
+])("$kind dismissal", ({ kind, api }) => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reads its state without requesting privilege", async () => {
+    mockSpawn.mockReturnValue(
+      createMockSpawnPromise(JSON.stringify({ signature: "previous-alert" }))
+    );
+
+    await api.get();
+
+    expect(mockSpawn).toHaveBeenCalledExactlyOnceWith(
+      ["/usr/libexec/cockpit-pacman/cockpit-pacman-backend", "dismissal-state", kind],
+      { err: "message" }
+    );
+  });
+
+  it("passes the kind before the signature without requesting privilege", async () => {
+    const signature = "linux:6.19.1-1 linux-lts:6.18.7-1";
+    mockSpawn.mockReturnValue(createMockSpawnPromise(JSON.stringify({ signature })));
+
+    await api.mark(signature);
+
+    expect(mockSpawn).toHaveBeenCalledExactlyOnceWith(
+      ["/usr/libexec/cockpit-pacman/cockpit-pacman-backend", "mark-dismissed", kind, signature],
+      { err: "message" }
+    );
+  });
+});
 
 describe("getDependencyTree", () => {
   beforeEach(() => {
