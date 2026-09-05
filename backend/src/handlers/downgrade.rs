@@ -4,17 +4,16 @@ use std::cmp::Ordering;
 use std::fs;
 use std::path::Path;
 
-use crate::alpm::{TransactionGuard, Verbosity, get_handle, setup_dl_cb, setup_log_cb};
+use crate::alpm::{TransactionGuard, get_handle};
 use crate::check_cancel_early;
 use crate::handlers::mutation::{
-    EventScope, commit_and_complete, fail_complete, prepare_failure, setup_event_cb,
-    setup_progress_cb, setup_question_cb,
+    EventScope, MutationOpts, add_pkg_failure, begin_mutation, commit_and_complete, fail_complete,
+    prepare_failure,
 };
 use crate::inhibit::ShutdownInhibitor;
 use crate::models::{CachedVersion, DowngradeResponse, StreamEvent};
 use crate::util::{
-    DEFAULT_MUTATION_TIMEOUT_SECS, TimeoutGuard, emit_event, emit_json, get_cache_dir,
-    list_cache_packages, parse_package_filename, setup_signal_handler, spawn_cancel_listener,
+    emit_event, emit_json, get_cache_dir, list_cache_packages, parse_package_filename,
 };
 
 use crate::validation::{validate_package_name, validate_version};
@@ -103,16 +102,13 @@ pub(crate) fn install_downgrade(
     version: &str,
     timeout_secs: Option<u64>,
 ) -> Result<()> {
-    setup_signal_handler();
-    spawn_cancel_listener();
-    let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
-
-    let mut handle = get_handle()?;
-    setup_log_cb(&mut handle);
-    setup_dl_cb(&mut handle, Verbosity::Streaming);
-    setup_progress_cb(&mut handle);
-    setup_event_cb(&mut handle, EventScope::Upgrade);
-    setup_question_cb(&mut handle, false);
+    let (mut handle, timeout) = begin_mutation(
+        EventScope::Upgrade,
+        MutationOpts {
+            questions: Some(false),
+        },
+        timeout_secs,
+    )?;
 
     check_cancel_early!(&timeout);
 
@@ -157,10 +153,7 @@ pub(crate) fn install_downgrade(
     };
 
     if let Err(e) = tx.add_pkg(pkg) {
-        return Err(fail_complete(format!(
-            "Failed to add '{}' to transaction: {}",
-            name, e
-        )));
+        return Err(add_pkg_failure(name, e));
     }
 
     check_cancel_early!(&timeout);

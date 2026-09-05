@@ -217,6 +217,34 @@ pub(crate) fn setup_question_cb(handle: &mut Alpm, answer_remove_pkgs: bool) {
     );
 }
 
+pub(crate) struct MutationOpts {
+    /// Install the question callback with this answer_remove_pkgs flag.
+    pub questions: Option<bool>,
+}
+
+pub(crate) fn begin_mutation(
+    scope: EventScope,
+    opts: MutationOpts,
+    timeout_secs: Option<u64>,
+) -> Result<(Alpm, TimeoutGuard)> {
+    setup_signal_handler();
+    spawn_cancel_listener();
+    let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
+
+    let mut handle = get_handle()?;
+    setup_log_cb(&mut handle);
+    if scope != EventScope::Remove {
+        setup_dl_cb(&mut handle, Verbosity::Streaming);
+    }
+    setup_progress_cb(&mut handle);
+    setup_event_cb(&mut handle, scope);
+    if let Some(answer_remove_pkgs) = opts.questions {
+        setup_question_cb(&mut handle, answer_remove_pkgs);
+    }
+
+    Ok((handle, timeout))
+}
+
 pub(crate) fn fail_complete(message: String) -> anyhow::Error {
     emit_event(&StreamEvent::Complete {
         success: false,
@@ -227,6 +255,10 @@ pub(crate) fn fail_complete(message: String) -> anyhow::Error {
 
 pub(crate) fn prepare_failure(err_msg: &str) -> anyhow::Error {
     fail_complete(format!("Failed to prepare transaction: {}", err_msg))
+}
+
+pub(crate) fn add_pkg_failure(name: &str, e: impl std::fmt::Display) -> anyhow::Error {
+    fail_complete(format!("Failed to add '{}' to transaction: {}", name, e))
 }
 
 pub(crate) fn commit_and_complete(
@@ -455,11 +487,13 @@ pub fn sync_database(force: bool, timeout_secs: Option<u64>) -> Result<()> {
 }
 
 pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<()> {
-    setup_signal_handler();
-    spawn_cancel_listener();
-    let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
-
-    let mut handle = get_handle()?;
+    let (mut handle, timeout) = begin_mutation(
+        EventScope::Upgrade,
+        MutationOpts {
+            questions: Some(true),
+        },
+        timeout_secs,
+    )?;
 
     for pkg_name in ignore_pkgs {
         handle.add_ignorepkg(pkg_name.as_str()).inspect_err(|e| {
@@ -469,12 +503,6 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
             });
         })?;
     }
-
-    setup_log_cb(&mut handle);
-    setup_dl_cb(&mut handle, Verbosity::Streaming);
-    setup_progress_cb(&mut handle);
-    setup_event_cb(&mut handle, EventScope::Upgrade);
-    setup_question_cb(&mut handle, true);
 
     if let Err(e) = handle.syncdbs_mut().update(false) {
         emit_event(&StreamEvent::Complete {
@@ -550,11 +578,11 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
 }
 
 pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
-    setup_signal_handler();
-    spawn_cancel_listener();
-    let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
-
-    let mut handle = get_handle()?;
+    let (mut handle, timeout) = begin_mutation(
+        EventScope::Remove,
+        MutationOpts { questions: None },
+        timeout_secs,
+    )?;
 
     let orphan_names: Vec<String> = {
         let localdb = handle.localdb();
@@ -577,10 +605,6 @@ pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
         });
         return Ok(());
     }
-
-    setup_log_cb(&mut handle);
-    setup_progress_cb(&mut handle);
-    setup_event_cb(&mut handle, EventScope::Remove);
 
     check_cancel_early!(&timeout);
 
@@ -619,17 +643,13 @@ pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
 }
 
 pub fn install_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
-    setup_signal_handler();
-    spawn_cancel_listener();
-    let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
-
-    let mut handle = get_handle()?;
-
-    setup_log_cb(&mut handle);
-    setup_dl_cb(&mut handle, Verbosity::Streaming);
-    setup_progress_cb(&mut handle);
-    setup_event_cb(&mut handle, EventScope::Install);
-    setup_question_cb(&mut handle, false);
+    let (mut handle, timeout) = begin_mutation(
+        EventScope::Install,
+        MutationOpts {
+            questions: Some(false),
+        },
+        timeout_secs,
+    )?;
 
     check_cancel_early!(&timeout);
 
@@ -662,10 +682,7 @@ pub fn install_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
         return Err(not_found());
     };
     if let Err(e) = tx.add_pkg(pkg) {
-        return Err(fail_complete(format!(
-            "Failed to add '{}' to transaction: {}",
-            name, e
-        )));
+        return Err(add_pkg_failure(name, e));
     }
 
     check_cancel_early!(&timeout);
@@ -682,15 +699,11 @@ pub fn install_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
 }
 
 pub fn remove_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
-    setup_signal_handler();
-    spawn_cancel_listener();
-    let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
-
-    let mut handle = get_handle()?;
-
-    setup_log_cb(&mut handle);
-    setup_progress_cb(&mut handle);
-    setup_event_cb(&mut handle, EventScope::Remove);
+    let (mut handle, timeout) = begin_mutation(
+        EventScope::Remove,
+        MutationOpts { questions: None },
+        timeout_secs,
+    )?;
 
     check_cancel_early!(&timeout);
 
