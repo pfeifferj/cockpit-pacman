@@ -1,6 +1,6 @@
 # cockpit-pacman
 
-[![AUR package](https://img.shields.io/aur/version/cockpit-pacman)](https://aur.archlinux.org/packages/cockpit-pacman)
+[![extra package](https://img.shields.io/archlinux/v/extra/x86_64/cockpit-pacman)](https://archlinux.org/packages/extra/x86_64/cockpit-pacman/)
 [![AUR package](https://img.shields.io/aur/version/cockpit-pacman-git)](https://aur.archlinux.org/packages/cockpit-pacman-git)
 
 A Cockpit plugin for Arch Linux package management using direct alpm.rs integration.
@@ -54,16 +54,18 @@ sudo systemctl enable --now cockpit.socket
 
 ## Installation
 
-### From AUR (recommended)
+### From the official repositories (recommended)
 
 ```bash
-# Using an AUR helper (e.g., paru)
-paru -S cockpit-pacman
+sudo pacman -S cockpit-pacman
+```
 
-# Or manually
-git clone https://aur.archlinux.org/cockpit-pacman.git
-cd cockpit-pacman
-makepkg -si
+### Development builds from the AUR
+
+`cockpit-pacman-git` builds the current main branch:
+
+```bash
+paru -S cockpit-pacman-git
 ```
 
 ### From source
