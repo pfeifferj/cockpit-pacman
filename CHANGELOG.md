@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Installing a package while system updates are pending warns about partial upgrades and offers to open the Updates tab first
+
 ## [0.3.8] - 2026-08-30
 
 ### Added

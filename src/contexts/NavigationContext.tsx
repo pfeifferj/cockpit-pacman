@@ -1,6 +1,7 @@
 import React, { createContext, useContext } from "react";
 
 export interface NavigationHandlers {
+  onViewUpdates?: () => void;
   onViewDependencies?: (packageName: string) => void;
   onViewHistory?: (packageName: string) => void;
   onViewOrphans?: () => void;
