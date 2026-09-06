@@ -2032,6 +2032,88 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(toggle).toBeChecked();
       });
+      expect(await screen.findByText("write failed")).toBeInTheDocument();
+      expect(screen.getByText("write failed").closest("[aria-live]")).toHaveAttribute("aria-live", "polite");
+      expect(toggle).not.toBeDisabled();
+      expect(mockCheckSecurity).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole("button", { name: /Close.*Failed to save the security advisories setting/ }));
+      expect(screen.queryByText("write failed")).not.toBeInTheDocument();
+      expect(toggle).toBeChecked();
+      expect(mockSetAdvisories).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(["", "config is read-only"])("reports a failed write with message %j when the system is up to date", async (message) => {
+      mockCheckUpdates.mockResolvedValue({ updates: [], warnings: [] });
+      mockCheckSecurity.mockResolvedValue({ advisories: [], disabled: true });
+      const mockSetAdvisories = vi.mocked(api.setSecurityAdvisories);
+      mockSetAdvisories.mockResolvedValue({ success: false, message });
+
+      render(<UpdatesView />);
+      fireEvent.click(await screen.findByRole("button", { name: "Overview settings" }));
+      const toggle = await screen.findByRole("checkbox", { name: /Check security advisories/ });
+      expect(toggle).not.toBeChecked();
+      fireEvent.click(toggle);
+
+      expect(await screen.findByText("Failed to save the security advisories setting")).toBeInTheDocument();
+      expect(toggle).not.toBeChecked();
+      expect(toggle).not.toBeDisabled();
+      expect(mockSetAdvisories).toHaveBeenCalledExactlyOnceWith(true);
+      expect(mockCheckSecurity).toHaveBeenCalledTimes(1);
+    });
+
+    it("clears the save error during a retry and keeps the toggle disabled until reloading finishes", async () => {
+      mockCheckUpdates.mockResolvedValue(onePackage);
+      mockCheckSecurity.mockResolvedValue({ advisories: [], disabled: false });
+      const mockSetAdvisories = vi.mocked(api.setSecurityAdvisories);
+      mockSetAdvisories.mockResolvedValueOnce({ success: false, message: "config is read-only" });
+
+      render(<UpdatesView />);
+      fireEvent.click(await screen.findByRole("button", { name: "Overview settings" }));
+      const toggle = await screen.findByRole("checkbox", { name: /Check security advisories/ });
+      fireEvent.click(toggle);
+      expect(await screen.findByText("config is read-only")).toBeInTheDocument();
+
+      let finishSave!: (response: api.SettingsSetResponse) => void;
+      mockSetAdvisories.mockReturnValueOnce(new Promise((resolve) => { finishSave = resolve; }));
+      let finishReload!: (response: api.SecurityResponse) => void;
+      mockCheckSecurity.mockReturnValueOnce(new Promise((resolve) => { finishReload = resolve; }));
+      fireEvent.click(toggle);
+
+      expect(screen.queryByText("config is read-only")).not.toBeInTheDocument();
+      expect(toggle).not.toBeChecked();
+      expect(toggle).toBeDisabled();
+      expect(mockSetAdvisories).toHaveBeenNthCalledWith(2, false);
+      await act(async () => { finishSave({ success: true, message: "Settings saved" }); });
+      expect(mockCheckSecurity).toHaveBeenCalledTimes(2);
+      expect(toggle).toBeDisabled();
+      await act(async () => { finishReload({ advisories: [], disabled: true }); });
+
+      expect(toggle).not.toBeDisabled();
+      expect(toggle).not.toBeChecked();
+      expect(screen.queryByText("Failed to save the security advisories setting")).not.toBeInTheDocument();
+    });
+
+    it("reverts the toggle when the backend reports a failed write", async () => {
+      mockCheckUpdates.mockResolvedValue(onePackage);
+      mockCheckSecurity.mockResolvedValue({ advisories: [], disabled: false });
+      const mockSetAdvisories = vi.mocked(api.setSecurityAdvisories);
+      mockSetAdvisories.mockResolvedValue({ success: false, message: "config is read-only" });
+
+      render(<UpdatesView />);
+      fireEvent.click(await screen.findByRole("button", { name: "Overview settings" }));
+      const toggle = await screen.findByRole("checkbox", { name: /Check security advisories/ });
+      expect(toggle).toBeChecked();
+
+      fireEvent.click(toggle);
+
+      await waitFor(() => {
+        expect(mockSetAdvisories).toHaveBeenCalledWith(false);
+      });
+      await waitFor(() => {
+        expect(toggle).toBeChecked();
+      });
+      expect(await screen.findByText("config is read-only")).toBeInTheDocument();
     });
   });
 

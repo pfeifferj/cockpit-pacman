@@ -263,6 +263,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     unavailable: securityUnavailable,
     enabled: securityEnabled,
     toggleBusy: savingSecurityToggle,
+    toggleError: securityToggleError,
+    clearToggleError: clearSecurityToggleError,
     load: loadSecurityData,
     setEnabled: handleSetSecurityEnabled,
   } = useSecurityAdvisories();
@@ -839,6 +841,19 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     </Alert>
   ) : null;
 
+  const securityToggleErrorAlert = securityToggleError !== null ? (
+    <Alert
+      variant="warning"
+      isInline
+      isLiveRegion
+      title="Failed to save the security advisories setting"
+      actionClose={<AlertActionCloseButton onClose={clearSecurityToggleError} />}
+      className="pf-v6-u-mb-md"
+    >
+      {securityToggleError}
+    </Alert>
+  ) : null;
+
   const securityStaleAlert = securityStale ? (
     <Alert
       variant="warning"
@@ -1297,6 +1312,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         )}
         {newsErrorAlert}
         {securityStaleAlert}
+        {securityToggleErrorAlert}
         {newsAlerts}
         {keyringStatus?.status === "uninitialized" && (
           <Alert variant="warning" title="Keyring not initialized" isInline className="pf-v6-u-mb-md">
@@ -1394,6 +1410,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       )}
       {newsErrorAlert}
       {securityStaleAlert}
+      {securityToggleErrorAlert}
       {newsAlerts}
       {keyringStatus?.status === "uninitialized" && (
         <Alert variant="warning" title="Keyring not initialized" isInline className="pf-v6-u-mb-md">
