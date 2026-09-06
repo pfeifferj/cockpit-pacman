@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Show a dismissible alert when the security advisories setting cannot be saved
+
 ## [0.3.8] - 2026-08-30
 
 ### Added
