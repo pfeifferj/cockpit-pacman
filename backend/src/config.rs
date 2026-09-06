@@ -166,11 +166,19 @@ impl Default for AppConfig {
     }
 }
 
+fn permission_denied(err: &anyhow::Error) -> bool {
+    err.root_cause()
+        .downcast_ref::<std::io::Error>()
+        .is_some_and(|io| io.kind() == std::io::ErrorKind::PermissionDenied)
+}
+
 impl AppConfig {
     pub fn load() -> Result<Self> {
-        use std::io::Read;
+        Self::load_from(Path::new(CONFIG_PATH))
+    }
 
-        let path = Path::new(CONFIG_PATH);
+    fn load_from(path: &Path) -> Result<Self> {
+        use std::io::Read;
 
         // Open without existence check - let File::open fail with NotFound
         let file = match File::open(path) {
@@ -180,7 +188,7 @@ impl AppConfig {
             }
             Err(e) => {
                 return Err(e)
-                    .with_context(|| format!("Failed to open config from {}", CONFIG_PATH));
+                    .with_context(|| format!("Failed to open config from {}", path.display()));
             }
         };
 
@@ -195,16 +203,30 @@ impl AppConfig {
 
         // Lock BEFORE reading
         file.lock_shared()
-            .with_context(|| format!("Failed to acquire read lock on {}", CONFIG_PATH))?;
+            .with_context(|| format!("Failed to acquire read lock on {}", path.display()))?;
 
         // Read from locked file handle (not path) to avoid TOCTOU race
         let mut content = String::new();
         let mut reader = std::io::BufReader::new(&file);
         reader
             .read_to_string(&mut content)
-            .with_context(|| format!("Failed to read config from {}", CONFIG_PATH))?;
+            .with_context(|| format!("Failed to read config from {}", path.display()))?;
 
         parse_config(&content)
+    }
+
+    /// Returns defaults and true when loading fails with permission denied.
+    /// Other errors propagate.
+    pub fn load_degraded() -> Result<(Self, bool)> {
+        Self::load_degraded_from(Path::new(CONFIG_PATH))
+    }
+
+    fn load_degraded_from(path: &Path) -> Result<(Self, bool)> {
+        match Self::load_from(path) {
+            Ok(config) => Ok((config, false)),
+            Err(e) if permission_denied(&e) => Ok((Self::default(), true)),
+            Err(e) => Err(e),
+        }
     }
 
     /// Read-modify-write the on-disk config under a sidecar lock. The lock is a
@@ -569,6 +591,99 @@ mod tests {
                 .ignored_packages
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn a_missing_config_uses_defaults_without_a_warning() {
+        let path = temp("missing-config");
+
+        let (config, degraded) = AppConfig::load_degraded_from(&path).unwrap();
+
+        assert!(!degraded);
+        assert_eq!(
+            serde_json::to_value(config).unwrap(),
+            serde_json::to_value(AppConfig::default()).unwrap()
+        );
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn a_config_read_error_does_not_fall_back_to_defaults() {
+        let path = temp("invalid-utf8-config");
+        let content = [0xff, 0xfe];
+        std::fs::write(&path, content).unwrap();
+
+        let error = AppConfig::load_degraded_from(&path).unwrap_err();
+        let after = std::fs::read(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+
+        assert_eq!(
+            error.downcast_ref::<std::io::Error>().unwrap().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        assert_eq!(after, content);
+    }
+
+    #[test]
+    fn a_readable_config_is_loaded_without_fallback() {
+        let path = temp("readable-config");
+        let content = r#"{"ignored_packages":["linux"],"security_advisories":false,"schedule":{"enabled":true,"mode":"check","schedule":"daily","max_packages":5},"future_option":"kept"}"#;
+        std::fs::write(&path, content).unwrap();
+
+        let (config, degraded) = AppConfig::load_degraded_from(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+
+        assert!(!degraded);
+        assert_eq!(config.ignored_packages, ["linux"]);
+        assert!(!config.security_advisories);
+        assert!(config.schedule.enabled);
+        assert_eq!(config.schedule.mode, super::ScheduleMode::Check);
+        assert_eq!(config.schedule.schedule, "daily");
+        assert_eq!(config.schedule.max_packages, 5);
+        assert_eq!(config.extra["future_option"], "kept");
+    }
+
+    #[test]
+    fn a_permission_denied_config_defaults_without_rewriting_the_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+
+        let path = temp("unreadable-config");
+        let content = r#"{"ignored_packages":["linux"],"security_advisories":false,"schedule":{"enabled":false,"mode":"check","schedule":"daily","max_packages":5}}"#;
+        std::fs::write(&path, content).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let strict_error = AppConfig::load_from(&path).unwrap_err();
+        let fallback = AppConfig::load_degraded_from(&path);
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+
+        assert!(super::permission_denied(&strict_error));
+        let (config, degraded) = fallback.unwrap();
+        assert!(degraded);
+        assert_eq!(
+            serde_json::to_value(config).unwrap(),
+            serde_json::to_value(AppConfig::default()).unwrap()
+        );
+        assert_eq!(mode, 0o000);
+        assert_eq!(after, content);
+    }
+
+    #[test]
+    fn a_malformed_config_does_not_fall_back_to_defaults() {
+        let path = temp("malformed-config");
+        std::fs::write(&path, "{ not json").unwrap();
+
+        let error = AppConfig::load_degraded_from(&path).unwrap_err();
+        std::fs::remove_file(&path).unwrap();
+
+        assert!(error.root_cause().is::<serde_json::Error>());
+        assert!(error.to_string().contains("Failed to parse config"));
     }
 
     #[test]

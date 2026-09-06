@@ -139,13 +139,14 @@ pub fn list_installed(
 
 pub fn check_updates() -> Result<()> {
     let handle = get_handle()?;
-    let config = crate::config::AppConfig::load()?;
+    let (config, degraded) = crate::config::AppConfig::load_degraded()?;
     let updates = find_available_updates(&handle, &config.ignored_packages);
 
-    let response = UpdatesResponse {
-        updates,
-        warnings: Vec::new(),
-    };
+    let mut warnings = Vec::new();
+    if degraded {
+        warnings.push("Saved cockpit-pacman package ignores could not be read".to_string());
+    }
+    let response = UpdatesResponse { updates, warnings };
     emit_json(&response)
 }
 

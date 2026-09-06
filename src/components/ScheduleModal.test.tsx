@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
 import { ScheduleModal } from "./ScheduleModal";
 import * as api from "../api";
 
@@ -52,6 +52,20 @@ async function renderWithRuns(runs: api.ScheduledRunEntry[]) {
 describe("ScheduleModal run history", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(() => cleanup());
+
+  it("cannot save defaults when the schedule could not be read", async () => {
+    mockGetScheduleConfig.mockRejectedValue(new Error("Permission denied"));
+    mockGetScheduledRuns.mockResolvedValue({ runs: [], total: 0 });
+    render(<ScheduleModal isOpen onClose={() => {}} />);
+
+    await screen.findByText("Permission denied");
+    fireEvent.click(screen.getByRole("switch"));
+    const save = screen.getByRole("button", { name: "Save" });
+
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    expect(api.setScheduleConfig).not.toHaveBeenCalled();
+  });
 
   it("labels a skipped run as skipped, not success", async () => {
     await renderWithRuns([
