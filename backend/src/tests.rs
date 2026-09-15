@@ -1130,7 +1130,7 @@ mod integration {
 
     #[test]
     fn a_high_fan_out_tree_stays_within_the_node_cap() {
-        let tree = build_dependency_tree("glibc", 3, "reverse").expect("tree");
+        let tree = build_dependency_tree("glibc", 3, "reverse", 3).expect("tree");
 
         assert!(
             tree.nodes.len() <= 500,

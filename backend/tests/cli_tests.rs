@@ -113,6 +113,20 @@ fn a_depth_outside_the_range_is_refused() {
 }
 
 #[test]
+fn invalid_optional_depth_is_refused_before_opening_the_database() {
+    for value in ["", "abc", "-1", "1.5", "6", "4294967296"] {
+        let envelope = expect_error_envelope(&["dependency-tree", "linux", "3", "reverse", value]);
+        assert!(
+            envelope["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("Optional dependency depth"),
+            "{value:?}: {envelope}"
+        );
+    }
+}
+
+#[test]
 fn an_archive_filename_that_escapes_its_directory_is_refused() {
     for filename in [
         "../evil.pkg.tar.zst",

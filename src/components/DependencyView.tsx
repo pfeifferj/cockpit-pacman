@@ -7,7 +7,6 @@ import {
   Toolbar,
   ToolbarContent,
   ToolbarItem,
-  ToolbarGroup,
   EmptyState,
   EmptyStateBody,
   Title,
@@ -102,6 +101,7 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ initialPackage }
   const [searchInput, setSearchInput] = useState(initialPackage ?? "");
   const [hasSearched, setHasSearched] = useState(false);
   const [depth, setDepth] = useState(1);
+  const [optionalDepth, setOptionalDepth] = useState(0);
   const [direction, setDirection] = useState<DependencyDirection>("forward");
   const [selectedPackage, setSelectedPackage] = useState<PackageDetails | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
@@ -109,6 +109,8 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ initialPackage }
   const containerRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true);
   const initialLoadRef = useRef<string | null>(null);
+  const requestIdRef = useRef(0);
+  const requestedPackageRef = useRef<string | null>(null);
 
   const [typeaheadOpen, setTypeaheadOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<SearchResult[]>([]);
@@ -116,14 +118,16 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ initialPackage }
   const textInputRef = useRef<HTMLInputElement | null>(null);
   const debouncedSearch = useDebouncedValue(searchInput, SEARCH_DEBOUNCE_MS);
 
-  const fetchDependencyTree = useCallback(async (name: string, depthVal: number, dir: DependencyDirection) => {
+  const fetchDependencyTree = useCallback(async (name: string, depthVal: number, dir: DependencyDirection, optionalDepthVal: number) => {
+    const requestId = ++requestIdRef.current;
+    requestedPackageRef.current = name;
     setLoading(true);
     setError(null);
     setWarnings([]);
     setHasSearched(true);
     try {
-      const response = await getDependencyTree({ name, depth: depthVal, direction: dir });
-      if (!isMountedRef.current) return;
+      const response = await getDependencyTree({ name, depth: depthVal, direction: dir, optionalDepth: optionalDepthVal });
+      if (!isMountedRef.current || requestId !== requestIdRef.current) return;
       setNodes(response.nodes);
       setEdges(response.edges);
       setRootId(response.root);
@@ -132,13 +136,13 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ initialPackage }
         setWarnings((prev) => [...prev, "Maximum depth reached. Some dependencies may not be shown."]);
       }
     } catch (ex) {
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current || requestId !== requestIdRef.current) return;
       setError(ex instanceof Error ? ex.message : String(ex));
       setNodes([]);
       setEdges([]);
       setRootId("");
     } finally {
-      if (isMountedRef.current) {
+      if (isMountedRef.current && requestId === requestIdRef.current) {
         setLoading(false);
       }
     }
@@ -156,9 +160,9 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ initialPackage }
     initialLoadRef.current = initialPackage;
     Promise.resolve().then(() => {
       setSearchInput(initialPackage);
-      void fetchDependencyTree(initialPackage, depth, direction);
+      void fetchDependencyTree(initialPackage, depth, direction, optionalDepth);
     });
-  }, [initialPackage, depth, direction, fetchDependencyTree]);
+  }, [initialPackage, depth, direction, optionalDepth, fetchDependencyTree]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -219,8 +223,8 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ initialPackage }
 
   const handleNodeDoubleClick = useCallback((node: ForceGraphNode) => {
     setSearchInput(node.name);
-    void fetchDependencyTree(node.name, depth, direction);
-  }, [depth, direction, fetchDependencyTree]);
+    void fetchDependencyTree(node.name, depth, direction, optionalDepth);
+  }, [depth, direction, optionalDepth, fetchDependencyTree]);
 
   const { svgRef, resetView } = useForceGraph(nodes, edges, rootId, {
     width: graphWidth,
@@ -236,10 +240,13 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ initialPackage }
       return;
     }
     setTypeaheadOpen(false);
-    fetchDependencyTree(query, depth, direction);
+    fetchDependencyTree(query, depth, direction, optionalDepth);
   };
 
   const handleSearchClear = () => {
+    requestIdRef.current++;
+    requestedPackageRef.current = null;
+    setLoading(false);
     setSearchInput("");
     setSuggestions([]);
     setNodes([]);
@@ -259,21 +266,28 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ initialPackage }
       setSearchInput(value);
       setTypeaheadOpen(false);
       setSuggestions([]);
-      fetchDependencyTree(value, depth, direction);
+      fetchDependencyTree(value, depth, direction, optionalDepth);
     }
   };
 
   const handleDepthChange = (_event: SliderOnChangeEvent, value: number) => {
     setDepth(value);
-    if (rootId && rootId.length > 0) {
-      fetchDependencyTree(rootId, value, direction);
+    if (requestedPackageRef.current) {
+      fetchDependencyTree(requestedPackageRef.current, value, direction, optionalDepth);
+    }
+  };
+
+  const handleOptionalDepthChange = (_event: SliderOnChangeEvent, value: number) => {
+    setOptionalDepth(value);
+    if (requestedPackageRef.current) {
+      fetchDependencyTree(requestedPackageRef.current, depth, direction, value);
     }
   };
 
   const handleDirectionChange = (newDirection: DependencyDirection) => {
     setDirection(newDirection);
-    if (rootId && rootId.length > 0) {
-      fetchDependencyTree(rootId, depth, newDirection);
+    if (requestedPackageRef.current) {
+      fetchDependencyTree(requestedPackageRef.current, depth, newDirection, optionalDepth);
     }
   };
 
@@ -384,24 +398,39 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ initialPackage }
                 </SelectList>
               </Select>
             </ToolbarItem>
-            <ToolbarGroup>
-              <ToolbarItem>
-                <Flex alignItems={{ default: "alignItemsCenter" }} gap={{ default: "gapSm" }}>
-                  <span style={{ whiteSpace: "nowrap" }}>Depth: {depth}</span>
-                  <div style={{ width: 150 }}>
-                    <Slider
-                      value={depth}
-                      min={1}
-                      max={5}
-                      step={1}
-                      onChange={handleDepthChange}
-                      showTicks
-                      aria-label="Depth"
-                    />
-                  </div>
-                </Flex>
-              </ToolbarItem>
-            </ToolbarGroup>
+            <ToolbarItem>
+              <Flex alignItems={{ default: "alignItemsCenter" }} gap={{ default: "gapSm" }}>
+                <span style={{ whiteSpace: "nowrap" }}>Depth: {depth}</span>
+                <div style={{ width: 150 }}>
+                  <Slider
+                    value={depth}
+                    min={1}
+                    max={5}
+                    step={1}
+                    onChange={handleDepthChange}
+                    showTicks
+                    thumbAriaLabel="Depth"
+                  />
+                </div>
+              </Flex>
+            </ToolbarItem>
+            <ToolbarItem>
+              <Flex alignItems={{ default: "alignItemsCenter" }} gap={{ default: "gapSm" }}>
+                <span style={{ whiteSpace: "nowrap" }}>Optional depth: {optionalDepth}</span>
+                <div style={{ width: 150 }}>
+                  <Slider
+                    value={optionalDepth}
+                    min={0}
+                    max={5}
+                    step={1}
+                    onChange={handleOptionalDepthChange}
+                    showTicks
+                    thumbAriaLabel="Optional dependency depth"
+                    aria-describedby="dependency-optional-depth-help"
+                  />
+                </div>
+              </Flex>
+            </ToolbarItem>
             <ToolbarItem>
               <ToggleGroup aria-label="Direction">
                 <ToggleGroupItem
@@ -430,6 +459,11 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ initialPackage }
             )}
           </ToolbarContent>
         </Toolbar>
+
+        <p id="dependency-optional-depth-help" style={{ fontSize: "0.875rem", color: "var(--pf-t--global--text--color--subtle)" }}>
+          Optional depth: 0 excludes optional dependencies; 1 includes immediate optional links.
+          Higher values include optional links farther from the root, within the overall depth.
+        </p>
 
         {loading ? (
           <div className="pf-v6-u-p-xl pf-v6-u-text-align-center">

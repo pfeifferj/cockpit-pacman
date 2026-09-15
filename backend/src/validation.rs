@@ -217,6 +217,16 @@ pub fn validate_depth(depth: u32) -> Result<()> {
     Ok(())
 }
 
+pub fn validate_optional_depth(depth: u32) -> Result<()> {
+    if depth > 5 {
+        anyhow::bail!(
+            "Optional dependency depth must be between 0 and 5 (got {})",
+            depth
+        );
+    }
+    Ok(())
+}
+
 pub fn validate_direction(direction: &str) -> Result<()> {
     match direction {
         "forward" | "reverse" | "both" => Ok(()),

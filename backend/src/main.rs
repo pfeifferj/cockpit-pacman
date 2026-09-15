@@ -20,9 +20,9 @@ use cockpit_pacman_backend::models::{MirrorEntry, RepoEntry, StructuredError};
 use cockpit_pacman_backend::util::{classify_error, emit_json, shutdown_event_writer};
 use cockpit_pacman_backend::validation::{
     validate_archive_filename, validate_depth, validate_direction, validate_json_payload_size,
-    validate_keep_versions, validate_mirror_timeout, validate_mirror_url, validate_package_name,
-    validate_pagination, validate_refresh_protocol, validate_refresh_sort, validate_search_query,
-    validate_signoff_arg,
+    validate_keep_versions, validate_mirror_timeout, validate_mirror_url, validate_optional_depth,
+    validate_package_name, validate_pagination, validate_refresh_protocol, validate_refresh_sort,
+    validate_search_query, validate_signoff_arg,
 };
 
 const SYSTEMD_INVOKED: &[&str] = &["scheduled-run", "scheduled-record-interrupted"];
@@ -212,10 +212,11 @@ Commands:
                          Restore a mirrorlist backup (requires root)
   delete-mirror-backup <timestamp>
                          Delete a mirrorlist backup (requires root)
-  dependency-tree NAME [depth] [direction]
+  dependency-tree NAME [depth] [direction] [optional_depth]
                          Get dependency tree for a package
-                         depth: 1-10 (default: 3)
+                         depth: 1-5 (default: 3)
                          direction: forward|reverse|both (default: forward)
+                         optional_depth: 0-5 from root (default: 0, excludes optional)
   fetch-news [days]      Fetch recent Arch Linux news items
                          days: lookback period (default: 30)
   news-read-state        Get read state of news items
@@ -658,7 +659,19 @@ fn main() {
             validate_package_name(&args[2])
                 .and_then(|_| validate_depth(depth))
                 .and_then(|_| validate_direction(direction))
-                .and_then(|_| get_dependency_tree(&args[2], depth, direction))
+                .and_then(|_| {
+                    let optional_depth = args
+                        .get(5)
+                        .map_or("0", String::as_str)
+                        .parse::<u32>()
+                        .map_err(|_| {
+                            anyhow::anyhow!(
+                                "Optional dependency depth must be an integer between 0 and 5"
+                            )
+                        })?;
+                    validate_optional_depth(optional_depth)?;
+                    get_dependency_tree(&args[2], depth, direction, optional_depth)
+                })
         }
         "fetch-news" => {
             let days = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(30u32);

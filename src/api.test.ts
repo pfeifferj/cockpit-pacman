@@ -5,6 +5,7 @@ import {
   mockUpdatesResponse,
   mockPackageDetails,
   mockSearchResponse,
+  mockDependencyTreeResponse,
   createMockSpawnPromise,
   createMockStreamingProcess,
 } from "./test/mocks";
@@ -15,6 +16,7 @@ import {
   listInstalled,
   checkUpdates,
   getPackageInfo,
+  getDependencyTree,
   searchPackages,
   runUpgrade,
   syncDatabase,
@@ -24,6 +26,30 @@ import {
   BackendError,
   isNetworkErrorCode,
 } from "./api";
+
+describe("getDependencyTree", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it.each([
+    { params: { name: "linux" }, args: ["linux", "3", "forward", "0"] },
+    {
+      params: { name: "linux", depth: 2, direction: "reverse" as const, optionalDepth: 5 },
+      args: ["linux", "2", "reverse", "5"],
+    },
+  ])("passes dependency options to the backend: $args", async ({ params, args }) => {
+    mockSpawn.mockReturnValue(createMockSpawnPromise(JSON.stringify(mockDependencyTreeResponse)));
+
+    const response = await getDependencyTree(params);
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      ["/usr/libexec/cockpit-pacman/cockpit-pacman-backend", "dependency-tree", ...args],
+      { err: "message" }
+    );
+    expect(response).toEqual(mockDependencyTreeResponse);
+  });
+});
 
 describe("formatSize", () => {
   it("formats bytes", () => {
