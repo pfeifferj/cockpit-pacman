@@ -45,6 +45,58 @@ test.describe("Dependency Graph", () => {
     expect(reverse).not.toEqual(forward);
   });
 
+  for (const { direction, root, optionalNode } of [
+    { direction: "Forward", root: "glibc", optionalNode: "gd" },
+    { direction: "Reverse", root: "gd", optionalNode: "glibc" },
+  ]) {
+    test(`redraws ${direction.toLowerCase()} optional dependencies when their depth changes`, async ({ pacman }) => {
+      await pacman.panel.getByRole("button", { name: direction, exact: true }).click();
+      await graphFor(pacman, root);
+
+      const optional = pacman.panel.getByRole("slider", { name: "Optional dependency depth", exact: true });
+      const optionalEdges = pacman.panel.locator("svg g.links line[stroke-dasharray]");
+
+      await expect(optional).toHaveAttribute("aria-valuenow", "0");
+      const required = await nodeNames(pacman);
+      expect(required).toContain(root);
+      expect(required).not.toContain(optionalNode);
+      await expect(optionalEdges).toHaveCount(0);
+
+      await optional.press("ArrowRight");
+      await expect(optional).toHaveAttribute("aria-valuenow", "1");
+      await expect.poll(() => nodeNames(pacman)).toContain(optionalNode);
+      await expect.poll(() => optionalEdges.count()).toBeGreaterThan(0);
+
+      await optional.press("ArrowLeft");
+      await expect(optional).toHaveAttribute("aria-valuenow", "0");
+      await expect.poll(() => nodeNames(pacman)).toEqual(required);
+      await expect(optionalEdges).toHaveCount(0);
+    });
+  }
+
+  test("limits optional reverse links by their distance from libde265", async ({ pacman }) => {
+    await pacman.panel.getByRole("button", { name: "Reverse", exact: true }).click();
+    const depth = pacman.panel.getByRole("slider", { name: "Depth", exact: true });
+    const optional = pacman.panel.getByRole("slider", { name: "Optional dependency depth", exact: true });
+    for (let step = 0; step < 3; step++) await depth.press("ArrowRight");
+    for (let step = 0; step < 2; step++) await optional.press("ArrowRight");
+    await expect(depth).toHaveAttribute("aria-valuenow", "4");
+    await expect(optional).toHaveAttribute("aria-valuenow", "2");
+    await graphFor(pacman, "libde265");
+
+    const shallow = await nodeNames(pacman);
+    expect(shallow).toContain("libde265");
+    expect(shallow).not.toContain("glibc");
+
+    await optional.press("ArrowRight");
+    await expect(optional).toHaveAttribute("aria-valuenow", "3");
+    await expect.poll(() => nodeNames(pacman)).toContain("glibc");
+
+    await optional.press("ArrowLeft");
+    await expect(optional).toHaveAttribute("aria-valuenow", "2");
+    await expect.poll(() => nodeNames(pacman)).toEqual(shallow);
+  });
+
   test("says so when the package does not exist", async ({ pacman }) => {
     const search = pacman.panel.getByPlaceholder("Search packages...");
     await search.fill("no-such-package-anywhere");

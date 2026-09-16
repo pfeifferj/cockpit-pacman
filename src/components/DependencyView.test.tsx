@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, cleanup, act } from "@testing-library/react";
 import { DependencyView } from "./DependencyView";
 import * as api from "../api";
+import { useForceGraph } from "../hooks/useForceGraph";
 import React from "react";
 
 vi.mock("../api", async () => {
@@ -15,14 +16,15 @@ vi.mock("../api", async () => {
 });
 
 vi.mock("../hooks/useForceGraph", () => ({
-  useForceGraph: () => ({
+  useForceGraph: vi.fn(() => ({
     svgRef: React.createRef(),
     resetView: vi.fn(),
-  }),
+  })),
 }));
 
 const mockGetDependencyTree = vi.mocked(api.getDependencyTree);
 const mockSearchPackages = vi.mocked(api.searchPackages);
+const mockUseForceGraph = vi.mocked(useForceGraph);
 
 const mockDependencyTreeResponse: api.DependencyTreeResponse = {
   nodes: [
@@ -73,6 +75,16 @@ const triggerSearch = async (searchValue: string) => {
   });
 };
 
+const deferredTree = () => {
+  let resolve!: (response: api.DependencyTreeResponse) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<api.DependencyTreeResponse>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+};
+
 describe("DependencyView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -96,7 +108,8 @@ describe("DependencyView", () => {
 
   it("renders depth slider", async () => {
     render(<DependencyView />);
-    expect(screen.getByText(/Depth:/)).toBeInTheDocument();
+    expect(screen.getByRole("slider", { name: "Depth" })).toHaveAttribute("aria-valuenow", "1");
+    expect(screen.getByRole("slider", { name: "Optional dependency depth" })).toHaveAttribute("aria-valuenow", "0");
   });
 
   it("renders direction toggle group", async () => {
@@ -132,8 +145,115 @@ describe("DependencyView", () => {
         name: "linux",
         depth: 1,
         direction: "forward",
+        optionalDepth: 0,
       });
     });
+  });
+
+  it("preserves optional depth when searching and changing the graph controls", async () => {
+    render(<DependencyView />);
+
+    fireEvent.keyDown(screen.getByRole("slider", { name: "Optional dependency depth" }), { key: "ArrowRight" });
+    expect(mockGetDependencyTree).not.toHaveBeenCalled();
+    await triggerSearch("linux");
+    expect(mockGetDependencyTree).toHaveBeenLastCalledWith({ name: "linux", depth: 1, direction: "forward", optionalDepth: 1 });
+
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole("slider", { name: "Depth" }), { key: "ArrowRight" });
+    });
+    expect(mockGetDependencyTree).toHaveBeenLastCalledWith({ name: "linux", depth: 2, direction: "forward", optionalDepth: 1 });
+
+    await act(async () => { fireEvent.click(screen.getByText("Reverse")); });
+    expect(mockGetDependencyTree).toHaveBeenLastCalledWith({ name: "linux", depth: 2, direction: "reverse", optionalDepth: 1 });
+
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole("slider", { name: "Optional dependency depth" }), { key: "ArrowRight" });
+    });
+    expect(mockGetDependencyTree).toHaveBeenLastCalledWith({ name: "linux", depth: 2, direction: "reverse", optionalDepth: 2 });
+
+    await act(async () => {
+      mockUseForceGraph.mock.lastCall?.[3].onNodeDoubleClick?.({ ...mockDependencyTreeResponse.nodes[1], reason: "dependency" });
+    });
+    expect(mockGetDependencyTree).toHaveBeenLastCalledWith({ name: "kmod", depth: 2, direction: "reverse", optionalDepth: 2 });
+
+    await triggerSearch("zlib");
+    expect(mockGetDependencyTree).toHaveBeenLastCalledWith({ name: "zlib", depth: 2, direction: "reverse", optionalDepth: 2 });
+  });
+
+  it("preserves optional depth for typeahead selection and a new initial package", async () => {
+    mockSearchPackages.mockResolvedValue({
+      results: [{ name: "linux-lts", version: "6.6-1", description: "LTS kernel", repository: "core", installed: false, installed_version: null }],
+      total: 1, total_installed: 0, total_not_installed: 1, repositories: ["core"],
+    });
+    const { rerender } = render(<DependencyView />);
+    fireEvent.keyDown(screen.getByRole("slider", { name: "Optional dependency depth" }), { key: "ArrowRight" });
+    fireEvent.change(screen.getByPlaceholderText("Search packages..."), { target: { value: "linux" } });
+
+    fireEvent.click(await screen.findByRole("option", { name: /linux-lts/ }));
+    await waitFor(() => {
+      expect(mockGetDependencyTree).toHaveBeenLastCalledWith({ name: "linux-lts", depth: 1, direction: "forward", optionalDepth: 1 });
+    });
+
+    rerender(<DependencyView initialPackage="zlib" />);
+    await waitFor(() => {
+      expect(mockGetDependencyTree).toHaveBeenLastCalledWith({ name: "zlib", depth: 1, direction: "forward", optionalDepth: 1 });
+    });
+  });
+
+  it("refetches during initial loading and ignores an older response", async () => {
+    const first = deferredTree();
+    const latest = deferredTree();
+    mockGetDependencyTree.mockReturnValueOnce(first.promise).mockReturnValueOnce(latest.promise);
+    render(<DependencyView initialPackage="linux" />);
+    await waitFor(() => { expect(mockGetDependencyTree).toHaveBeenCalledTimes(1); });
+
+    fireEvent.keyDown(screen.getByRole("slider", { name: "Optional dependency depth" }), { key: "ArrowRight" });
+    expect(mockGetDependencyTree).toHaveBeenLastCalledWith({ name: "linux", depth: 1, direction: "forward", optionalDepth: 1 });
+
+    await act(async () => {
+      latest.resolve({ ...mockDependencyTreeResponse, nodes: mockDependencyTreeResponse.nodes.slice(0, 1), edges: [] });
+    });
+    expect(screen.getByText("1 nodes")).toBeInTheDocument();
+
+    await act(async () => { first.resolve(mockDependencyTreeResponse); });
+    expect(screen.getByText("1 nodes")).toBeInTheDocument();
+    expect(screen.queryByText("3 nodes")).not.toBeInTheDocument();
+  });
+
+  it("keeps the current request loading when an older request fails", async () => {
+    const first = deferredTree();
+    const latest = deferredTree();
+    mockGetDependencyTree.mockReturnValueOnce(first.promise).mockReturnValueOnce(latest.promise);
+    render(<DependencyView initialPackage="linux" />);
+    await waitFor(() => { expect(mockGetDependencyTree).toHaveBeenCalledTimes(1); });
+
+    fireEvent.keyDown(screen.getByRole("slider", { name: "Optional dependency depth" }), { key: "ArrowRight" });
+    await act(async () => { first.reject(new Error("Old request failed")); });
+
+    expect(screen.getByText("Loading dependency tree...")).toBeInTheDocument();
+    expect(screen.queryByText("Failed to load dependencies")).not.toBeInTheDocument();
+    await act(async () => { latest.resolve(mockDependencyTreeResponse); });
+    expect(screen.getByText("3 nodes")).toBeInTheDocument();
+  });
+
+  it.each(["resolve", "reject"] as const)("keeps the graph clear when a pending request settles: %s", async (outcome) => {
+    const pending = deferredTree();
+    mockGetDependencyTree.mockReturnValueOnce(pending.promise);
+    render(<DependencyView />);
+    await triggerSearch("linux");
+
+    fireEvent.click(screen.getByLabelText("Clear input"));
+    expect(screen.getByText("Explore package dependencies")).toBeInTheDocument();
+    await act(async () => {
+      if (outcome === "resolve") pending.resolve(mockDependencyTreeResponse);
+      else pending.reject(new Error("Cleared request failed"));
+    });
+    expect(screen.getByText("Explore package dependencies")).toBeInTheDocument();
+    expect(screen.queryByText("3 nodes")).not.toBeInTheDocument();
+    expect(screen.queryByText("Failed to load dependencies")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(screen.getByRole("slider", { name: "Optional dependency depth" }), { key: "ArrowRight" });
+    expect(mockGetDependencyTree).toHaveBeenCalledTimes(1);
   });
 
   it("displays error message on API failure", async () => {

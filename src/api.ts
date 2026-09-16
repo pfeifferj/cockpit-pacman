@@ -893,14 +893,16 @@ export interface DependencyTreeParams {
   name: string;
   depth?: number;
   direction?: DependencyDirection;
+  optionalDepth?: number;
 }
 
 export async function getDependencyTree(params: DependencyTreeParams): Promise<DependencyTreeResponse> {
-  const { name, depth = 3, direction = "forward" } = params;
+  const { name, depth = 3, direction = "forward", optionalDepth = 0 } = params;
   return runBackend<DependencyTreeResponse>("dependency-tree", [
     sanitizeSearchInput(name),
     String(depth),
     direction,
+    String(optionalDepth),
   ], { superuser: "none" });
 }
 
