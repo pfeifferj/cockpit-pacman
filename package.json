@@ -16,10 +16,10 @@
     "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
-    "@patternfly/patternfly": "^6.4.0",
-    "@patternfly/react-core": "^6.4.3",
+    "@patternfly/patternfly": "^6.6.1",
+    "@patternfly/react-core": "^6.6.1",
     "@patternfly/react-icons": "^6.4.0",
-    "@patternfly/react-table": "^6.4.3",
+    "@patternfly/react-table": "^6.6.1",
     "d3-drag": "^3.0.0",
     "d3-force": "^3.0.0",
     "d3-selection": "^3.0.0",
