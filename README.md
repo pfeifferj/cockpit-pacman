@@ -68,7 +68,9 @@ makepkg -si
 
 ### From source
 
-Requires Rust toolchain and npm:
+Requires the Rust toolchain, npm, and a supported Node.js version: 22.x from
+22.22.2, 24.x from 24.15.0, or 26 and later. CI uses Node.js 24 LTS.
+
 ```bash
 sudo pacman -S rust npm
 ```
