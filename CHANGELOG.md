@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Updates, advisory settings and the ignored-package list use defaults when legacy config permissions deny access. Updates warn when saved cockpit-pacman package ignores are unavailable
+
 ## [0.3.8] - 2026-08-30
 
 ### Added
