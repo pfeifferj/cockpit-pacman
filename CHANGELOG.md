@@ -4,6 +4,7 @@
 
 ### Fixed
 - Updates, advisory settings and the ignored-package list use defaults when legacy config permissions deny access. Updates warn when saved cockpit-pacman package ignores are unavailable
+- Show a dismissible alert when the security advisories setting cannot be saved
 
 ## [0.3.8] - 2026-08-30
 

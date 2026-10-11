@@ -10,6 +10,8 @@ export function useSecurityAdvisories(): {
   unavailable: boolean;
   enabled: boolean;
   toggleBusy: boolean;
+  toggleError: string | null;
+  clearToggleError: () => void;
   load: (force?: boolean) => Promise<void>;
   setEnabled: (enabled: boolean) => Promise<void>;
 } {
@@ -18,6 +20,7 @@ export function useSecurityAdvisories(): {
   const [stale, setStale] = useState(false);
   const [enabled, setEnabledState] = useState(true);
   const [toggleBusy, setToggleBusy] = useState(false);
+  const [toggleError, setToggleError] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState(false);
 
   const load = useCallback(async (force = false) => {
@@ -50,15 +53,24 @@ export function useSecurityAdvisories(): {
     }
   }, []);
 
+  const clearToggleError = useCallback(() => setToggleError(null), []);
+
   const setEnabled = useCallback(
     async (next: boolean) => {
       setToggleBusy(true);
+      setToggleError(null);
       setEnabledState(next);
       try {
-        await setSecurityAdvisories(next);
+        const response = await setSecurityAdvisories(next);
+        if (!response.success) {
+          setEnabledState(!next);
+          setToggleError(response.message);
+          return;
+        }
         await load();
-      } catch {
+      } catch (err) {
         setEnabledState(!next);
+        setToggleError(err instanceof Error ? err.message : String(err));
       } finally {
         setToggleBusy(false);
       }
@@ -79,5 +91,5 @@ export function useSecurityAdvisories(): {
     return map;
   }, [advisories]);
 
-  return { advisories, actionable, loading, stale, unavailable, enabled, toggleBusy, load, setEnabled };
+  return { advisories, actionable, loading, stale, unavailable, enabled, toggleBusy, toggleError, clearToggleError, load, setEnabled };
 }
