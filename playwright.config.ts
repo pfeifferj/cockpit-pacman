@@ -10,9 +10,9 @@ export default defineConfig({
   use: {
     baseURL: process.env.COCKPIT_URL || "https://localhost:9090",
     ignoreHTTPSErrors: true,
-    trace: "on-first-retry",
+    trace: "off",
     screenshot: "only-on-failure",
-    video: "on-first-retry",
+    video: "off",
   },
   projects: [
     {

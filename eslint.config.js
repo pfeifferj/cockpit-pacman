@@ -75,6 +75,10 @@ export default [
       globals: {
         console: "readonly",
         process: "readonly",
+        document: "readonly",
+        HTMLInputElement: "readonly",
+        HTMLButtonElement: "readonly",
+        Event: "readonly",
       },
     },
     plugins: {

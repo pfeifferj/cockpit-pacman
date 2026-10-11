@@ -1,22 +1,12 @@
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
+import { test, authenticate } from "./auth";
 
 test.use({ storageState: { cookies: [], origins: [] } });
 
 const PLUGIN_FRAME = 'iframe[name*="pacman"], iframe[src*="pacman"]';
 
 async function openPluginUnescalated(page: Page) {
-  const username = process.env.COCKPIT_USER;
-  const password = process.env.COCKPIT_PASSWORD;
-  if (!username || !password) {
-    throw new Error("COCKPIT_USER and COCKPIT_PASSWORD are required");
-  }
-
-  await page.goto("/");
-  await page.fill("#login-user-input", username);
-  await page.fill("#login-password-input", password);
-  await page.click("#login-button");
-  await page.waitForSelector("#nav-system", { timeout: 30000 });
-
+  await authenticate(page, false);
   await page.goto("/pacman");
   const frame = page.frameLocator(PLUGIN_FRAME);
   await frame.locator('[role="tablist"]').first().waitFor({ timeout: 60000 });
