@@ -398,15 +398,15 @@ impl AppConfig {
 #[derive(Serialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct IgnoredPackagesResponse {
-    pub packages: Vec<String>,
-    pub total: usize,
+    pub packages: Option<Vec<String>>,
+    pub total: Option<usize>,
 }
 
 impl From<&AppConfig> for IgnoredPackagesResponse {
     fn from(config: &AppConfig) -> Self {
         Self {
-            total: config.ignored_packages.len(),
-            packages: config.ignored_packages.clone(),
+            total: Some(config.ignored_packages.len()),
+            packages: Some(config.ignored_packages.clone()),
         }
     }
 }
@@ -414,15 +414,7 @@ impl From<&AppConfig> for IgnoredPackagesResponse {
 #[derive(Serialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct SettingsResponse {
-    pub security_advisories: bool,
-}
-
-impl From<&AppConfig> for SettingsResponse {
-    fn from(config: &AppConfig) -> Self {
-        Self {
-            security_advisories: config.security_advisories,
-        }
-    }
+    pub security_advisories: Option<bool>,
 }
 
 #[derive(Serialize, TS)]

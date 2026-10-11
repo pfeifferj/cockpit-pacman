@@ -29,14 +29,14 @@ export const SystemOverviewCard: React.FC<{
   pendingSignoffs?: number | null;
   securityFilterActive?: boolean;
   onToggleSecurityFilter?: () => void;
-  securityEnabled: boolean;
+  securityEnabled: boolean | null;
   onSetSecurityEnabled: (enabled: boolean) => void;
   securityToggleBusy: boolean;
 }> = ({ updates, securityCount, securityLoading, securityUnavailable, orphanCount, cacheSize, keyringStatus, summaryLoading, pendingSignoffs, securityFilterActive, onToggleSecurityFilter, securityEnabled, onSetSecurityEnabled, securityToggleBusy }) => {
   const securityFilterable = securityEnabled && !!onToggleSecurityFilter && !securityLoading && !securityUnavailable && securityCount > 0;
   const { onViewOrphans, onViewCache, onViewKeyring, onViewSignoffs } = useNavigation();
   const isAdmin = useAdminPermission();
-  const mayToggle = isAdmin === true && !securityToggleBusy;
+  const mayToggle = isAdmin === true && !securityToggleBusy && securityEnabled !== null;
   const [menuOpen, setMenuOpen] = useState(false);
   const settingsMenu = (
     <Dropdown
@@ -47,11 +47,13 @@ export const SystemOverviewCard: React.FC<{
     >
       <DropdownList>
         <DropdownItem
-          hasCheckbox
-          isSelected={securityEnabled}
+          hasCheckbox={securityEnabled !== null}
+          isSelected={securityEnabled ?? undefined}
           isDisabled={!mayToggle}
           description={
-            isAdmin === false
+            securityEnabled === null
+              ? securityLoading ? "Loading saved advisory setting" : "Saved advisory setting is unavailable"
+              : isAdmin === false
               ? "Not permitted to change system settings"
               : "Queries the Arch Security Tracker for installed packages"
           }

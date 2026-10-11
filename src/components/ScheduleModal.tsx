@@ -70,6 +70,7 @@ const RUN_STATUS = {
   ok: { Icon: CheckCircleIcon, token: "success", label: "Success" },
   skipped: { Icon: ExclamationTriangleIcon, token: "warning", label: "Skipped" },
   failed: { Icon: ExclamationCircleIcon, token: "danger", label: "Failed" },
+  unrecorded: { Icon: ExclamationTriangleIcon, token: "warning", label: "Record unavailable" },
 } as const;
 
 /**
@@ -79,7 +80,7 @@ const RUN_STATUS = {
  */
 const RunStatus: React.FC<{ run: ScheduledRunEntry }> = ({ run }) => {
   const status: ScheduledRunStatus =
-    run.status === "ok" || run.status === "skipped" || run.status === "failed"
+    run.status === "ok" || run.status === "skipped" || run.status === "failed" || run.status === "unrecorded"
       ? run.status
       : run.success
         ? "ok"
@@ -180,7 +181,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
     try {
       const response = await getScheduledRuns({ limit: 10 });
       setRuns(response.runs);
-      setRunsError(null);
+      setRunsError(response.warning ?? null);
     } catch (ex) {
       setRuns([]);
       setRunsError(sanitizeErrorMessage(ex instanceof Error ? ex.message : String(ex)));
@@ -395,7 +396,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
               isExpanded={historyExpanded}
               className="pf-v6-u-mt-lg"
             >
-              {runsError !== null ? (
+              {runsError !== null && (
                 <Alert
                   variant="warning"
                   isInline
@@ -404,13 +405,14 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                 >
                   {runsError}
                 </Alert>
-              ) : runs.length === 0 ? (
+              )}
+              {runs.length === 0 && runsError === null ? (
                 <EmptyState headingLevel="h4" icon={ClockIcon} titleText="No scheduled runs yet">
                   <EmptyStateBody>
                     Scheduled upgrade history will appear here once the timer runs.
                   </EmptyStateBody>
                 </EmptyState>
-              ) : (
+              ) : runs.length > 0 ? (
                 <Table aria-label="Scheduled run history" variant="compact">
                   <Thead>
                     <Tr>
@@ -432,7 +434,9 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                         </Td>
                         <Td dataLabel="Status"><RunStatus run={run} /></Td>
                         <Td dataLabel="Packages">
-                          {run.packages_upgraded > 0
+                          {run.packages_checked === null || run.packages_upgraded === null
+                            ? "Unknown"
+                            : run.packages_upgraded > 0
                             ? `${(run.packages_upgraded).toLocaleString()} upgraded`
                             : `${(run.packages_checked).toLocaleString()} checked`}
                         </Td>
@@ -441,7 +445,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                     ))}
                   </Tbody>
                 </Table>
-              )}
+              ) : null}
             </ExpandableSection>
           </>
         )}

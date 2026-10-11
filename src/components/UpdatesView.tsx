@@ -97,7 +97,7 @@ import { NetworkErrorState } from "./NetworkErrorState";
 import { ErrorDetails } from "./ErrorDetails";
 import { CompactPagination } from "./CompactPagination";
 
-import { isDbLockError, sanitizeUrl } from "../utils";
+import { isDbLockError, sanitizeUrl, sanitizeErrorMessage } from "../utils";
 import { TimeAgo } from "./TimeAgo";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { StatBox } from "./StatBox";
@@ -221,6 +221,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [restartServicesOnComplete, setRestartServicesOnComplete] = useState(false);
   const [pacnewStatus, setPacnewStatus] = useState<PacnewStatus | null>(null);
   const [latestScheduledRun, setLatestScheduledRun] = useState<ScheduledRunEntry | null>(null);
+  const [scheduledHistoryWarning, setScheduledHistoryWarning] = useState<string | null>(null);
 
   const servicesSignature = useMemo(
     () => (servicesStatus?.services ?? []).map((s) => s.name).sort().join(","),
@@ -240,7 +241,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     () => (pacnewStatus?.files ?? []).map((f) => `${f.path}@${f.mtime}`).sort().join(","),
     [pacnewStatus],
   );
-  const scheduledSignature = latestScheduledRun?.timestamp ?? "";
+  const scheduledSignature = latestScheduledRun?.invocation_id ?? latestScheduledRun?.timestamp ?? "";
 
   const { undismissed: servicesUndismissed, dismiss: dismissServices } =
     useSignatureDismissal(servicesDismissal.get, servicesDismissal.mark, "services", servicesSignature);
@@ -261,6 +262,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     loading: securityLoading,
     stale: securityStale,
     unavailable: securityUnavailable,
+    loadError: securityLoadError,
     enabled: securityEnabled,
     toggleBusy: savingSecurityToggle,
     toggleError: securityToggleError,
@@ -412,6 +414,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     setErrorDetails(undefined);
     setWarnings([]);
     setLockRetryExhausted(false);
+    void loadSecurityData(force);
     // page_status is published by a dedicated effect (see publishPageStatus
     // effect) so a failed/deferred scheduled run can take precedence.
     try {
@@ -420,14 +423,13 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       setUpdates(response.updates);
       setWarnings(response.warnings);
       setState(response.updates.length > 0 ? "available" : "uptodate");
-      loadSecurityData(force);
     } catch (ex) {
       failWith("check", ex instanceof Error ? ex.message : String(ex), ex instanceof BackendError ? ex.code : undefined, ex instanceof BackendError ? ex.details : undefined);
     }
   }, [loadSecurityData, failWith]);
 
   const scheduledUnacked =
-    (latestScheduledRun?.status === "failed" || latestScheduledRun?.status === "skipped") &&
+    (latestScheduledRun?.status === "failed" || latestScheduledRun?.status === "skipped" || latestScheduledRun?.status === "unrecorded") &&
     scheduledUndismissed;
 
   // Single owner of page_status: a failed/deferred scheduled run takes
@@ -473,10 +475,13 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     const { cancel } = syncDatabase({
       onData: appendLog,
       onComplete: () => loadUpdates(),
-      onError: (err, code, details) => failWith("sync", err, code, details),
+      onError: (err, code, details) => {
+        void loadSecurityData();
+        failWith("sync", err, code, details);
+      },
     });
     return () => cancel();
-  }, [loadUpdates, failWith, appendLog]);
+  }, [loadUpdates, loadSecurityData, failWith, appendLog]);
 
   const loadRebootStatus = useCallback(async () => {
     try {
@@ -508,10 +513,12 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
   const loadLatestScheduledRun = useCallback(async () => {
     try {
-      const { runs } = await getScheduledRuns({ limit: 1 });
+      const { runs, warning } = await getScheduledRuns({ limit: 1 });
       setLatestScheduledRun(runs[0] ?? null);
-    } catch {
+      setScheduledHistoryWarning(warning ?? null);
+    } catch (error) {
       setLatestScheduledRun(null);
+      setScheduledHistoryWarning(error instanceof Error ? error.message : String(error));
     }
   }, []);
 
@@ -602,7 +609,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       {
         onData: appendLog,
         onComplete: () => loadUpdates(),
-        onError: (err, code, details) => failWith("sync", err, code, details),
+        onError: (err, code, details) => {
+          void loadSecurityData();
+          failWith("sync", err, code, details);
+        },
       },
       true,
     );
@@ -871,8 +881,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       title="Security status unavailable"
       className="pf-v6-u-mb-md"
     >
-      Couldn&apos;t reach the Arch security tracker and no cached data is available, so known
-      vulnerabilities can&apos;t be checked. This is not a clean bill of health.
+      {securityLoadError ? sanitizeErrorMessage(securityLoadError) : "Security advisories could not be checked."}
     </Alert>
   ) : null;
 
@@ -963,13 +972,21 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     </Alert>
   ) : null;
 
+  const scheduledHistoryAlert = scheduledHistoryWarning ? (
+    <Alert variant="warning" isInline isLiveRegion title="Scheduled run history is incomplete" className="pf-v6-u-mb-md">
+      {sanitizeErrorMessage(scheduledHistoryWarning)}
+    </Alert>
+  ) : null;
+
   const scheduledAlert = scheduledUnacked && latestScheduledRun ? (
     <Alert
       variant={latestScheduledRun.status === "failed" ? "danger" : "warning"}
       title={
         latestScheduledRun.status === "failed"
           ? "Last scheduled upgrade failed"
-          : "Scheduled upgrade was deferred"
+          : latestScheduledRun.status === "unrecorded"
+            ? "Scheduled run record unavailable"
+            : "Scheduled upgrade was deferred"
       }
       className="pf-v6-u-mb-md"
       actionClose={
@@ -1076,6 +1093,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       {servicesPartialAlert}
       {servicesAlert}
       {pacnewAlert}
+      {scheduledHistoryAlert}
       {scheduledAlert}
     </>
   );

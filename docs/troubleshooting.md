@@ -63,19 +63,33 @@ systemctl list-timers cockpit-pacman-scheduled.timer
 journalctl -u cockpit-pacman-scheduled.service
 ```
 
-Each run appends one JSON line to `/var/log/cockpit-pacman/scheduled.jsonl`,
-and the Updates view reads that file. Three cases run without writing a record:
+Run records are stored in `/var/log/cockpit-pacman/scheduled.jsonl`. The plugin
+also checks systemd's latest completed invocation, so a missing or unreadable
+record does not silently leave the previous run at the top of the history.
 
-- The service was killed cgroup-wide (`systemctl kill`, systemd-oomd). The
-  failure handler (`cockpit-pacman-failure@.service`) runs outside the cgroup
-  and still leaves a line.
-- `config.json` is malformed. The run exits non-zero before doing any work,
-  which also reaches the failure handler.
-- `/var/log` is full. The write error goes to stderr and the run still exits
-  0, since an upgrade that already landed must not be reported as failed. The
-  journal has the line.
+- A cgroup-wide kill can also kill `ExecStopPost`. The separate failure handler
+  writes to the journal, and systemd supplies the failed result to the UI.
+- Unreadable or malformed configuration stops a scheduled run before any
+  package work. The error is journaled; an interrupted-run record whose mode
+  cannot be read labels it `unknown`.
+- A full log filesystem prevents the JSONL write. The write error is journaled
+  without changing the package operation's exit status. A successful service
+  without a record appears as **Record unavailable**, with unknown package
+  counts, rather than a failed upgrade.
 
-When the file and the journal disagree, the journal is the authority.
+New records include the systemd invocation ID to avoid duplicate entries.
+Independent service evidence describes only the most recent invocation and
+can be lost after reboot or unit unloading; it does not reconstruct older
+missing records. Use the journal for older diagnostics when available.
+
+## Backend command diagnostics
+
+Commands that end with an error, and background news refreshes, write
+warnings under `journalctl -t cockpit-pacman`. A news refresh that uses cached
+content also records the refresh error. The argument list and credential input
+are not logged, though an error message can name the package or path involved.
+Journal writes are best effort and bounded; an unavailable journal does not
+prevent a command from returning its result to the UI.
 
 ## Advisories that look ancient
 

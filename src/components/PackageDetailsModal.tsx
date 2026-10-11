@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useBackdropClose } from "../hooks/useBackdropClose";
 import {
 	Spinner,
@@ -130,11 +130,21 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
   const [uninstallTarget, setUninstallTarget] = useState<{ name: string; version: string } | null>(null);
   const [installTarget, setInstallTarget] = useState<{ name: string; version: string } | null>(null);
   const [securityExpanded, setSecurityExpanded] = useState(false);
-  const isOpen = packageDetails !== null || isLoading || !!error;
+  const isOpen = (packageDetails !== null || isLoading || !!error) && !downgradeModalOpen;
+  const downgradeButton = useRef<React.ComponentRef<"button">>(null);
+  const returnToDowngrade = useRef(false);
+
+  useEffect(() => {
+    if (isOpen && returnToDowngrade.current) {
+      downgradeButton.current?.focus();
+      returnToDowngrade.current = false;
+    }
+  }, [isOpen]);
   const isInstalled = packageDetails && isInstalledPackage(packageDetails);
   useBackdropClose(isOpen, onClose);
 
   const handleDowngradeClose = () => {
+    returnToDowngrade.current = true;
     setDowngradeModalOpen(false);
   };
 
@@ -162,6 +172,7 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
     <>
     <Modal
       variant={ModalVariant.medium}
+      aria-label={packageDetails ? `${packageDetails.name} package details` : "Package details"}
       isOpen={isOpen}
       onClose={onClose}
     >
@@ -617,6 +628,7 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
               <Button
                 variant="secondary"
                 icon={<ArrowDownIcon />}
+                ref={downgradeButton}
                 onClick={() => setDowngradeModalOpen(true)}
               >
                 Downgrade
@@ -641,7 +653,7 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
         </ModalFooter>
       )}
     </Modal>
-    {isInstalled && packageDetails && (
+    {isInstalled && packageDetails && downgradeModalOpen && (
       <DowngradeModal
         packageName={packageDetails.name}
         currentVersion={packageDetails.version}

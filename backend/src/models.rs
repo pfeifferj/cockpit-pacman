@@ -448,21 +448,21 @@ pub struct ScheduledRunEntry {
     pub timestamp: String,
     pub mode: String,
     pub success: bool,
-    // "ok" | "skipped" | "failed". `skipped` is a deferred run (safety limit or
+    // "ok" | "skipped" | "failed" | "unrecorded". `skipped` is a deferred run (safety limit or
     // manual intervention required); `success` stays true for those.
     pub status: String,
-    pub packages_checked: usize,
-    pub packages_upgraded: usize,
+    pub packages_checked: Option<usize>,
+    pub packages_upgraded: Option<usize>,
     pub error: Option<String>,
     pub details: Vec<String>,
-    /// Absent on records written before it existed, and on ExecStopPost
-    /// records, which never saw the run start.
+    // Legacy and ExecStopPost records lack a start time.
     #[ts(type = "number | null")]
     pub duration_secs: Option<u64>,
-    /// This run found a pacman lock with no holder process and reaped it, which
-    /// means the run before it was killed mid-transaction. Says nothing about
-    /// this run, which is why it is not folded into `status`.
+    // A stale lock predates this run and does not determine this run's status.
     pub removed_stale_lock: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub invocation_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, TS)]
@@ -470,6 +470,9 @@ pub struct ScheduledRunEntry {
 pub struct ScheduledRunsResponse {
     pub runs: Vec<ScheduledRunEntry>,
     pub total: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub warning: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, TS)]

@@ -495,6 +495,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
   return (
     <Modal
       variant={ModalVariant.medium}
+      aria-label={`Downgrade ${packageName}`}
       isOpen={isOpen}
       onClose={handleClose}
     >

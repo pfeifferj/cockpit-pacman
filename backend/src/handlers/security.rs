@@ -46,8 +46,8 @@ fn feed_is_fresh(fetched_at: i64, now: i64) -> bool {
     (0..FEED_TTL_SECS).contains(&age)
 }
 
-fn advisories_enabled() -> bool {
-    crate::config::AppConfig::load().map_or(true, |c| c.security_advisories)
+fn advisories_enabled() -> Result<bool> {
+    Ok(crate::config::AppConfig::load()?.security_advisories)
 }
 
 fn advisory_for(pkg_name: &str, installed: &str, avg: &Avg) -> Option<PackageSecurityAdvisory> {
@@ -144,7 +144,7 @@ fn load_feed(client: &SecurityClient, force: bool, path: Option<&Path>) -> Resul
 }
 
 pub fn check_security(force: bool) -> Result<()> {
-    if !advisories_enabled() {
+    if !advisories_enabled()? {
         return emit_json(&SecurityResponse {
             advisories: Vec::new(),
             stale: false,
@@ -190,7 +190,7 @@ pub fn check_security(force: bool) -> Result<()> {
 }
 
 pub fn security_info(name: &str) -> Result<()> {
-    if !advisories_enabled() {
+    if !advisories_enabled()? {
         return emit_json(&SecurityInfoResponse {
             name: name.to_string(),
             advisories: Vec::new(),

@@ -132,4 +132,24 @@ describe("ScheduleModal run history", () => {
     expect(await screen.findByText("No scheduled runs yet")).toBeInTheDocument();
     expect(screen.queryByText("Could not read the run history")).not.toBeInTheDocument();
   });
+  it("shows a completed service with missing results separately from a failed upgrade", async () => {
+    await renderWithRuns([run({ status: "unrecorded", mode: "unknown", packages_checked: null, packages_upgraded: null })]);
+    expect(await screen.findByText("Record unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Unknown")).toBeInTheDocument();
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("0 checked")).not.toBeInTheDocument();
+  });
+
+  it("keeps independent service evidence visible when the history file is unreadable", async () => {
+    mockGetScheduleConfig.mockResolvedValue(config);
+    mockGetScheduledRuns.mockResolvedValue({
+      runs: [run({ status: "failed", mode: "unknown", packages_checked: null, packages_upgraded: null })],
+      total: 1, warning: "Permission denied reading scheduled.jsonl",
+    });
+    render(<ScheduleModal isOpen onClose={() => {}} />);
+    expect(await screen.findByText("Could not read the run history")).toBeInTheDocument();
+    expect(await screen.findByText("Failed")).toBeInTheDocument();
+    expect(screen.getByText("Unknown")).toBeInTheDocument();
+  });
+
 });

@@ -736,8 +736,8 @@ fn test_config_list_ignored_empty() {
     let config = AppConfig::default();
     let response: IgnoredPackagesResponse = (&config).into();
 
-    assert_eq!(response.total, 0);
-    assert!(response.packages.is_empty());
+    assert_eq!(response.total, Some(0));
+    assert_eq!(response.packages, Some(vec![]));
 }
 
 #[test]
@@ -751,8 +751,8 @@ fn test_config_list_ignored_with_packages() {
 
     let response: IgnoredPackagesResponse = (&config).into();
 
-    assert_eq!(response.total, 3);
-    assert_eq!(response.packages.len(), 3);
+    assert_eq!(response.total, Some(3));
+    assert_eq!(response.packages.as_ref().map(Vec::len), Some(3));
 }
 
 #[test]
@@ -1565,8 +1565,12 @@ fn test_classify_error_top_level_io() {
     let refused = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::ConnectionReset));
     assert_eq!(classify_error(&refused), Some("network_error"));
 
-    // A non-network io kind with no matching keyword stays unclassified.
-    let other = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+    let denied = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        .context("Failed to open config")
+        .context("Could not load saved settings");
+    assert_eq!(classify_error(&denied), Some("permission_denied"));
+
+    let other = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::UnexpectedEof));
     assert_eq!(classify_error(&other), None);
 }
 

@@ -46,12 +46,22 @@ test.describe("Downgrade modal", () => {
     const details = pacman.frame.getByRole("dialog").first();
     await details.getByRole("button", { name: "Downgrade", exact: true }).click();
 
-    // PatternFly can mark a visible stacked modal aria-hidden.
-    const modal = pacman.frame.locator('[role="dialog"]').last();
+    const modal = pacman.frame.getByRole("dialog", { name: `Downgrade ${TARGET}` });
     await expect(modal.locator("h1")).toHaveText(`Downgrade ${TARGET}`);
-    await expect(modal.locator('button:has-text("Cache")')).toBeVisible({ timeout: 15000 });
+    await expect(modal.getByRole("button", { name: "Cache", exact: true })).toBeVisible({ timeout: 15000 });
     return modal;
   }
+
+  test("keeps the version dialog accessible and returns focus to package details", async ({ pacman }) => {
+    const modal = await openDowngrade(pacman);
+    await expect(pacman.frame.getByRole("dialog")).toHaveCount(1);
+    await modal.getByRole("button", { name: "Cache", exact: true }).focus();
+    await pacman.page.keyboard.press("Tab");
+    expect(await modal.evaluate((dialog) => dialog.contains(dialog.ownerDocument.activeElement))).toBe(true);
+    await pacman.page.keyboard.press("Escape");
+    await expect(modal).toHaveCount(0);
+    await expect(pacman.frame.getByRole("dialog").getByRole("button", { name: "Downgrade", exact: true })).toBeFocused();
+  });
 
   test("lists the installed version in the cache", async ({ pacman }) => {
     const installed = (await guestCommand(pacman, ["pacman", "-Q", TARGET])).trim();
@@ -79,14 +89,14 @@ test.describe("Downgrade modal", () => {
     expect((await guestCommand(pacman, ["pacman", "-Qp", originalPath])).trim()).toBe(originalQuery);
 
     const modal = await openDowngrade(pacman);
-    const targetRow = modal.locator('tbody tr:has(button:has-text("Upgrade"))').first();
+    const targetRow = modal.locator('tbody tr').filter({ has: pacman.page.locator('button', { hasText: /^Upgrade$/ }) }).first();
     await expect(targetRow).toBeVisible({ timeout: 15000 });
     const selectedVersion = (await targetRow.locator('td[data-label="Version"] code').innerText()).trim();
     expect(selectedVersion).not.toBe(original.version);
 
     restore = { path: originalPath, query: originalQuery };
-    await targetRow.locator('button:has-text("Upgrade")').click();
-    await modal.locator('button:has-text("Confirm Upgrade")').click();
+    await targetRow.getByRole("button", { name: "Upgrade", exact: true }).click();
+    await modal.getByRole("button", { name: "Confirm Upgrade", exact: true }).click();
 
     await expect(modal.getByText("Version change complete", { exact: true }))
       .toBeVisible({ timeout: 120000 });

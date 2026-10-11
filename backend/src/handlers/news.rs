@@ -51,16 +51,23 @@ pub fn fetch_news(days: u32) -> Result<()> {
                 items,
                 stale: false,
             };
-            if let Ok(path) = news_cache_path() {
-                let _ = write_json_atomic(&path, &response);
+            if let Ok(path) = news_cache_path()
+                && let Err(error) = write_json_atomic(&path, &response)
+            {
+                crate::util::journal_note(&format!("fetch-news: could not save cache: {error:#}"));
             }
             emit_json(&response)
         }
         Err(e) => match news_cache_path().ok().and_then(read_news_cache) {
-            Some(items) => emit_json(&NewsResponse {
-                items: filter_items_within_days(items, days),
-                stale: true,
-            }),
+            Some(items) => {
+                crate::util::journal_note(&format!(
+                    "fetch-news: using cached news after refresh failed: {e:#}"
+                ));
+                emit_json(&NewsResponse {
+                    items: filter_items_within_days(items, days),
+                    stale: true,
+                })
+            }
             None => Err(e),
         },
     }

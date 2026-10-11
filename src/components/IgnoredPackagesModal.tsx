@@ -61,7 +61,8 @@ export const IgnoredPackagesModal: React.FC<IgnoredPackagesModalProps> = ({
   useBackdropClose(isOpen, onClose);
   const [ignoredPackages, setIgnoredPackages] = useState<string[]>([]);
   const [packageVersions, setPackageVersions] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [available, setAvailable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchFilter, setSearchFilter] = useState("");
   const [adding, setAdding] = useState(false);
@@ -80,12 +81,21 @@ export const IgnoredPackagesModal: React.FC<IgnoredPackagesModalProps> = ({
 
   const loadIgnoredPackages = useCallback(async () => {
     setLoading(true);
+    setAvailable(false);
     setError(null);
     try {
       const response = await listIgnoredPackages();
+      if (response.packages === null) {
+        setIgnoredPackages([]);
+        return null;
+      }
       setIgnoredPackages(response.packages);
+      setAvailable(true);
+      return response.packages;
     } catch (ex) {
+      setIgnoredPackages([]);
       setError(ex instanceof Error ? ex.message : String(ex));
+      return null;
     } finally {
       setLoading(false);
     }
@@ -169,7 +179,7 @@ export const IgnoredPackagesModal: React.FC<IgnoredPackagesModalProps> = ({
   }, [selectedPackage]);
 
   const handleAddPackage = async () => {
-    if (!selectedPackage) return;
+    if (!selectedPackage || !available || loading) return;
 
     setAdding(true);
     setError(null);
@@ -179,8 +189,8 @@ export const IgnoredPackagesModal: React.FC<IgnoredPackagesModalProps> = ({
       setSelectedPackage(null);
       setPreviewPackage(null);
       setSuggestions([]);
-      await loadIgnoredPackages();
-      onIgnoredChange?.(ignoredPackages);
+      const packages = await loadIgnoredPackages();
+      if (packages !== null) onIgnoredChange?.(packages);
     } catch (ex) {
       setError(ex instanceof Error ? ex.message : String(ex));
     } finally {
@@ -189,12 +199,13 @@ export const IgnoredPackagesModal: React.FC<IgnoredPackagesModalProps> = ({
   };
 
   const handleRemovePackage = async (packageName: string) => {
+    if (!available || loading) return;
     setRemoving(packageName);
     setError(null);
     try {
       await removeIgnoredPackage(packageName);
-      await loadIgnoredPackages();
-      onIgnoredChange?.(ignoredPackages);
+      const packages = await loadIgnoredPackages();
+      if (packages !== null) onIgnoredChange?.(packages);
     } catch (ex) {
       setError(ex instanceof Error ? ex.message : String(ex));
     } finally {
@@ -273,6 +284,7 @@ export const IgnoredPackagesModal: React.FC<IgnoredPackagesModalProps> = ({
   return (
     <Modal
       variant={ModalVariant.medium}
+      aria-label="Ignored Packages"
       isOpen={isOpen}
       onClose={onClose}
     >
@@ -332,7 +344,7 @@ export const IgnoredPackagesModal: React.FC<IgnoredPackagesModalProps> = ({
                     variant="primary"
                     onClick={handleAddPackage}
                     isLoading={adding}
-                    isDisabled={adding || !selectedPackage || ignoredPackages.includes(selectedPackage.name)}
+                    isDisabled={!available || loading || adding || !selectedPackage || ignoredPackages.includes(selectedPackage.name)}
                   >
                     Ignore Package
                   </Button>
@@ -402,6 +414,11 @@ export const IgnoredPackagesModal: React.FC<IgnoredPackagesModalProps> = ({
 
         {loading ? (
           <EmptyState headingLevel="h4" icon={Spinner} titleText="Loading ignored packages" />
+        ) : !available ? (
+          <Alert variant="warning" isInline isLiveRegion title="Saved package ignores are unavailable">
+            The saved ignore list could not be read. Changes are disabled until it is available.
+            <Button variant="link" onClick={() => void loadIgnoredPackages()}>Retry</Button>
+          </Alert>
         ) : ignoredPackages.length === 0 ? (
           <EmptyState headingLevel="h4" titleText="No ignored packages">
             <EmptyStateBody>
@@ -433,7 +450,7 @@ export const IgnoredPackagesModal: React.FC<IgnoredPackagesModalProps> = ({
                       aria-label={`Unignore ${pkg}`}
                       onClick={() => handleRemovePackage(pkg)}
                       isLoading={removing === pkg}
-                      isDisabled={removing === pkg}
+                      isDisabled={!available || loading || removing === pkg}
                     >
                       <TrashIcon />
                     </Button>

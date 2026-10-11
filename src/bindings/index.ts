@@ -28,7 +28,7 @@ export type GroupedLogResponse = { groups: Array<LogGroup>, total_groups: number
 
 export type IgnoreOperationResponse = { success: boolean, package: string, message: string, };
 
-export type IgnoredPackagesResponse = { packages: Array<string>, total: number, };
+export type IgnoredPackagesResponse = { packages: Array<string> | null, total: number | null, };
 
 export type KeyringKey = { fingerprint: string, uid: string, created: string | null, expires: string | null, trust: string, };
 
@@ -130,20 +130,9 @@ export type ScheduleMode = "check" | "upgrade";
 
 export type ScheduleSetResponse = { success: boolean, message: string, };
 
-export type ScheduledRunEntry = { timestamp: string, mode: string, success: boolean, status: string, packages_checked: number, packages_upgraded: number, error: string | null, details: Array<string>, 
-/**
- * Absent on records written before it existed, and on ExecStopPost
- * records, which never saw the run start.
- */
-duration_secs: number | null, 
-/**
- * This run found a pacman lock with no holder process and reaped it, which
- * means the run before it was killed mid-transaction. Says nothing about
- * this run, which is why it is not folded into `status`.
- */
-removed_stale_lock: boolean, };
+export type ScheduledRunEntry = { timestamp: string, mode: string, success: boolean, status: string, packages_checked: number | null, packages_upgraded: number | null, error: string | null, details: Array<string>, duration_secs: number | null, removed_stale_lock: boolean, invocation_id?: string, };
 
-export type ScheduledRunsResponse = { runs: Array<ScheduledRunEntry>, total: number, };
+export type ScheduledRunsResponse = { runs: Array<ScheduledRunEntry>, total: number, warning?: string, };
 
 export type SearchResponse = { results: Array<SearchResult>, total: number, total_installed: number, total_not_installed: number, repositories: Array<string>, };
 
@@ -171,7 +160,7 @@ export type ServicesStatus = { restart_required: boolean, services: Array<Servic
  */
 scan_incomplete: boolean, };
 
-export type SettingsResponse = { security_advisories: boolean, };
+export type SettingsResponse = { security_advisories: boolean | null, };
 
 export type SettingsSetResponse = { success: boolean, message: string, };
 

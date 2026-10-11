@@ -7,8 +7,15 @@ use crate::config::{
 use crate::util::emit_json;
 
 pub fn list_ignored() -> Result<()> {
-    let (config, _) = AppConfig::load_degraded()?;
-    let response = IgnoredPackagesResponse::from(&config);
+    let (config, degraded) = AppConfig::load_degraded()?;
+    let response = if degraded {
+        IgnoredPackagesResponse {
+            packages: None,
+            total: None,
+        }
+    } else {
+        IgnoredPackagesResponse::from(&config)
+    };
     emit_json(&response)
 }
 
@@ -45,8 +52,10 @@ pub fn remove_ignored(package: &str) -> Result<()> {
 }
 
 pub fn get_settings() -> Result<()> {
-    let (config, _) = AppConfig::load_degraded()?;
-    emit_json(&SettingsResponse::from(&config))
+    let (config, degraded) = AppConfig::load_degraded()?;
+    emit_json(&SettingsResponse {
+        security_advisories: (!degraded).then_some(config.security_advisories),
+    })
 }
 
 pub fn set_settings(security_advisories: Option<bool>) -> Result<()> {

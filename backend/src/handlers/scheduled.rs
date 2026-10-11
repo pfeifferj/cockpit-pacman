@@ -36,8 +36,8 @@ struct LogEntry {
     success: bool,
     #[serde(default)]
     status: String,
-    packages_checked: usize,
-    packages_upgraded: usize,
+    packages_checked: Option<usize>,
+    packages_upgraded: Option<usize>,
     error: Option<String>,
     details: Vec<String>,
     // Absent on records written before it existed, and on ExecStopPost records,
@@ -46,6 +46,8 @@ struct LogEntry {
     duration_secs: Option<u64>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     removed_stale_lock: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    invocation_id: Option<String>,
 }
 
 impl LogEntry {
@@ -53,7 +55,7 @@ impl LogEntry {
     /// readers and the wire `success` flag stay correct.
     fn new(
         timestamp: String,
-        mode: ScheduleMode,
+        mode: impl std::fmt::Display,
         status: &str,
         packages_checked: usize,
         packages_upgraded: usize,
@@ -65,12 +67,15 @@ impl LogEntry {
             mode: mode.to_string(),
             success: status != "failed",
             status: status.to_string(),
-            packages_checked,
-            packages_upgraded,
+            packages_checked: Some(packages_checked),
+            packages_upgraded: Some(packages_upgraded),
             error,
             details,
             duration_secs: None,
             removed_stale_lock: false,
+            invocation_id: std::env::var("INVOCATION_ID")
+                .ok()
+                .filter(|id| !id.is_empty()),
         }
     }
 
@@ -109,7 +114,7 @@ fn get_timestamp() -> String {
 /// stops a caller reintroducing the coupling with `?`.
 fn log_run(entry: &LogEntry) {
     if let Err(e) = write_run(entry) {
-        eprintln!("failed to write scheduled run record: {:#}", e);
+        crate::util::journal_note(&format!("scheduled-run: failed to write run record: {e:#}"));
     }
 }
 
@@ -294,37 +299,142 @@ fn parse_run_entries(content: &[u8]) -> Vec<ScheduledRunEntry> {
             details: entry.details,
             duration_secs: entry.duration_secs,
             removed_stale_lock: entry.removed_stale_lock,
+            invocation_id: entry.invocation_id,
         })
         .collect()
 }
 
+#[derive(Debug)]
+struct ServiceRun {
+    started: i64,
+    finished: i64,
+    invocation_id: Option<String>,
+    result: String,
+    exit_status: String,
+}
+
+fn parse_service_run(output: &str) -> Option<ServiceRun> {
+    let properties: std::collections::HashMap<_, _> = output
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .collect();
+    if !matches!(properties.get("ActiveState"), Some(&"inactive" | &"failed")) {
+        return None;
+    }
+    let timestamp = |key| -> Option<i64> {
+        properties
+            .get(key)?
+            .trim_start_matches('@')
+            .split('.')
+            .next()?
+            .parse()
+            .ok()
+    };
+    let started = timestamp("ExecMainStartTimestamp")?;
+    let finished = timestamp("ExecMainExitTimestamp")?;
+    if started <= 0 || finished < started {
+        return None;
+    }
+    Some(ServiceRun {
+        started,
+        finished,
+        invocation_id: properties
+            .get("InvocationID")
+            .filter(|id| !id.is_empty() && id.chars().any(|ch| ch != '0'))
+            .map(|id| (*id).to_string()),
+        result: properties.get("Result")?.to_string(),
+        exit_status: properties.get("ExecMainStatus")?.to_string(),
+    })
+}
+
+fn latest_service_run() -> Result<Option<ServiceRun>> {
+    let mut command = std::process::Command::new("systemctl");
+    command.args([
+        "show", "cockpit-pacman-scheduled.service", "--timestamp=unix",
+        "--property=LoadState,ActiveState,InvocationID,Result,ExecMainStatus,ExecMainStartTimestamp,ExecMainExitTimestamp",
+    ]).env("LC_ALL", "C");
+    let output = crate::util::output_with_timeout(command, std::time::Duration::from_secs(3))?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    if text.lines().any(|line| line == "LoadState=not-found") {
+        return Ok(None);
+    }
+    if !output.status.success() {
+        anyhow::bail!("{}", String::from_utf8_lossy(&output.stderr).trim());
+    }
+    Ok(parse_service_run(&text))
+}
+
+fn reconcile_service_run(runs: &mut Vec<ScheduledRunEntry>, service: ServiceRun) {
+    let recorded = runs.iter().any(|run| {
+        if run.invocation_id.is_some() && run.invocation_id == service.invocation_id {
+            return true;
+        }
+        let time = chrono::DateTime::parse_from_str(&run.timestamp, "%Y-%m-%dT%H:%M:%S%z")
+            .map(|time| time.timestamp())
+            .ok();
+        // Without both invocation IDs, compare timestamps at legacy second precision.
+        time.is_some_and(|time| {
+            time > service.started
+                || ((run.invocation_id.is_none() || service.invocation_id.is_none())
+                    && time == service.started)
+        })
+    });
+    if recorded {
+        return;
+    }
+    let Some(timestamp) = chrono::DateTime::from_timestamp(service.finished, 0) else {
+        return;
+    };
+    let success = service.result == "success";
+    runs.push(ScheduledRunEntry {
+        timestamp: timestamp.format("%Y-%m-%dT%H:%M:%S%z").to_string(),
+        invocation_id: service.invocation_id,
+        mode: "unknown".to_string(),
+        success,
+        status: if success { "unrecorded" } else { "failed" }.to_string(),
+        packages_checked: None,
+        packages_upgraded: None,
+        error: Some(if success {
+            "The scheduled service finished, but its run record is unavailable. Package results are unknown.".to_string()
+        } else {
+            format!("The scheduled service failed without a run record (result={}, exit status={}). Package results are unknown.", service.result, service.exit_status)
+        }),
+        details: Vec::new(),
+        duration_secs: None,
+        removed_stale_lock: false,
+    });
+}
+
 pub fn get_scheduled_runs(offset: usize, limit: usize) -> Result<()> {
-    // A shared lock, not the writer's: this runs unprivileged whenever the
-    // session has not escalated, and taking the write lock would fail on the
-    // root-owned directory before the log itself was ever opened.
-    //
-    // Only a missing log means "no runs yet". Path::exists() cannot say that:
-    // it is equally false for a reader denied the directory.
     let content = with_file_read_lock(Path::new(LOG_LOCK_PATH), || match fs::read(LOG_PATH) {
-        Ok(content) => Ok(Some(content)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Ok(content) => Ok(content),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
         Err(e) => Err(e).context("Failed to read run history"),
-    })?;
-
-    let mut runs = content
-        .as_deref()
-        .map(parse_run_entries)
-        .unwrap_or_default();
-
+    });
+    let mut warnings = Vec::new();
+    let mut runs = match content {
+        Ok(content) => parse_run_entries(&content),
+        Err(error) => {
+            warnings.push(format!(
+                "Scheduled run history could not be read: {error:#}"
+            ));
+            Vec::new()
+        }
+    };
+    match latest_service_run() {
+        Ok(Some(service)) => reconcile_service_run(&mut runs, service),
+        Ok(None) => {}
+        Err(error) => warnings.push(format!(
+            "The latest scheduled service result could not be checked: {error:#}"
+        )),
+    }
     runs.reverse();
     let total = runs.len();
-    let paginated: Vec<_> = runs.into_iter().skip(offset).take(limit).collect();
-
-    let response = ScheduledRunsResponse {
-        runs: paginated,
+    emit_json(&ScheduledRunsResponse {
+        runs: runs.into_iter().skip(offset).take(limit).collect(),
         total,
-    };
-    emit_json(&response)
+        warning: (!warnings.is_empty()).then(|| warnings.join("; ")),
+    })
 }
 
 /// True only for outcomes where the process died without running its own
@@ -343,18 +453,25 @@ pub fn record_interrupted() -> Result<()> {
         return Ok(());
     }
 
-    let mode = AppConfig::load()
-        .map(|c| c.schedule.mode)
-        .unwrap_or_default();
-    let entry = LogEntry::new(
+    let (mode, details) = match AppConfig::load() {
+        Ok(config) => (config.schedule.mode.to_string(), Vec::new()),
+        Err(error) => {
+            let detail = format!("Could not read the scheduled mode: {error:#}");
+            crate::util::journal_note(&detail);
+            ("unknown".to_string(), vec![detail])
+        }
+    };
+    let mut entry = LogEntry::new(
         get_timestamp(),
         mode,
         "failed",
         0,
         0,
         Some(format!("Run killed by systemd (result={result})")),
-        Vec::new(),
+        details,
     );
+    entry.packages_checked = None;
+    entry.packages_upgraded = None;
     log_run(&entry);
     Ok(())
 }
@@ -1029,5 +1146,99 @@ mod tests {
                 super::SCHEDULED_TIMEOUT_SECS
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod service_history_tests {
+    use super::*;
+
+    fn service(result: &str, id: &str) -> ServiceRun {
+        parse_service_run(&format!(
+            "LoadState=loaded\nActiveState=inactive\nInvocationID={id}\nResult={result}\nExecMainStatus=9\nExecMainStartTimestamp=@1735689600.900000\nExecMainExitTimestamp=@1735689602.100000\n"
+        )).expect("completed invocation")
+    }
+
+    fn record(id: Option<&str>, timestamp: &str) -> ScheduledRunEntry {
+        ScheduledRunEntry {
+            timestamp: timestamp.to_string(),
+            mode: "check".to_string(),
+            success: true,
+            status: "ok".to_string(),
+            packages_checked: Some(3),
+            packages_upgraded: Some(0),
+            error: None,
+            details: Vec::new(),
+            duration_secs: Some(2),
+            removed_stale_lock: false,
+            invocation_id: id.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn killed_service_is_visible_without_invented_package_results() {
+        let mut runs = Vec::new();
+        reconcile_service_run(&mut runs, service("signal", "killed"));
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].status, "failed");
+        assert_eq!(runs[0].mode, "unknown");
+        assert_eq!(runs[0].packages_checked, None);
+        assert_eq!(runs[0].packages_upgraded, None);
+        assert!(
+            runs[0]
+                .error
+                .as_ref()
+                .expect("failure detail")
+                .contains("result=signal")
+        );
+    }
+
+    #[test]
+    fn successful_service_without_a_record_is_not_a_failed_upgrade() {
+        let mut runs = Vec::new();
+        reconcile_service_run(&mut runs, service("success", "finished"));
+        assert_eq!(runs[0].status, "unrecorded");
+        assert!(runs[0].success);
+        assert_eq!(runs[0].duration_secs, None);
+    }
+
+    #[test]
+    fn invocation_ids_distinguish_runs_in_the_same_second() {
+        let mut runs = vec![record(Some("previous"), "2025-01-01T00:00:00+0000")];
+        reconcile_service_run(&mut runs, service("signal", "next"));
+        assert_eq!(runs.len(), 2);
+        reconcile_service_run(&mut runs, service("signal", "next"));
+        assert_eq!(runs.len(), 2);
+    }
+
+    #[test]
+    fn legacy_second_precision_does_not_invent_a_missing_record() {
+        let mut runs = vec![record(None, "2025-01-01T00:00:00+0000")];
+        reconcile_service_run(&mut runs, service("success", "completed"));
+        assert_eq!(runs.len(), 1);
+    }
+
+    #[test]
+    fn an_unloaded_invocation_id_uses_the_record_timestamp() {
+        let mut runs = vec![record(Some("completed"), "2025-01-01T00:00:00+0000")];
+        let mut state = service("success", "completed");
+        state.invocation_id = None;
+        reconcile_service_run(&mut runs, state);
+        assert_eq!(runs.len(), 1);
+    }
+
+    #[test]
+    fn older_service_state_does_not_replace_a_newer_record() {
+        let mut runs = vec![record(Some("newer"), "2025-01-02T00:00:00+0000")];
+        reconcile_service_run(&mut runs, service("signal", "old"));
+        assert_eq!(runs.len(), 1);
+    }
+
+    #[test]
+    fn active_and_never_started_services_have_no_completed_result() {
+        for state in ["activating", "active", "deactivating"] {
+            assert!(parse_service_run(&format!("ActiveState={state}\nExecMainStartTimestamp=@1\nExecMainExitTimestamp=@2\nResult=success\nExecMainStatus=0")).is_none());
+        }
+        assert!(parse_service_run("ActiveState=inactive\nExecMainStartTimestamp=\nExecMainExitTimestamp=\nResult=success\nExecMainStatus=0").is_none());
     }
 }

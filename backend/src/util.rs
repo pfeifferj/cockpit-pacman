@@ -119,12 +119,27 @@ pub fn journal_note(message: &str) {
     let Ok(mut child) = Command::new("systemd-cat")
         .args(["-t", "cockpit-pacman", "-p", "warning"])
         .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
     else {
         return;
     };
-    if let Some(stdin) = child.stdin.as_mut() {
-        let _ = writeln!(stdin, "{}", message);
+    if let Some(mut stdin) = child.stdin.take() {
+        // Keep the write within PIPE_BUF even if the journal reader stalls.
+        let mut end = message.len().min(4095);
+        while !message.is_char_boundary(end) {
+            end -= 1;
+        }
+        let _ = writeln!(stdin, "{}", &message[..end]);
+    }
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while matches!(child.try_wait(), Ok(None)) {
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
     }
     let _ = child.wait();
 }
@@ -384,7 +399,7 @@ where
 
 /// Shared lock for readers. Opens read-only and never creates anything, so an
 /// unprivileged reader can take it against a root-owned directory, which
-/// with_file_lock cannot. A lock file that is missing or unreadable falls
+/// with_file_lock cannot. A lock file that is busy, missing or unreadable falls
 /// through to an unlocked read: the readers here already tolerate a torn line,
 /// and refusing to read at all would be the worse failure.
 pub fn with_file_read_lock<F, R>(lock_path: &Path, body: F) -> Result<R>
@@ -392,7 +407,7 @@ where
     F: FnOnce() -> Result<R>,
 {
     let guard = match std::fs::File::open(lock_path) {
-        Ok(file) => file.lock_shared().ok().map(|()| file),
+        Ok(file) => file.try_lock_shared().ok().map(|()| file),
         Err(_) => None,
     };
 
@@ -784,6 +799,7 @@ fn classify_ureq(err: &ureq::Error) -> &'static str {
 fn classify_io(kind: io::ErrorKind) -> Option<&'static str> {
     use io::ErrorKind::*;
     match kind {
+        PermissionDenied => Some("permission_denied"),
         TimedOut => Some("timeout"),
         ConnectionRefused | ConnectionReset | ConnectionAborted | NotConnected
         | HostUnreachable | NetworkUnreachable | AddrNotAvailable => Some("network_error"),

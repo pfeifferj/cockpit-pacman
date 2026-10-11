@@ -1389,12 +1389,13 @@ fn scheduled_run_entry_error_nullable() {
         mode: "upgrade".into(),
         success: true,
         status: "ok".into(),
-        packages_checked: 100,
-        packages_upgraded: 5,
+        packages_checked: Some(100),
+        packages_upgraded: Some(5),
         error: None,
         details: vec!["linux upgraded".into()],
         duration_secs: Some(42),
         removed_stale_lock: false,
+        invocation_id: None,
     };
     let v = to_json(&entry);
 
@@ -1562,6 +1563,7 @@ fn scheduled_runs_response_shape() {
     let resp = ScheduledRunsResponse {
         runs: vec![],
         total: 0,
+        warning: None,
     };
     let v = to_json(&resp);
     assert_array(&v, "runs");

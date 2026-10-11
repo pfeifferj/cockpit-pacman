@@ -795,6 +795,7 @@ fn main() {
     shutdown_event_writer(Duration::from_secs(5));
 
     if let Err(e) = result {
+        cockpit_pacman_backend::util::journal_note(&format!("{}: {e:#}", args[1]));
         let emit_envelope = !SYSTEMD_INVOKED.contains(&args[1].as_str());
         if emit_envelope {
             // Every frontend-consumed command reports failure as an envelope, so

@@ -35,6 +35,7 @@ vi.mock("../api", async () => {
     getKeyringStatus: vi.fn(),
     fetchNews: vi.fn(),
     checkSecurity: vi.fn(),
+    getSettings: vi.fn(),
     setSecurityAdvisories: vi.fn(),
     getNewsReadState: vi.fn(),
     markNewsRead: vi.fn(),
@@ -65,6 +66,7 @@ const mockGetCacheInfo = vi.mocked(api.getCacheInfo);
 const mockGetKeyringStatus = vi.mocked(api.getKeyringStatus);
 const mockFetchNews = vi.mocked(api.fetchNews);
 const mockCheckSecurity = vi.mocked(api.checkSecurity);
+const mockGetSettings = vi.mocked(api.getSettings);
 const mockCheckLock = vi.mocked(api.checkLock);
 const mockRemoveStaleLock = vi.mocked(api.removeStaleLock);
 const mockAddIgnoredPackage = vi.mocked(api.addIgnoredPackage);
@@ -115,6 +117,7 @@ describe("UpdatesView", () => {
     });
     mockFetchNews.mockResolvedValue(mockNewsResponseEmpty);
     mockCheckSecurity.mockResolvedValue({ advisories: [] });
+    mockGetSettings.mockResolvedValue({ security_advisories: true });
     mockCheckLock.mockResolvedValue({ locked: true, stale: true, lock_path: "/var/lib/pacman/db.lck", holder_unknown: false });
     mockRemoveStaleLock.mockResolvedValue({ removed: true });
     mockAddIgnoredPackage.mockResolvedValue({ success: true, package: "linux", message: "Package ignored" });
@@ -1972,6 +1975,50 @@ describe("UpdatesView", () => {
       });
     });
 
+    it("shows an unavailable setting without claiming a checkbox value, then recovers the saved false value", async () => {
+      mockCheckUpdates.mockResolvedValue(onePackage);
+      mockGetSettings.mockResolvedValue({ security_advisories: null });
+      render(<UpdatesView />);
+      await screen.findByText("Security status unavailable");
+      fireEvent.click(await screen.findByRole("button", { name: "Overview settings" }));
+      const unavailable = screen.getByRole("menuitem", { name: /Check security advisories/ });
+      expect(unavailable).toBeDisabled();
+      expect(unavailable).toHaveTextContent("Saved advisory setting is unavailable");
+      expect(screen.queryByRole("checkbox", { name: /Check security advisories/ })).not.toBeInTheDocument();
+      fireEvent.click(unavailable);
+      expect(api.setSecurityAdvisories).not.toHaveBeenCalled();
+      expect(mockCheckSecurity).not.toHaveBeenCalled();
+
+      mockGetSettings.mockResolvedValue({ security_advisories: false });
+      mockCheckSecurity.mockResolvedValue({ advisories: [], disabled: true });
+      fireEvent.click(screen.getByRole("button", { name: "Overview settings" }));
+      fireEvent.click(screen.getByRole("button", { name: /^Refresh$/ }));
+      await waitFor(() => expect(mockGetSettings).toHaveBeenCalledTimes(2));
+      fireEvent.click(await screen.findByRole("button", { name: "Overview settings" }));
+      const toggle = await screen.findByRole("checkbox", { name: /Check security advisories/ });
+      expect(toggle).not.toBeChecked();
+      expect(toggle).toBeEnabled();
+      expect(screen.queryByText("Security status unavailable")).not.toBeInTheDocument();
+    });
+
+    it("leaves the known setting editable when the security tracker fails", async () => {
+      mockCheckUpdates.mockResolvedValue(onePackage);
+      mockCheckSecurity.mockRejectedValue(new Error("Tracker is unreachable"));
+      render(<UpdatesView />);
+      await screen.findByText("Security status unavailable");
+      fireEvent.click(await screen.findByRole("button", { name: "Overview settings" }));
+      const toggle = screen.getByRole("checkbox", { name: /Check security advisories/ });
+      expect(toggle).toBeChecked();
+      expect(toggle).toBeEnabled();
+      mockGetSettings.mockResolvedValue({ security_advisories: false });
+      mockCheckSecurity.mockResolvedValue({ advisories: [], disabled: true });
+      vi.mocked(api.setSecurityAdvisories).mockResolvedValue({ success: true, message: "Saved" });
+      fireEvent.click(toggle);
+      await waitFor(() => expect(api.setSecurityAdvisories).toHaveBeenCalledWith(false));
+      await waitFor(() => expect(toggle).toBeEnabled());
+      expect(toggle).not.toBeChecked();
+    });
+
     it("writes the setting and reloads when the toggle is unchecked", async () => {
       mockCheckUpdates.mockResolvedValue(onePackage);
       mockCheckSecurity.mockResolvedValue({ advisories: [], disabled: false });
@@ -2011,6 +2058,35 @@ describe("UpdatesView", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Overview settings" }));
       const toggle = await screen.findByRole("checkbox", { name: /Check security advisories/ });
       expect(toggle).toBeDisabled();
+    });
+
+    it.each(["sync", "check"])("loads the saved advisory setting when a limited session cannot %s updates", async (operation) => {
+      mockPermission.mockReturnValueOnce({
+        allowed: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        close: vi.fn(),
+      });
+      if (operation === "sync") {
+        mockSyncDatabase.mockImplementation(callbacks => {
+          setTimeout(() => callbacks.onError("Not permitted", "permission_denied"), 0);
+          return { cancel: vi.fn(), forceStop: vi.fn() };
+        });
+      } else {
+        mockCheckUpdates.mockRejectedValue(new api.BackendError("Not permitted", "permission_denied"));
+      }
+      mockGetSettings.mockResolvedValue({ security_advisories: false });
+      mockCheckSecurity.mockResolvedValue({ advisories: [], disabled: true });
+
+      render(<UpdatesView />);
+      fireEvent.click(await screen.findByRole("button", { name: /^Dismiss$/ }));
+      fireEvent.click(await screen.findByRole("button", { name: "Overview settings" }));
+      const toggle = await screen.findByRole("checkbox", { name: /Check security advisories/ });
+      expect(toggle).not.toBeChecked();
+      expect(toggle).toBeDisabled();
+      expect(screen.getByText("Not permitted to change system settings")).toBeInTheDocument();
+      expect(screen.queryByText("Loading saved advisory setting")).not.toBeInTheDocument();
+      expect(mockGetSettings).toHaveBeenCalledTimes(1);
     });
 
     it("reverts the toggle when the setting cannot be written", async () => {
@@ -2220,8 +2296,7 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(screen.getByText("Security status unavailable")).toBeInTheDocument();
       });
-      // Must not read as a clean "0 vulnerabilities".
-      expect(screen.getByText(/not a clean bill of health/)).toBeInTheDocument();
+      expect(screen.getByText(/could not resolve host/)).toBeInTheDocument();
     });
 
     it("dismissing news error alert removes it", async () => {

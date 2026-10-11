@@ -885,7 +885,7 @@ export const rebootDismissal = makeDismissalApi("reboot");
 export const pacnewDismissal = makeDismissalApi("pacnew");
 export const scheduledDismissal = makeDismissalApi("scheduled");
 
-export type ScheduledRunStatus = "ok" | "skipped" | "failed";
+export type ScheduledRunStatus = "ok" | "skipped" | "failed" | "unrecorded";
 
 export type DependencyDirection = "forward" | "reverse" | "both";
 
