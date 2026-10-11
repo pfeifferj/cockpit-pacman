@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
 
@@ -91,6 +93,10 @@ jobs:
         working-directory: backend
         run: cargo test --features integration-tests
 
+      - name: Test fixture endpoint restrictions
+        working-directory: backend
+        run: cargo test --features e2e-fixtures endpoints
+
       - name: Check generated TS bindings are up to date
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -100,3 +106,26 @@ jobs:
       - name: Build
         working-directory: backend
         run: cargo build --release
+
+  browser:
+    name: Browser integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - name: Install VM and browser dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils xorriso rsync openssh-client
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Build frontend
+        run: |
+          npm run build
+          cp src/index.html src/manifest.json dist/
+      - name: Test against disposable Arch guest
+        run: python3 test/e2e/vm.py

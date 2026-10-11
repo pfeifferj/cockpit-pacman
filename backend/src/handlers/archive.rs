@@ -19,12 +19,9 @@ fn archive_dir_url_at(base: &str, name: &str) -> Option<String> {
     Some(format!("{}/{}/{}/", base, first, name))
 }
 
-fn archive_file_url(name: &str, filename: &str) -> Option<String> {
+fn archive_file_url_at(base: &str, name: &str, filename: &str) -> Option<String> {
     let first = name.chars().next()?;
-    Some(format!(
-        "{}/{}/{}/{}",
-        ARCHIVE_BASE_URL, first, name, filename
-    ))
+    Some(format!("{}/{}/{}/{}", base, first, name, filename))
 }
 
 /// Extract (filename, size) pairs (excluding signatures) from an archive
@@ -116,7 +113,8 @@ pub fn list_archive_versions(name: &str, query: Option<&str>) -> Result<()> {
     let installed_version = get_installed_version(&alpm, name);
     let arch = system_arch();
 
-    let Some(html) = fetch_listing(ARCHIVE_BASE_URL, name)? else {
+    let base = crate::endpoints::endpoint(ARCHIVE_BASE_URL, "COCKPIT_PACMAN_TEST_ARCHIVE_URL")?;
+    let Some(html) = fetch_listing(&base, name)? else {
         return emit_json(&DowngradeResponse {
             packages: vec![],
             total: 0,
@@ -179,8 +177,9 @@ pub fn downgrade_from_archive(name: &str, filename: &str, timeout: Option<u64>) 
 
     let (_, version, _) = parse_package_filename(filename)
         .ok_or_else(|| anyhow::anyhow!("Invalid package filename"))?;
-    let url =
-        archive_file_url(name, filename).ok_or_else(|| anyhow::anyhow!("Invalid package name"))?;
+    let base = crate::endpoints::endpoint(ARCHIVE_BASE_URL, "COCKPIT_PACMAN_TEST_ARCHIVE_URL")?;
+    let url = archive_file_url_at(&base, name, filename)
+        .ok_or_else(|| anyhow::anyhow!("Invalid package name"))?;
 
     install_downgrade(DowngradeSource::Url(url), name, &version, timeout)
 }
@@ -362,7 +361,12 @@ mod tests {
             "https://archive.archlinux.org/packages/b/bash/"
         );
         assert_eq!(
-            archive_file_url("bash", "bash-5.1.016-1-x86_64.pkg.tar.zst").unwrap(),
+            archive_file_url_at(
+                ARCHIVE_BASE_URL,
+                "bash",
+                "bash-5.1.016-1-x86_64.pkg.tar.zst"
+            )
+            .unwrap(),
             "https://archive.archlinux.org/packages/b/bash/bash-5.1.016-1-x86_64.pkg.tar.zst"
         );
     }

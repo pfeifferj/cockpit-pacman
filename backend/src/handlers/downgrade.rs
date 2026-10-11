@@ -123,6 +123,8 @@ pub(crate) fn install_downgrade(
             file_siglevel(handle.local_file_siglevel(), handle.default_siglevel()),
         ),
         DowngradeSource::Url(url) => {
+            let siglevel = file_siglevel(handle.remote_file_siglevel(), handle.default_siglevel());
+            handle.set_remote_file_siglevel(siglevel)?;
             let fetched = handle
                 .fetch_pkgurl([url.as_str()].into_iter())
                 .map_err(|e| {
@@ -134,10 +136,7 @@ pub(crate) fn install_downgrade(
                     name, version
                 )));
             };
-            (
-                path,
-                file_siglevel(handle.remote_file_siglevel(), handle.default_siglevel()),
-            )
+            (path, siglevel)
         }
     };
 

@@ -3,6 +3,7 @@
 pub mod alpm;
 pub mod config;
 pub mod db;
+mod endpoints;
 pub mod handlers;
 pub mod inhibit;
 pub mod models;

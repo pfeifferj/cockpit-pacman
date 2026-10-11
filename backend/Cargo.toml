@@ -5,6 +5,7 @@ edition = "2024"
 
 [features]
 integration-tests = []
+e2e-fixtures = []
 
 [dev-dependencies]
 wiremock = "0.6"

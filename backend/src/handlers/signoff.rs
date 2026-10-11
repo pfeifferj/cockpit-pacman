@@ -59,7 +59,7 @@ pub fn signoff_list(creds_b64: &str) -> Result<()> {
     let session = SignoffSession::login(
         &username,
         &password,
-        DEFAULT_BASE_URL,
+        &crate::endpoints::endpoint(DEFAULT_BASE_URL, "COCKPIT_PACMAN_TEST_ARCHWEB_URL")?,
         crate::util::detected_ip_family(),
     )?;
     let groups = session.get_signoffs()?;
@@ -138,7 +138,7 @@ fn run_signoff_action(
     let session = SignoffSession::login(
         &username,
         &password,
-        DEFAULT_BASE_URL,
+        &crate::endpoints::endpoint(DEFAULT_BASE_URL, "COCKPIT_PACMAN_TEST_ARCHWEB_URL")?,
         crate::util::detected_ip_family(),
     )?;
     let spec = SignoffSpec {
