@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useBackdropClose } from "../hooks/useBackdropClose";
 import { usePackageDetails } from "../hooks/usePackageDetails";
 import { usePagination } from "../hooks/usePagination";
+import { useDebouncedValue } from "../hooks/useDebounce";
+import { SEARCH_DEBOUNCE_MS } from "../constants";
 import { useSortableTable } from "../hooks/useSortableTable";
 import {
   Card,
@@ -30,10 +32,10 @@ import {
   ToolbarItem,
   Popover,
   Icon,
-  Label,
-  LabelGroup,
+  Alert,
 } from "@patternfly/react-core";
 import { ExpandableLogViewer, LogViewer } from "./LogViewer";
+import { CacheFilesModal } from "./CacheFilesModal";
 import { CompactPagination } from "./CompactPagination";
 import { TrashIcon, CheckCircleIcon, FolderIcon, ExclamationCircleIcon, OutlinedQuestionCircleIcon } from "@patternfly/react-icons";
 import { PackageDetailsModal } from "./PackageDetailsModal";
@@ -41,24 +43,17 @@ import { StatBox } from "./StatBox";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
   CacheInfo,
-  CachePackage,
+  CacheSelection,
   getCacheInfo,
   cleanCache,
   formatSize,
 } from "../api";
 import { appendCapped, sanitizeErrorMessage } from "../utils";
 
-interface GroupedCachePackage {
-  name: string;
-  versions: CachePackage[];
-  latestVersion: string;
-  totalSize: number;
-}
-
-type ViewState = "loading" | "ready" | "cleaning" | "success" | "error";
+type ViewState = "ready" | "cleaning" | "success" | "error";
 
 export const CacheView: React.FC = () => {
-  const [state, setState] = useState<ViewState>("loading");
+  const [state, setState] = useState<ViewState>("ready");
   const [cacheData, setCacheData] = useState<CacheInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [log, setLog] = useState("");
@@ -67,80 +62,101 @@ export const CacheView: React.FC = () => {
   useBackdropClose(confirmModalOpen, () => setConfirmModalOpen(false));
   const [keepVersions, setKeepVersions] = useState(3);
   const [searchFilter, setSearchFilter] = useState("");
-  const [selectedPackages, setSelectedPackages] = useState<Set<string>>(new Set());
-  const hasInitializedSelection = useRef(false);
+  const [selection, setSelection] = useState<{ all: boolean; names: Set<string> }>({ all: true, names: new Set() });
+  const [filesPackage, setFilesPackage] = useState<string | null>(null);
+  const [refresh, setRefresh] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const debouncedSearch = useDebouncedValue(searchFilter, SEARCH_DEBOUNCE_MS);
   const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
-  const { page, perPage, onSetPage, onPerPageSelect, resetPage } = usePagination();
+  const { page, perPage, setPage, onSetPage, onPerPageSelect, resetPage } = usePagination();
   const cancelRef = useRef<(() => void) | null>(null);
   const isMountedRef = useRef(true);
 
-  const { activeSortIndex, activeSortDirection, getSortParams } = useSortableTable({
+  const { activeSortKey, activeSortDirection, getSortParams } = useSortableTable({
     columns: { name: 0, version: 1, size: 2 },
     defaultDirection: "asc",
+    onSort: resetPage,
   });
 
-  const loadCacheInfo = useCallback(async () => {
-    setState("loading");
-    setError(null);
-    try {
-      const response = await getCacheInfo();
-      setCacheData(response);
-      setState("ready");
-    } catch (ex) {
-      setState("error");
-      setError(ex instanceof Error ? ex.message : String(ex));
-    }
-  }, []);
+  const loadCacheInfo = useCallback(() => {
+    setRefresh(value => value + 1);
+    setPage(1);
+  }, [setPage]);
 
   useEffect(() => {
     let cancelled = false;
-    getCacheInfo()
-      .then((response) => {
+    Promise.resolve().then(async () => {
+      if (cancelled) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await getCacheInfo({
+          offset: (page - 1) * perPage,
+          limit: perPage,
+          search: debouncedSearch,
+          sortBy: activeSortKey ?? "name",
+          sortDir: activeSortDirection,
+        });
         if (cancelled) return;
+        const lastPage = Math.max(1, Math.ceil(response.total / perPage));
+        if (page > lastPage) {
+          setPage(lastPage);
+          return;
+        }
         setCacheData(response);
         setState("ready");
-      })
-      .catch((ex) => {
+      } catch (ex) {
         if (cancelled) return;
         setState("error");
         setError(ex instanceof Error ? ex.message : String(ex));
-      });
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    });
     return () => { cancelled = true; };
-  }, []);
+  }, [page, perPage, debouncedSearch, activeSortKey, activeSortDirection, refresh, setPage]);
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
-      if (cancelRef.current) {
-        cancelRef.current();
-      }
+      cancelRef.current?.();
     };
   }, []);
+
+  const hasSelection = selection.all || selection.names.size > 0;
+  const areAllSelected = selection.all && selection.names.size === 0;
+  const areSomeSelected = hasSelection && !areAllSelected;
 
   const handleRowClick = (pkgName: string) => {
     fetchDetails(pkgName, { strategy: "local-then-sync" });
   };
-
 
   const handleCleanCache = () => {
     setConfirmModalOpen(true);
   };
 
   const startCleanup = () => {
+    if (!hasSelection || loading || searchFilter !== debouncedSearch) return;
     setConfirmModalOpen(false);
     setState("cleaning");
     setLog("");
     setIsDetailsExpanded(true);
 
-    const packages = Array.from(selectedPackages);
+    const packages: CacheSelection = selection.all
+      ? selection.names.size === 0 ? { mode: "all" } : { mode: "except", names: [...selection.names] }
+      : { mode: "only", names: [...selection.names] };
     const { cancel } = cleanCache(
       {
-        onData: (data) => setLog((prev) => appendCapped(prev, data)),
+        onData: (data) => { if (isMountedRef.current) setLog((prev) => appendCapped(prev, data)); },
         onComplete: () => {
+          if (!isMountedRef.current) return;
           setState("success");
+          setSelection({ all: true, names: new Set() });
           cancelRef.current = null;
         },
         onError: (err) => {
+          if (!isMountedRef.current) return;
           setState("error");
           setError(err);
           cancelRef.current = null;
@@ -161,103 +177,16 @@ export const CacheView: React.FC = () => {
     }
   };
 
-
-  const groupedPackages = useMemo((): GroupedCachePackage[] => {
-    if (!cacheData?.packages) return [];
-    const groups = new Map<string, CachePackage[]>();
-    for (const pkg of cacheData.packages) {
-      const existing = groups.get(pkg.name) || [];
-      existing.push(pkg);
-      groups.set(pkg.name, existing);
-    }
-    // Backend sorts packages by name asc, then version desc (via alpm::vercmp).
-    // versions[0] is the newest cached version within each group.
-    return Array.from(groups.entries()).map(([name, versions]) => ({
-      name,
-      versions,
-      latestVersion: versions[0].version,
-      totalSize: versions.reduce((sum, v) => sum + v.size, 0),
-    }));
-  }, [cacheData]);
-
-  useEffect(() => {
-    if (groupedPackages.length === 0) {
-      hasInitializedSelection.current = false;
-      return;
-    }
-    if (hasInitializedSelection.current) {
-      setSelectedPackages((prev) => {
-        const existing = new Set(groupedPackages.map((g) => g.name));
-        const next = new Set<string>();
-        for (const pkg of prev) {
-          if (existing.has(pkg)) next.add(pkg);
-        }
-        return next;
-      });
-      return;
-    }
-    setSelectedPackages(new Set(groupedPackages.map((g) => g.name)));
-    hasInitializedSelection.current = true;
-  }, [groupedPackages]);
-
   const togglePackageSelection = (name: string) => {
-    setSelectedPackages((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
+    setSelection(previous => {
+      const names = new Set(previous.names);
+      if (names.has(name)) names.delete(name);
+      else names.add(name);
+      return { all: previous.all, names };
     });
   };
 
-  const selectAllPackages = () => {
-    setSelectedPackages(new Set(groupedPackages.map((g) => g.name)));
-  };
-
-  const deselectAllPackages = () => {
-    setSelectedPackages(new Set());
-  };
-
-  const areAllSelected = selectedPackages.size === groupedPackages.length && groupedPackages.length > 0;
-  const areSomeSelected = selectedPackages.size > 0 && selectedPackages.size < groupedPackages.length;
-
-  const sortedGroups = useMemo(() => {
-    return [...groupedPackages].sort((a, b) => {
-      if (activeSortIndex === null) return 0;
-      let comparison = 0;
-      switch (activeSortIndex) {
-        case 0:
-          comparison = a.name.localeCompare(b.name);
-          break;
-        case 1:
-          comparison = a.latestVersion.localeCompare(b.latestVersion);
-          break;
-        case 2:
-          comparison = a.totalSize - b.totalSize;
-          break;
-        default:
-          return 0;
-      }
-      return activeSortDirection === "asc" ? comparison : -comparison;
-    });
-  }, [groupedPackages, activeSortIndex, activeSortDirection]);
-
-  const filteredGroups = useMemo(() => {
-    if (!searchFilter) return sortedGroups;
-    const lower = searchFilter.toLowerCase();
-    return sortedGroups.filter(g => g.name.toLowerCase().includes(lower));
-  }, [sortedGroups, searchFilter]);
-
-  const paginatedGroups = useMemo(() => {
-    const start = (page - 1) * perPage;
-    return filteredGroups.slice(start, start + perPage);
-  }, [filteredGroups, page, perPage]);
-
-  const uniquePackageCount = groupedPackages.length;
-  const multiVersionPackages = groupedPackages.filter(
-    (g) => g.versions.length > 1
-  ).length;
-
-  if (state === "loading") {
+  if (loading && !cacheData) {
     return (
       <Card>
         <CardBody>
@@ -338,7 +267,7 @@ export const CacheView: React.FC = () => {
     );
   }
 
-  if (!cacheData?.packages.length) {
+  if (!cacheData?.package_count) {
     return (
       <Card>
         <CardBody>
@@ -391,14 +320,14 @@ export const CacheView: React.FC = () => {
               <FlexItem>
                 <StatBox
                   label="Unique Packages"
-                  value={(uniquePackageCount).toLocaleString()}
+                  value={cacheData.unique_packages.toLocaleString()}
                 />
               </FlexItem>
               <FlexItem>
                 <StatBox
                   label="Multi-Version"
-                  value={(multiVersionPackages).toLocaleString()}
-                  color={multiVersionPackages > 0 ? "info" : "default"}
+                  value={cacheData.multi_version_packages.toLocaleString()}
+                  color={cacheData.multi_version_packages > 0 ? "info" : "default"}
                 />
               </FlexItem>
             </Flex>
@@ -421,16 +350,17 @@ export const CacheView: React.FC = () => {
                 variant="secondary"
                 icon={<TrashIcon />}
                 onClick={handleCleanCache}
-                isDisabled={selectedPackages.size === 0}
+                isDisabled={!hasSelection || loading || searchFilter !== debouncedSearch}
               >
-                {selectedPackages.size > 0 && !areAllSelected
-                  ? `Clean ${selectedPackages.size} package${selectedPackages.size !== 1 ? "s" : ""}`
-                  : "Clean Cache"}
+                {hasSelection && !areAllSelected ? "Clean selected packages" : "Clean Cache"}
               </Button>
+            </ToolbarItem>
+            <ToolbarItem>
+              <Button variant="plain" onClick={loadCacheInfo} isDisabled={loading}>Refresh</Button>
             </ToolbarItem>
             <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
               <CompactPagination
-                itemCount={filteredGroups.length}
+                itemCount={cacheData.total}
                 perPage={perPage}
                 page={page}
                 onSetPage={onSetPage}
@@ -440,14 +370,18 @@ export const CacheView: React.FC = () => {
           </ToolbarContent>
         </Toolbar>
 
-        <Table aria-label="Cached packages" variant="compact">
+        {loading && <Spinner size="md" aria-label="Loading cached packages" />}
+        {!loading && cacheData.total === 0 && (
+          <Alert variant="info" isInline title="No cached packages match this filter" />
+        )}
+        <Table aria-label="Cached packages" variant="compact" aria-busy={loading}>
           <Thead>
             <Tr>
               <Th screenReaderText="Select">
                 <Checkbox
                   id="select-all-cache"
                   isChecked={areAllSelected ? true : areSomeSelected ? null : false}
-                  onChange={(_event, checked) => checked ? selectAllPackages() : deselectAllPackages()}
+                  onChange={(_event, checked) => setSelection({ all: checked, names: new Set() })}
                   aria-label="Select all packages"
                 />
               </Th>
@@ -457,13 +391,13 @@ export const CacheView: React.FC = () => {
             </Tr>
           </Thead>
           <Tbody>
-            {paginatedGroups.map((group) => {
-              const isSelected = selectedPackages.has(group.name);
+            {cacheData.groups.map((group, rowIndex) => {
+              const isSelected = selection.all !== selection.names.has(group.name);
               return (
               <Tr key={group.name} isClickable onRowClick={() => handleRowClick(group.name)} isRowSelected={isSelected}>
                 <Td
                   select={{
-                    rowIndex: 0,
+                    rowIndex,
                     onSelect: () => togglePackageSelection(group.name),
                     isSelected,
                   }}
@@ -475,15 +409,17 @@ export const CacheView: React.FC = () => {
                   </Button>
                 </Td>
                 <Td dataLabel="Version">
-                  <LabelGroup numLabels={3}>
-                    {group.versions.map((v) => (
-                      <Label key={v.filename} isCompact variant="outline">
-                        {v.version}
-                      </Label>
-                    ))}
-                  </LabelGroup>
+                  <div>{group.latest_version}</div>
+                  <Button
+                    variant="link"
+                    isInline
+                    aria-label={`View cached files for ${group.name}`}
+                    onClick={event => { event.stopPropagation(); setFilesPackage(group.name); }}
+                  >
+                    {group.file_count} file{group.file_count === 1 ? "" : "s"}
+                  </Button>
                 </Td>
-                <Td dataLabel="Size">{formatSize(group.totalSize)}</Td>
+                <Td dataLabel="Size">{formatSize(group.total_size)}</Td>
               </Tr>
               );
             })}
@@ -493,7 +429,7 @@ export const CacheView: React.FC = () => {
           <ToolbarContent>
             <ToolbarItem variant="pagination" align={{ default: "alignEnd" }}>
               <CompactPagination
-                itemCount={filteredGroups.length}
+                itemCount={cacheData.total}
                 perPage={perPage}
                 page={page}
                 onSetPage={onSetPage}
@@ -506,6 +442,7 @@ export const CacheView: React.FC = () => {
 
       <Modal
         variant={ModalVariant.small}
+        aria-label="Clean package cache?"
         isOpen={confirmModalOpen}
         onClose={() => setConfirmModalOpen(false)}
       >
@@ -515,13 +452,15 @@ export const CacheView: React.FC = () => {
             <Content component={ContentVariants.p}>
               {areAllSelected
                 ? "This will remove old versions of all cached packages, keeping only the most recent versions."
-                : `This will clean ${selectedPackages.size} of ${groupedPackages.length} cached packages.`}
+                : selection.all
+                  ? "This will clean all cached packages except those you deselected."
+                  : "This will clean only the packages you selected."}
             </Content>
             <Content component={ContentVariants.p} className="pf-v6-u-mt-md pf-v6-u-mb-sm">
               <strong>Versions to keep:</strong>{" "}
               <Popover
                 headerContent="How many versions to keep"
-                bodyContent="0 deletes all cached packages, including the currently installed ones. 1 or more keeps the N most recent versions of each package, letting you downgrade later without re-downloading."
+                bodyContent="0 deletes every cached version of each selected package, including the currently installed version. 1 or more keeps the N most recent versions of each selected package, letting you downgrade later without re-downloading."
               >
                 <Icon isInline style={{ cursor: "pointer" }}>
                   <OutlinedQuestionCircleIcon />
@@ -545,13 +484,13 @@ export const CacheView: React.FC = () => {
             />
             <Content component={ContentVariants.p} className="pf-v6-u-mt-md">
               {keepVersions === 0
-                ? "All cached packages will be removed."
+                ? "All cached versions of the selected packages will be removed."
                 : `The ${keepVersions} most recent version${keepVersions !== 1 ? "s" : ""} of each selected package will be kept.`}
             </Content>
           </Content>
         </ModalBody>
         <ModalFooter>
-          <Button key="confirm" variant="primary" onClick={startCleanup} isDisabled={selectedPackages.size === 0}>
+          <Button key="confirm" variant="primary" onClick={startCleanup} isDisabled={!hasSelection || loading || searchFilter !== debouncedSearch}>
             Clean Cache
           </Button>
           <Button key="cancel" variant="link" onClick={() => setConfirmModalOpen(false)}>
@@ -559,6 +498,10 @@ export const CacheView: React.FC = () => {
           </Button>
         </ModalFooter>
       </Modal>
+
+      {filesPackage !== null && (
+        <CacheFilesModal name={filesPackage} onClose={() => setFilesPackage(null)} />
+      )}
 
       <PackageDetailsModal
         packageDetails={selectedPackage}

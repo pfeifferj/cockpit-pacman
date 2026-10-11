@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent, act, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act, cleanup, within } from "@testing-library/react";
 import { CacheView } from "./CacheView";
 import * as api from "../api";
 import { createMockStreamingProcess } from "../test/mocks";
@@ -9,12 +9,14 @@ vi.mock("../api", async () => {
   return {
     ...actual,
     getCacheInfo: vi.fn(),
+    getCacheFiles: vi.fn(),
     cleanCache: vi.fn(),
     getPackageInfo: vi.fn(),
     getSyncPackageInfo: vi.fn(),
   };
 });
 
+const mockGetCacheFiles = vi.mocked(api.getCacheFiles);
 const mockGetCacheInfo = vi.mocked(api.getCacheInfo);
 const mockCleanCache = vi.mocked(api.cleanCache);
 const mockGetPackageInfo = vi.mocked(api.getPackageInfo);
@@ -23,10 +25,12 @@ const mockGetSyncPackageInfo = vi.mocked(api.getSyncPackageInfo);
 const mockCacheInfo: api.CacheInfo = {
   total_size: 5000000000,
   package_count: 150,
-  packages: [
-    { name: "linux", version: "6.7.0-arch1-1", filename: "linux-6.7.0-arch1-1-x86_64.pkg.tar.zst", size: 150000000 },
-    { name: "linux", version: "6.6.0-arch1-1", filename: "linux-6.6.0-arch1-1-x86_64.pkg.tar.zst", size: 148000000 },
-    { name: "glibc", version: "2.39-1", filename: "glibc-2.39-1-x86_64.pkg.tar.zst", size: 45000000 },
+  unique_packages: 2,
+  multi_version_packages: 1,
+  total: 2,
+  groups: [
+    { name: "glibc", latest_version: "2.39-1", file_count: 1, total_size: 45000000 },
+    { name: "linux", latest_version: "6.7.0-arch1-1", file_count: 2, total_size: 298000000 },
   ],
   path: "/var/cache/pacman/pkg",
 };
@@ -58,7 +62,7 @@ const mockPackageDetails: api.PackageDetails = {
 
 describe("CacheView", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockGetCacheInfo.mockResolvedValue(mockCacheInfo);
   });
 
@@ -127,7 +131,7 @@ describe("CacheView", () => {
     const linuxCells = screen.getAllByText("linux");
     expect(linuxCells.length).toBe(1);
     expect(screen.getByText("6.7.0-arch1-1")).toBeInTheDocument();
-    expect(screen.getByText("6.6.0-arch1-1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View cached files for linux" })).toHaveTextContent("2 files");
     expect(screen.getByText("2.39-1")).toBeInTheDocument();
   });
 
@@ -157,7 +161,7 @@ describe("CacheView", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Clean package cache?")).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: "Clean package cache?" })).toBeInTheDocument();
     });
   });
 
@@ -429,7 +433,10 @@ describe("CacheView", () => {
     mockGetCacheInfo.mockResolvedValue({
       total_size: 0,
       package_count: 0,
-      packages: [],
+      unique_packages: 0,
+      multi_version_packages: 0,
+      total: 0,
+      groups: [],
       path: "/var/cache/pacman/pkg",
     });
 
@@ -455,4 +462,173 @@ describe("CacheView", () => {
     const rows = screen.getAllByRole("row");
     expect(rows.length).toBeGreaterThan(1);
   });
+
+  it("requests group pages and sorting from the backend", async () => {
+    mockGetCacheInfo.mockImplementation(async params => ({
+      ...mockCacheInfo,
+      total: 101,
+      unique_packages: 101,
+      groups: params?.offset === 50 ? [mockCacheInfo.groups[1]] : [mockCacheInfo.groups[0]],
+    }));
+    render(<CacheView />);
+    await screen.findByText("glibc");
+    fireEvent.click(screen.getAllByRole("button", { name: "Go to next page" })[0]);
+    await screen.findByText("linux");
+    expect(mockGetCacheInfo).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 50, limit: 50 }));
+    fireEvent.click(screen.getByText("Version"));
+    await waitFor(() => expect(mockGetCacheInfo).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 0, sortBy: "version", sortDir: "asc" })));
+  });
+
+  it("keeps cache totals and the filter when no group matches", async () => {
+    mockGetCacheInfo.mockImplementation(async params => ({
+      ...mockCacheInfo,
+      total: params?.search ? 0 : 2,
+      groups: params?.search ? [] : mockCacheInfo.groups,
+    }));
+    render(<CacheView />);
+    await screen.findByText("glibc");
+    const input = screen.getByRole("textbox", { name: "Filter cached packages" });
+    fireEvent.change(input, { target: { value: "absent" } });
+    await screen.findByText("No cached packages match this filter");
+    expect(input).toHaveValue("absent");
+    expect(screen.getByText("4.66 GiB")).toBeInTheDocument();
+    expect(screen.queryByText("Cache is empty")).not.toBeInTheDocument();
+  });
+
+  it("discards an older filter response without replacing the current rows", async () => {
+    let resolveOlder: ((response: api.CacheInfo) => void) | undefined;
+    mockGetCacheInfo.mockImplementation(params => {
+      if (params?.search === "linux") return new Promise(resolve => { resolveOlder = resolve; });
+      return Promise.resolve({ ...mockCacheInfo, total: 1, groups: [mockCacheInfo.groups[0]] });
+    });
+    render(<CacheView />);
+    await screen.findByText("glibc");
+    const input = screen.getByRole("textbox", { name: "Filter cached packages" });
+    fireEvent.change(input, { target: { value: "linux" } });
+    await waitFor(() => expect(resolveOlder).toBeDefined());
+    fireEvent.change(input, { target: { value: "glibc" } });
+    await waitFor(() => expect(mockGetCacheInfo).toHaveBeenLastCalledWith(expect.objectContaining({ search: "glibc" })));
+    await act(async () => { resolveOlder?.({ ...mockCacheInfo, total: 1, groups: [mockCacheInfo.groups[1]] }); });
+    expect(screen.getByText("glibc")).toBeInTheDocument();
+    expect(screen.queryByText("linux")).not.toBeInTheDocument();
+  });
+
+  it("preserves excluded packages across pages and filters", async () => {
+    mockGetCacheInfo.mockImplementation(async params => ({
+      ...mockCacheInfo, total: params?.search ? 1 : 101, unique_packages: 101,
+      groups: params?.offset || params?.search ? [mockCacheInfo.groups[1]] : [mockCacheInfo.groups[0]],
+    }));
+    mockCleanCache.mockReturnValue({ cancel: vi.fn(), forceStop: vi.fn() });
+    render(<CacheView />);
+    await screen.findByText("glibc");
+    fireEvent.click(within(screen.getByRole("row", { name: /glibc/ })).getByRole("checkbox"));
+    fireEvent.click(screen.getAllByRole("button", { name: "Go to next page" })[0]);
+    await screen.findByText("linux");
+    expect(within(screen.getByRole("row", { name: /linux/ })).getByRole("checkbox")).toBeChecked();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "linux" } });
+    await waitFor(() => expect(mockGetCacheInfo).toHaveBeenLastCalledWith(expect.objectContaining({ search: "linux", offset: 0 })));
+    const clean = screen.getByRole("button", { name: "Clean selected packages" });
+    await waitFor(() => expect(clean).toBeEnabled());
+    fireEvent.click(clean);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clean Cache" }));
+    expect(mockCleanCache).toHaveBeenCalledWith(expect.any(Object), 3, { mode: "except", names: ["glibc"] });
+  });
+
+  it("requires a selected package after deselecting all", async () => {
+    mockCleanCache.mockReturnValue({ cancel: vi.fn(), forceStop: vi.fn() });
+    render(<CacheView />);
+    await screen.findByText("glibc");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all packages" }));
+    expect(screen.getByRole("button", { name: "Clean Cache" })).toBeDisabled();
+    expect(mockCleanCache).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole("row", { name: /linux/ })).getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Clean selected packages" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clean Cache" }));
+    expect(mockCleanCache).toHaveBeenCalledWith(expect.any(Object), 3, { mode: "only", names: ["linux"] });
+  });
+
+  it("preserves exclusions through a failed refresh and retry", async () => {
+    mockCleanCache.mockReturnValue({ cancel: vi.fn(), forceStop: vi.fn() });
+    render(<CacheView />);
+    await screen.findByText("glibc");
+    fireEvent.click(within(screen.getByRole("row", { name: /glibc/ })).getByRole("checkbox"));
+    mockGetCacheInfo.mockRejectedValueOnce(new Error("Cache unavailable"));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    await screen.findByText("glibc");
+    expect(within(screen.getByRole("row", { name: /glibc/ })).getByRole("checkbox")).not.toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Clean selected packages" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clean Cache" }));
+    expect(mockCleanCache).toHaveBeenCalledWith(expect.any(Object), 3, { mode: "except", names: ["glibc"] });
+  });
+
+  it("describes selection without a stale count after an excluded package disappears", async () => {
+    mockCleanCache.mockReturnValue({ cancel: vi.fn(), forceStop: vi.fn() });
+    render(<CacheView />);
+    await screen.findByText("glibc");
+    fireEvent.click(within(screen.getByRole("row", { name: /glibc/ })).getByRole("checkbox"));
+    mockGetCacheInfo.mockResolvedValue({
+      ...mockCacheInfo, unique_packages: 1, total: 1, groups: [mockCacheInfo.groups[1]],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(screen.queryByText("glibc")).not.toBeInTheDocument());
+    const clean = screen.getByRole("button", { name: "Clean selected packages" });
+    expect(clean).toBeEnabled();
+    fireEvent.click(clean);
+    expect(screen.getByText("This will clean all cached packages except those you deselected.")).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clean Cache" }));
+    expect(mockCleanCache).toHaveBeenCalledWith(expect.any(Object), 3, { mode: "except", names: ["glibc"] });
+  });
+
+  it("preserves an empty explicit selection on refresh", async () => {
+    render(<CacheView />);
+    await screen.findByText("glibc");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all packages" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled());
+    expect(screen.getByRole("checkbox", { name: "Select all packages" })).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Clean Cache" })).toBeDisabled();
+  });
+
+  it("loads cached files on demand and preserves filenames across file pages", async () => {
+    const files = [
+      { name: "linux", version: "6.7-1", filename: "linux-6.7-1-aarch64.pkg.tar.zst", size: 100 },
+      { name: "linux", version: "6.7-1", filename: "linux-6.7-1-x86_64.pkg.tar.zst", size: 120 },
+    ];
+    mockGetCacheFiles.mockImplementation(async (_name, offset) => ({ total: 55, files: offset ? [files[1]] : [files[0]] }));
+    render(<CacheView />);
+    await screen.findByText("glibc");
+    expect(mockGetCacheFiles).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "View cached files for linux" }));
+    await screen.findByText(files[0].filename);
+    expect(mockGetCacheFiles).toHaveBeenLastCalledWith("linux", 0, 50);
+    const dialog = within(screen.getByRole("dialog", { name: "Cached files for linux" }));
+    fireEvent.click(dialog.getByRole("button", { name: "Go to next page" }));
+    await screen.findByText(files[1].filename);
+    expect(mockGetCacheFiles).toHaveBeenLastCalledWith("linux", 50, 50);
+    expect(screen.queryByText(files[0].filename)).not.toBeInTheDocument();
+    expect(mockGetPackageInfo).not.toHaveBeenCalled();
+  });
+
+  it("resets selection and group pagination after cleanup", async () => {
+    let callbacks: api.UpgradeCallbacks | undefined;
+    mockGetCacheInfo.mockResolvedValue({ ...mockCacheInfo, total: 101, unique_packages: 101 });
+    mockCleanCache.mockImplementation(value => { callbacks = value; return { cancel: vi.fn(), forceStop: vi.fn() }; });
+    render(<CacheView />);
+    await screen.findByText("glibc");
+    fireEvent.click(screen.getAllByRole("button", { name: "Go to next page" })[0]);
+    await waitFor(() => expect(mockGetCacheInfo).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 50 })));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all packages" }));
+    fireEvent.click(within(screen.getByRole("row", { name: /linux/ })).getByRole("checkbox"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Clean selected packages" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Clean selected packages" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clean Cache" }));
+    await act(async () => { callbacks?.onComplete(); });
+    mockGetCacheInfo.mockResolvedValue({ ...mockCacheInfo, groups: [mockCacheInfo.groups[0]], total: 1, unique_packages: 1 });
+    fireEvent.click(screen.getByRole("button", { name: "View Cache" }));
+    await screen.findByText("glibc");
+    expect(mockGetCacheInfo).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 0 }));
+    expect(screen.getByRole("checkbox", { name: "Select all packages" })).toBeChecked();
+  });
+
 });

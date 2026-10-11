@@ -19,7 +19,7 @@ pub mod services;
 pub mod signoff;
 
 pub use archive::{downgrade_from_archive, list_archive_versions};
-pub use cache::{clean_cache, get_cache_info};
+pub use cache::{clean_cache, get_cache_files, get_cache_info, validate_cache_selection};
 pub use config::{add_ignored, get_settings, list_ignored, remove_ignored, set_settings};
 pub use dependency::get_dependency_tree;
 pub use downgrade::{downgrade_package, list_downgrades};

@@ -368,12 +368,32 @@ pub struct CachePackage {
 
 #[derive(Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct CacheGroup {
+    pub name: String,
+    pub latest_version: String,
+    pub file_count: usize,
+    #[ts(type = "number")]
+    pub total_size: i64,
+}
+
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct CacheInfo {
     #[ts(type = "number")]
     pub total_size: i64,
     pub package_count: usize,
-    pub packages: Vec<CachePackage>,
+    pub unique_packages: usize,
+    pub multi_version_packages: usize,
+    pub total: usize,
+    pub groups: Vec<CacheGroup>,
     pub path: String,
+}
+
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct CacheFiles {
+    pub files: Vec<CachePackage>,
+    pub total: usize,
 }
 
 #[derive(Serialize, Deserialize, Clone, TS)]

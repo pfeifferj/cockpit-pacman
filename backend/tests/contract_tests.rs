@@ -8,7 +8,7 @@
 //! Run with: cargo test --test contract_tests
 
 use cockpit_pacman_backend::models::{
-    CacheInfo, CachePackage, ConflictInfo, DependencyEdge, DependencyNode, DependencyTreeResponse,
+    CacheGroup, CacheInfo, ConflictInfo, DependencyEdge, DependencyNode, DependencyTreeResponse,
     GroupedLogResponse, KeyInfo, KeyringKey, KeyringStatusResponse, LogEntry, LogGroup,
     MirrorEntry, MirrorListResponse, MirrorStatus, MirrorStatusResponse, MirrorTestResult,
     NewsItem, NewsResponse, OrphanPackage, OrphanResponse, Package, PackageDetails,
@@ -1254,11 +1254,14 @@ fn cache_info_shape() {
     let info = CacheInfo {
         total_size: 524_288_000,
         package_count: 3,
-        packages: vec![CachePackage {
+        unique_packages: 1,
+        multi_version_packages: 1,
+        total: 1,
+        groups: vec![CacheGroup {
             name: "linux".into(),
-            version: "6.7.0-arch1-1".into(),
-            filename: "linux-6.7.0.arch1-1-x86_64.pkg.tar.zst".into(),
-            size: 142_000_000,
+            latest_version: "6.7.0.arch1-1".into(),
+            file_count: 3,
+            total_size: 524_288_000,
         }],
         path: "/var/cache/pacman/pkg".into(),
     };
@@ -1266,14 +1269,14 @@ fn cache_info_shape() {
 
     assert_number(&v, "total_size");
     assert_number(&v, "package_count");
-    assert_array(&v, "packages");
+    assert_array(&v, "groups");
     assert_string(&v, "path");
 
-    let pkg = &v["packages"][0];
+    let pkg = &v["groups"][0];
     assert_string(pkg, "name");
-    assert_string(pkg, "version");
-    assert_string(pkg, "filename");
-    assert_number(pkg, "size");
+    assert_string(pkg, "latest_version");
+    assert_number(pkg, "file_count");
+    assert_number(pkg, "total_size");
 }
 
 #[test]
@@ -1282,14 +1285,14 @@ fn cache_info_fixture_matches_struct_shape() {
 
     assert_number(&fixture, "total_size");
     assert_number(&fixture, "package_count");
-    assert_array(&fixture, "packages");
+    assert_array(&fixture, "groups");
     assert_string(&fixture, "path");
 
-    let pkg = &fixture["packages"][0];
+    let pkg = &fixture["groups"][0];
     assert_string(pkg, "name");
-    assert_string(pkg, "version");
-    assert_string(pkg, "filename");
-    assert_number(pkg, "size");
+    assert_string(pkg, "latest_version");
+    assert_number(pkg, "file_count");
+    assert_number(pkg, "total_size");
 }
 
 // DependencyTreeResponse

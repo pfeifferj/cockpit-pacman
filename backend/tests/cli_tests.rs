@@ -213,3 +213,25 @@ fn an_invalid_package_name_is_refused() {
         expect_error_envelope(&["local-package-info", name]);
     }
 }
+
+#[test]
+fn cache_pages_reject_invalid_limits_before_scanning() {
+    for args in [
+        vec!["cache-info", "0", "1001"],
+        vec!["cache-files", "linux", "0", "0"],
+    ] {
+        let envelope = expect_error_envelope(&args);
+        assert!(
+            envelope["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("Limit")
+        );
+    }
+}
+
+#[test]
+fn empty_explicit_cache_selection_is_refused_before_opening_alpm() {
+    let envelope = expect_error_envelope(&["clean-cache", "0", "", "only"]);
+    assert_eq!(envelope["message"], "Select at least one package to clean");
+}

@@ -6,7 +6,11 @@
  */
 export type BackupSource = "manual" | "auto";
 
-export type CacheInfo = { total_size: number, package_count: number, packages: Array<CachePackage>, path: string, };
+export type CacheFiles = { files: Array<CachePackage>, total: number, };
+
+export type CacheGroup = { name: string, latest_version: string, file_count: number, total_size: number, };
+
+export type CacheInfo = { total_size: number, package_count: number, unique_packages: number, multi_version_packages: number, total: number, groups: Array<CacheGroup>, path: string, };
 
 export type CachePackage = { name: string, version: string, filename: string, size: number, };
 

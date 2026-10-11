@@ -5,6 +5,7 @@ import { isDbLockError, sanitizeSearchInput } from "./utils";
 // backend/src + src/bindings). Imported for local use and re-exported so
 // consumers keep importing them from "../api".
 import type {
+  CacheFiles,
   CacheInfo,
   DependencyTreeResponse,
   DismissalState,
@@ -630,13 +631,31 @@ export async function removeIgnoredPackage(name: string): Promise<IgnoreOperatio
   return runBackend<IgnoreOperationResponse>("remove-ignored", [name]);
 }
 
-export async function getCacheInfo(): Promise<CacheInfo> {
-  return runBackend<CacheInfo>("cache-info", [], { superuser: "none" });
+export interface CacheParams {
+  offset?: number;
+  limit?: number;
+  search?: string;
+  sortBy?: "name" | "version" | "size";
+  sortDir?: SortDirection;
 }
 
-export function cleanCache(callbacks: UpgradeCallbacks, keepVersions: number = 3, packages?: string[]): StreamingHandle {
-  const pkgArg = packages && packages.length > 0 ? packages.map(pkg => sanitizeSearchInput(pkg)).join(",") : "";
-  return runStreamingBackend("clean-cache", [String(keepVersions), pkgArg], callbacks);
+export async function getCacheInfo(params: CacheParams = {}): Promise<CacheInfo> {
+  const { offset = 0, limit = 50, search = "", sortBy = "name", sortDir = "asc" } = params;
+  return runBackend<CacheInfo>("cache-info", [String(offset), String(limit), sanitizeSearchInput(search), sortBy, sortDir], { superuser: "none" });
+}
+
+export async function getCacheFiles(name: string, offset = 0, limit = 50): Promise<CacheFiles> {
+  return runBackend<CacheFiles>("cache-files", [name, String(offset), String(limit)], { superuser: "none" });
+}
+
+export type CacheSelection = { mode: "all" } | { mode: "only" | "except"; names: string[] };
+
+export function cleanCache(callbacks: UpgradeCallbacks, keepVersions = 3, selection: CacheSelection = { mode: "all" }): StreamingHandle {
+  const names = selection.mode === "all" ? [] : selection.names;
+  if (selection.mode === "only" && names.length === 0) {
+    throw new Error("Select at least one package to clean");
+  }
+  return runStreamingBackend("clean-cache", [String(keepVersions), names.join(","), selection.mode], callbacks);
 }
 
 export type HistoryFilterType = "all" | "upgraded" | "installed" | "removed";

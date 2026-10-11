@@ -66,7 +66,9 @@ import {
   getGroupedHistory,
   getRebootStatus,
   getPacnewStatus,
+  getCacheFiles,
   getCacheInfo,
+  cleanCache,
   getKeyringStatus,
   getDependencyTree,
   listOrphans,
@@ -636,20 +638,43 @@ describe("getCacheInfo contract", () => {
 
     expect(typeof result.total_size).toBe("number");
     expect(typeof result.package_count).toBe("number");
-    expect(Array.isArray(result.packages)).toBe(true);
+    expect(Array.isArray(result.groups)).toBe(true);
     expect(typeof result.path).toBe("string");
   });
 
-  it("cache package entries have all required fields", async () => {
+  it("cache group entries have all required fields", async () => {
     spawnReturns(cacheInfoFixture);
     const result = await getCacheInfo();
 
-    const pkg = result.packages[0];
+    const pkg = result.groups[0];
     expect(typeof pkg.name).toBe("string");
-    expect(typeof pkg.version).toBe("string");
-    expect(typeof pkg.filename).toBe("string");
-    expect(typeof pkg.size).toBe("number");
+    expect(typeof pkg.latest_version).toBe("string");
+    expect(typeof pkg.file_count).toBe("number");
+    expect(typeof pkg.total_size).toBe("number");
   });
+
+  it("passes bounded filter and sort arguments to an unprivileged command", async () => {
+    spawnReturns(cacheInfoFixture);
+    await getCacheInfo({ offset: 50, limit: 25, search: "linux", sortBy: "size", sortDir: "desc" });
+    expect(mockSpawn).toHaveBeenCalledWith([expect.any(String), "cache-info", "50", "25", "linux", "size", "desc"], { err: "message" });
+  });
+
+  it("keeps filenames in paginated file responses", async () => {
+    const files = [
+      { name: "linux", version: "1-1", filename: "linux-1-1-any.pkg.tar.zst", size: 10 },
+      { name: "linux", version: "1-1", filename: "linux-1-1-x86_64.pkg.tar.zst", size: 20 },
+    ];
+    spawnReturns({ total: 52, files });
+    const result = await getCacheFiles("linux", 50, 2);
+    expect(result).toEqual({ total: 52, files });
+    expect(mockSpawn).toHaveBeenCalledWith([expect.any(String), "cache-files", "linux", "50", "2"], { err: "message" });
+  });
+
+  it("does not start a command for an empty explicit cleanup selection", () => {
+    expect(() => cleanCache({ onComplete: vi.fn(), onError: vi.fn() }, 0, { mode: "only", names: [] })).toThrow("Select at least one package");
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
 });
 
 describe("getKeyringStatus contract", () => {

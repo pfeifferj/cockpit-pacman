@@ -49,6 +49,6 @@ test.describe("Cache Tab", () => {
     await expect(clean).toBeDisabled();
 
     await pacman.panel.locator(CACHE_ROWS).first().locator('input[type="checkbox"]').check();
-    await expect(clean).toContainText("Clean 1 package");
+    await expect(clean).toContainText("Clean selected packages");
   });
 });

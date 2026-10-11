@@ -105,7 +105,10 @@ describe("UpdatesView", () => {
     mockGetCacheInfo.mockResolvedValue({
       total_size: 1024 * 1024 * 1024,
       package_count: 100,
-      packages: [],
+      unique_packages: 100,
+      multi_version_packages: 0,
+      total: 100,
+      groups: [],
       path: "/var/cache/pacman/pkg",
     });
     mockGetKeyringStatus.mockResolvedValue({

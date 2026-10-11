@@ -4,17 +4,17 @@ use std::time::Duration;
 use cockpit_pacman_backend::handlers::{
     add_ignored, check_lock, check_security, check_updates, clean_cache, delete_mirror_backup,
     delete_repo_backup, downgrade_from_archive, downgrade_package, fetch_mirror_status, fetch_news,
-    get_cache_info, get_dependency_tree, get_grouped_history, get_history, get_pacnew_status,
-    get_reboot_status, get_schedule_config, get_scheduled_runs, get_services_status, get_settings,
-    init_keyring, install_package, keyring_status, list_archive_versions, list_downgrades,
-    list_ignored, list_installed, list_mirror_backups, list_mirrors, list_orphans,
-    list_repo_backups, list_repos, local_package_info, mark_dismissed, mark_news_read,
-    preflight_upgrade, read_credentials_from_stdin, read_dismissal, read_news_state,
-    record_interrupted, refresh_keyring, refresh_mirrors, remove_ignored, remove_orphans,
-    remove_package, remove_stale_lock, restore_mirror_backup, restore_repo_backup, run_upgrade,
-    save_mirrorlist, save_repos, scheduled_run, search, security_info, set_schedule_config,
-    set_settings, signoff_list, signoff_revoke, signoff_sign, sync_database, sync_package_info,
-    test_mirrors,
+    get_cache_files, get_cache_info, get_dependency_tree, get_grouped_history, get_history,
+    get_pacnew_status, get_reboot_status, get_schedule_config, get_scheduled_runs,
+    get_services_status, get_settings, init_keyring, install_package, keyring_status,
+    list_archive_versions, list_downgrades, list_ignored, list_installed, list_mirror_backups,
+    list_mirrors, list_orphans, list_repo_backups, list_repos, local_package_info, mark_dismissed,
+    mark_news_read, preflight_upgrade, read_credentials_from_stdin, read_dismissal,
+    read_news_state, record_interrupted, refresh_keyring, refresh_mirrors, remove_ignored,
+    remove_orphans, remove_package, remove_stale_lock, restore_mirror_backup, restore_repo_backup,
+    run_upgrade, save_mirrorlist, save_repos, scheduled_run, search, security_info,
+    set_schedule_config, set_settings, signoff_list, signoff_revoke, signoff_sign, sync_database,
+    sync_package_info, test_mirrors, validate_cache_selection,
 };
 use cockpit_pacman_backend::models::{MirrorEntry, RepoEntry, StructuredError};
 use cockpit_pacman_backend::util::{classify_error, emit_json, shutdown_event_writer};
@@ -52,6 +52,7 @@ const COMMANDS: &[&str] = &[
     "add-ignored",
     "remove-ignored",
     "cache-info",
+    "cache-files",
     "clean-cache",
     "history",
     "history-grouped",
@@ -147,10 +148,14 @@ Commands:
                          security-advisories: true|false, empty leaves unchanged
   add-ignored NAME       Add a package to the ignored list (requires root)
   remove-ignored NAME    Remove a package from the ignored list (requires root)
-  cache-info             Show package cache information and size
-  clean-cache [KEEP] [PKGS]  Clean package cache (requires root)
+  cache-info [offset] [limit] [search] [sort_by] [sort_dir]
+                         Show cache groups (sort_by: name|version|size)
+  cache-files NAME [offset] [limit]
+                         List cached files for one package
+  clean-cache [KEEP] [PKGS] [MODE]  Clean package cache (requires root)
                          KEEP: number of versions to keep (default: 3)
-                         PKGS: comma-separated package names to clean
+                         PKGS: comma-separated package names
+                         MODE: all|only|except (default: only with PKGS, otherwise all)
   history [offset] [limit] [filter] [search]
                          View package history from pacman.log
                          filter: all|upgraded|installed|removed
@@ -479,7 +484,20 @@ fn main() {
             }
             validate_package_name(&args[2]).and_then(|_| remove_ignored(&args[2]))
         }
-        "cache-info" => get_cache_info(),
+        "cache-info" => get_cache_info(
+            arg_usize(&args, 2, 0),
+            arg_usize(&args, 3, 50),
+            args.get(4).map(String::as_str).unwrap_or(""),
+            arg_opt(&args, 5).as_deref().unwrap_or("name"),
+            arg_opt(&args, 6).as_deref().unwrap_or("asc"),
+        ),
+        "cache-files" => {
+            let Some(name) = args.get(2) else {
+                eprintln!("Error: cache-files requires a package name");
+                std::process::exit(1);
+            };
+            get_cache_files(name, arg_usize(&args, 3, 0), arg_usize(&args, 4, 50))
+        }
         "clean-cache" => {
             let keep_versions = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(3);
             let filter_pkgs: Vec<String> = args
@@ -492,13 +510,17 @@ fn main() {
                         .collect()
                 })
                 .unwrap_or_default();
+            let mode = args
+                .get(4)
+                .map(String::as_str)
+                .unwrap_or(if filter_pkgs.is_empty() {
+                    "all"
+                } else {
+                    "only"
+                });
             validate_keep_versions(keep_versions)
-                .and_then(|_| {
-                    filter_pkgs
-                        .iter()
-                        .try_for_each(|p| validate_package_name(p))
-                })
-                .and_then(|_| clean_cache(keep_versions, &filter_pkgs))
+                .and_then(|_| validate_cache_selection(mode, &filter_pkgs))
+                .and_then(|_| clean_cache(keep_versions, &filter_pkgs, mode))
         }
         "history" => {
             let (offset, limit, filter, search) = parse_history(&args, 100);
