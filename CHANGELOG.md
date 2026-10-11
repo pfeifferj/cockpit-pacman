@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- Installing a package while system updates are pending warns about partial upgrades and offers to open the Updates tab first
+
 ### Fixed
 - Updates, advisory settings and the ignored-package list use defaults when legacy config permissions deny access. Updates warn when saved cockpit-pacman package ignores are unavailable
 - Show a dismissible alert when the security advisories setting cannot be saved

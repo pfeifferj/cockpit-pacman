@@ -64,6 +64,10 @@ export const App: React.FC = () => {
     setActiveTab(4);
   };
 
+  const handleViewUpdates = () => {
+    setActiveTab(0);
+  };
+
   const handleViewSignoffs = () => {
     setActiveTab(7);
   };
@@ -79,6 +83,7 @@ export const App: React.FC = () => {
 
   const navHandlers = useMemo(
     () => ({
+      onViewUpdates: handleViewUpdates,
       onViewDependencies: handleViewDependencies,
       onViewHistory: handleViewHistory,
       onViewOrphans: handleViewOrphans,

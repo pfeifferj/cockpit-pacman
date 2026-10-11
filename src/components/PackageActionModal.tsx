@@ -9,6 +9,7 @@ import {
   Button,
   Spinner,
   Alert,
+  AlertActionLink,
   EmptyState,
   EmptyStateBody,
   Label,
@@ -18,8 +19,9 @@ import {
 import { ExpandableLogViewer } from "./LogViewer";
 import { ErrorAlert } from "./ErrorAlert";
 import { CheckCircleIcon } from "@patternfly/react-icons";
-import { installPackage, removePackage, ErrorCode, UpgradeCallbacks } from "../api";
+import { checkUpdates, installPackage, removePackage, ErrorCode, UpgradeCallbacks } from "../api";
 import { appendCapped, sanitizeErrorMessage } from "../utils";
+import { useNavigation } from "../contexts/NavigationContext";
 
 type ModalState = "confirm" | "running" | "success" | "error";
 
@@ -27,6 +29,7 @@ interface ActionConfig {
   verb: string;
   confirmPrompt: (pkg: string) => React.ReactNode;
   notice: React.ReactNode;
+  warnPendingUpdates?: boolean;
   confirmLabel: string;
   confirmVariant: "primary" | "danger";
   runningText: string;
@@ -52,12 +55,32 @@ export const PackageActionModal: React.FC<PackageActionModalProps & { config: Ac
   config,
 }) => {
   useBackdropClose(isOpen, onClose);
+  const { onViewUpdates } = useNavigation();
   const [state, setState] = useState<ModalState>("confirm");
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
   const [log, setLog] = useState("");
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
+  const [updateCheck, setUpdateCheck] = useState<{ count: number } | { error: string } | null>(null);
+  const pendingUpdates = updateCheck && "count" in updateCheck ? updateCheck.count : null;
+  const checkingUpdates = !!config.warnPendingUpdates && updateCheck === null;
   const cancelRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (!isOpen || !config.warnPendingUpdates) return;
+    let stale = false;
+    checkUpdates()
+      .then((response) => {
+        if (!stale) setUpdateCheck({ count: response.updates.length });
+      })
+      .catch((err: unknown) => {
+        if (!stale) setUpdateCheck({ error: err instanceof Error ? err.message : String(err) });
+      });
+    return () => {
+      stale = true;
+      setUpdateCheck(null);
+    };
+  }, [isOpen, config.warnPendingUpdates, packageName]);
 
   const resetState = useCallback(() => {
     setState("confirm");
@@ -136,6 +159,39 @@ export const PackageActionModal: React.FC<PackageActionModalProps & { config: Ac
               </Content>
             </Content>
             {config.notice}
+            {config.warnPendingUpdates && updateCheck && "error" in updateCheck && (
+              <Alert
+                variant="warning"
+                isLiveRegion
+                title="Could not check for pending updates"
+                className="pf-v6-u-mt-md"
+              >
+                {sanitizeErrorMessage(updateCheck.error)}
+              </Alert>
+            )}
+            {config.warnPendingUpdates && pendingUpdates !== null && pendingUpdates > 0 && (
+              <Alert
+                variant="warning"
+                isLiveRegion
+                title={`${pendingUpdates} system update${pendingUpdates !== 1 ? "s" : ""} pending`}
+                className="pf-v6-u-mt-md"
+                actionLinks={
+                  onViewUpdates && (
+                    <AlertActionLink
+                      onClick={() => {
+                        onViewUpdates();
+                        handleClose();
+                      }}
+                    >
+                      Review updates
+                    </AlertActionLink>
+                  )
+                }
+              >
+                Installing packages before a full system upgrade can cause a partial upgrade.
+                Upgrade the system first to avoid incompatible package versions.
+              </Alert>
+            )}
           </>
         );
 
@@ -178,7 +234,12 @@ export const PackageActionModal: React.FC<PackageActionModalProps & { config: Ac
       case "confirm":
         return (
           <>
-            <Button variant={config.confirmVariant} onClick={handleConfirm}>
+            <Button
+              variant={config.confirmVariant}
+              onClick={handleConfirm}
+              isDisabled={checkingUpdates}
+              isLoading={checkingUpdates}
+            >
               {config.confirmLabel}
             </Button>
             <Button variant="link" onClick={handleClose}>
@@ -239,6 +300,7 @@ export const installConfig: ActionConfig = {
       This will install the package and its required dependencies from the repositories.
     </Alert>
   ),
+  warnPendingUpdates: true,
   confirmLabel: "Confirm Install",
   confirmVariant: "primary",
   runningText: "Installing",
