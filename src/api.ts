@@ -369,7 +369,7 @@ export interface UpgradeCallbacks {
   /** Timeout in seconds for the operation (default: 300) */
   timeout?: number;
   /** Superuser mode for cockpit.spawn (default: "require") */
-  superuser?: "try" | "require";
+  superuser?: "none" | "try" | "require";
   /** Called for each parsed JSON event before default handling. Return true to skip default processing. */
   onRawEvent?: (event: Record<string, unknown>) => boolean;
 }
@@ -458,17 +458,18 @@ function runStreamingBackend(
     };
   };
 
+  const su = callbacks.superuser ?? "require";
   const proc = cockpit.spawn(
     [backendPath(), command, ...args],
-    { superuser: callbacks.superuser || "require", err: "out" }
+    su === "none" ? { err: "out" } : { superuser: su, err: "out" }
   );
 
   let firstOutputTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
     firstOutputTimer = undefined;
     startupTimeout = {
       success: false,
-      message: `Backend command '${command}' produced no output within ${STREAM_FIRST_OUTPUT_TIMEOUT_MS / 1000}s. ` +
-        "The privileged bridge may be waiting for administrative access.",
+      message: `Backend command '${command}' produced no output within ${STREAM_FIRST_OUTPUT_TIMEOUT_MS / 1000}s.` +
+        (su === "none" ? "" : " The privileged bridge may be waiting for administrative access."),
       code: "timeout",
     };
     if (options?.gracefulCancel) proc.input("cancel\n", true);
@@ -863,7 +864,7 @@ export function testMirrors(
     onComplete: callbacks.onComplete,
     onError: callbacks.onError,
     timeout: callbacks.timeout,
-    superuser: "try",
+    superuser: "none",
     onRawEvent: (event) => {
       if (event.type === "mirror_test") {
         const e = event as unknown as Extract<StreamEvent, { type: "mirror_test" }>;
@@ -895,7 +896,7 @@ export async function refreshMirrors(params: RefreshMirrorsParams = {}): Promise
     country,
     protocol,
     sortBy,
-  ]);
+  ], { superuser: "none" });
 }
 
 export async function listMirrorBackups(): Promise<MirrorBackupListResponse> {

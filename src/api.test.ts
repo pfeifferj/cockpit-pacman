@@ -30,6 +30,8 @@ import {
   BackendError,
   isNetworkErrorCode,
   listMirrorBackups,
+  testMirrors,
+  refreshMirrors,
 } from "./api";
 
 it("reads protected mirror undo backups with administrative access", async () => {
@@ -40,6 +42,15 @@ it("reads protected mirror undo backups with administrative access", async () =>
     ["/usr/libexec/cockpit-pacman/cockpit-pacman-backend", "list-mirror-backups"],
     { superuser: "require", err: "message" },
   );
+});
+
+it("tests and ranks mirrors as the session user", async () => {
+  mockSpawn.mockReturnValueOnce(createMockStreamingProcess());
+  testMirrors({ onComplete: vi.fn(), onError: vi.fn() });
+  expect(mockSpawn).toHaveBeenLastCalledWith(expect.arrayContaining(["test-mirrors"]), { err: "out" });
+  mockSpawn.mockReturnValueOnce(createMockSpawnPromise("{}"));
+  await refreshMirrors();
+  expect(mockSpawn).toHaveBeenLastCalledWith(expect.arrayContaining(["refresh-mirrors"]), { err: "message" });
 });
 
 describe.each([
