@@ -16,6 +16,8 @@ to localhost. It builds the Rust backend in the guest against that guest's
 libalpm. QEMU uses KVM when available and falls back to TCG. Install QEMU,
 xorriso, rsync, OpenSSH and OpenSSL on the host first. `--image PATH` reuses an
 existing cloud image; trailing test paths limit the Playwright run.
+After upgrading packages, the runner reboots into the installed kernel so
+the networking tests can load its firewall modules.
 
 `--inspect-seconds N` keeps a failed guest available for up to 3600 seconds,
 then removes it. Add `--inspect-on-success` to keep a successful guest too.
@@ -78,3 +80,7 @@ Keyring cancellation uses a root-owned fixture directory to select fake
 `gpg` and `pacman-key` commands in the E2E wrapper. Its grandchild holds a
 temporary file lock. The browser test checks that cancelling refresh ends both
 processes and releases that lock; the real pacman keyring is not modified.
+
+Proxy tests use local HTTP(S)/SOCKS servers, DNS and a firewall to check
+routing, downloads, scheduled runs and an isolated dirmngr. Fixtures restore
+guest state after each test.

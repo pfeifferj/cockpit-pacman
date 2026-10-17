@@ -65,3 +65,46 @@ list that would read as a clean bill of health.
 
 The setting fails open: a config that cannot be read or parsed leaves
 advisories on, so a broken file cannot quietly suppress security data.
+
+## Proxies
+
+Create `/etc/cockpit-pacman/proxy.json` to route Arch service requests, mirror
+probes, package/database downloads and scheduled runs. Changes apply to the
+next request or scheduled run.
+
+```json
+{
+  "mode": "proxy",
+  "all_proxy": "http://proxy.example.org:3128",
+  "no_proxy": "localhost,127.0.0.0/8,.example.internal"
+}
+```
+
+`all_proxy` is required. Optional `http_proxy` and `https_proxy` override it;
+`no_proxy` lists hosts, domains or CIDRs to bypass (`*` bypasses everything).
+Proxy mode replaces inherited proxy settings, including the bypass list.
+
+Without the file, or with `{"mode":"inherit"}`, libcurl uses the process's
+proxy environment. `HTTP_PROXY` is ignored; use lowercase `http_proxy`.
+Cockpit and systemd may not inherit your shell's environment.
+`{"mode":"direct"}` disables proxies. Inherit/direct modes reject endpoint
+and bypass fields.
+
+Endpoints support `http://`, `https://`, `socks5://` and `socks5h://`.
+SOCKS5 resolves destination names locally; SOCKS5h resolves them at the proxy.
+For authentication, use `http://user:password@host:port` with percent-encoded
+credentials. HTTPS uses the system CA store.
+
+The file and its directory must be root-owned, not symlinks, and not writable
+by other users. Cockpit users need directory access and permission to read the
+file: use `0644` without credentials, or `0640` with a suitable group or ACL
+when credentials are present. World-readable credentials are rejected.
+
+Invalid or unreadable settings block network operations. Failed proxy
+connections never fall back to direct access. Local operations remain available.
+
+Keyring refresh uses dirmngr, which needs separate configuration. Refresh is
+blocked in `proxy`/`direct` modes and in `inherit` mode with an active proxy.
+After configuring dirmngr, allow refresh with `"keyring": "external"`;
+`"keyring": "deny"` always blocks it. Package hooks also control their own
+networking.

@@ -70,11 +70,11 @@ paru -S cockpit-pacman-git
 
 ### From source
 
-Requires the Rust toolchain, npm, and a supported Node.js version: 22.x from
-22.22.2, 24.x from 24.15.0, or 26 and later. CI uses Node.js 24 LTS.
+Requires the Rust toolchain, npm, system libcurl, pkgconf, and a supported Node.js
+version: 22.x from 22.22.2, 24.x from 24.15.0, or 26 and later. CI uses Node.js 24 LTS.
 
 ```bash
-sudo pacman -S rust npm
+sudo pacman -S rust npm curl pkgconf
 ```
 
 #### Build
@@ -109,7 +109,7 @@ scheduled service. Its default is `/usr/libexec/cockpit-pacman`.
 
 - [Troubleshooting](docs/troubleshooting.md): locked database, interrupted
   upgrade, a scheduled run with no record, where the config and backups live
-- [Configuration](docs/configuration.md): `/etc/cockpit-pacman/config.json`
+- [Configuration](docs/configuration.md): settings and [proxies](docs/configuration.md#proxies)
 - [Signoffs](docs/signoffs.md): ArchWeb credentials and the signoff view
 
 ## Development
