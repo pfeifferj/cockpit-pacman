@@ -111,7 +111,11 @@ fn status_client() -> arch_http_client::Client {
 
 pub fn fetch_mirror_status() -> Result<()> {
     crate::network::require_network()?;
-    let status = arch_mirror_client::fetch(&status_client())?;
+    let url = crate::endpoints::endpoint(
+        arch_mirror_client::STATUS_URL,
+        "COCKPIT_PACMAN_TEST_MIRRORS_URL",
+    )?;
+    let status = arch_mirror_client::fetch_from(&status_client(), &url)?;
 
     let mirrors: Vec<MirrorStatus> = status
         .mirrors
@@ -144,7 +148,11 @@ pub fn refresh_mirrors(
     sort_by: &str,
 ) -> Result<()> {
     crate::network::require_network()?;
-    let status = arch_mirror_client::fetch(&status_client())?;
+    let url = crate::endpoints::endpoint(
+        arch_mirror_client::STATUS_URL,
+        "COCKPIT_PACMAN_TEST_MIRRORS_URL",
+    )?;
+    let status = arch_mirror_client::fetch_from(&status_client(), &url)?;
 
     let candidates = arch_mirror_client::rank(
         status.mirrors,

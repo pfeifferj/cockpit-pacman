@@ -89,7 +89,7 @@ def main():
             'package_update': True,
             'package_upgrade': True,
             'packages': ['cockpit', 'sudo', 'rsync', 'python', 'rust', 'base-devel', 'openssl',
-                         'gnome-keyring', 'libsecret', 'htop', 'tree', 'curl'],
+                         'gnome-keyring', 'libsecret', 'htop', 'tree', 'curl', 'iptables-nft'],
             'runcmd': [['systemctl', 'enable', '--now', 'cockpit.socket'], ['loginctl', 'enable-linger', 'dev']],
         }
         (work / 'user-data').write_text('#cloud-config\n' + json.dumps(seed))
@@ -99,7 +99,8 @@ def main():
         ssh_port, cockpit_port = port(), port()
         ssh = ['ssh', '-i', str(work / 'id'), '-p', str(ssh_port), '-o', 'BatchMode=yes',
                '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null',
-               '-o', 'LogLevel=ERROR', '-o', 'ConnectTimeout=3', 'root@127.0.0.1']
+               '-o', 'LogLevel=ERROR', '-o', 'ConnectTimeout=3', '-o', 'ServerAliveInterval=5',
+               '-o', 'ServerAliveCountMax=2', 'root@127.0.0.1']
         session = {'url': f'https://127.0.0.1:{cockpit_port}', 'password': password, 'ssh': ssh}
         with (work / 'serial.log').open('wb') as serial:
             guest = subprocess.Popen([
@@ -118,6 +119,18 @@ def main():
                     time.sleep(3)
                 print('Arch guest reachable; waiting for provisioning', flush=True)
                 run(ssh + ['cloud-init status --wait'], timeout=900)
+                boot_id = run(ssh + ['cat /proc/sys/kernel/random/boot_id'], capture_output=True, text=True).stdout
+                print('Rebooting guest into the upgraded kernel', flush=True)
+                subprocess.run(ssh + ['systemctl reboot'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+                deadline = time.monotonic() + 180
+                while True:
+                    probe = subprocess.run(ssh + ['cat /proc/sys/kernel/random/boot_id'], capture_output=True, text=True)
+                    if probe.returncode == 0 and probe.stdout != boot_id:
+                        break
+                    if guest.poll() is not None or time.monotonic() > deadline:
+                        raise RuntimeError('Guest did not reboot into the upgraded kernel')
+                    time.sleep(3)
+                run(ssh + ['cloud-init status --wait'], timeout=180)
                 rsync_ssh = ' '.join(ssh[:-1])
                 run(['rsync', '-a', '--exclude=.git', '--exclude=node_modules', '--exclude=backend/target*',
                      '--exclude=.auth', '--exclude=.work*', '--exclude=.calira', '--exclude=test-results',

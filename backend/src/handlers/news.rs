@@ -53,7 +53,8 @@ struct NewsCache {
 }
 
 pub fn fetch_news(days: u32, force: bool) -> Result<()> {
-    let response = news_with_cache(ARCH_NEWS_URL, &news_cache_path()?, days.min(365), force)?;
+    let url = crate::endpoints::endpoint(ARCH_NEWS_URL, "COCKPIT_PACMAN_TEST_NEWS_URL")?;
+    let response = news_with_cache(&url, &news_cache_path()?, days.min(365), force)?;
     emit_json(&response)
 }
 

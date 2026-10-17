@@ -155,7 +155,11 @@ pub fn check_security(force: bool) -> Result<()> {
         });
     }
 
-    let client = SecurityClient::new();
+    let url = crate::endpoints::endpoint(
+        arch_security_client::DEFAULT_BASE_URL,
+        "COCKPIT_PACMAN_TEST_SECURITY_URL",
+    )?;
+    let client = SecurityClient::with_base_url(&url);
     let feed = load_feed(&client, force, security_cache_path().ok().as_deref())?;
     let avgs = feed.avgs;
 
@@ -203,7 +207,11 @@ pub fn security_info(name: &str) -> Result<()> {
         });
     }
 
-    let client = SecurityClient::new();
+    let url = crate::endpoints::endpoint(
+        arch_security_client::DEFAULT_BASE_URL,
+        "COCKPIT_PACMAN_TEST_SECURITY_URL",
+    )?;
+    let client = SecurityClient::with_base_url(&url);
     crate::network::require_network()?;
     let info = client.fetch_package(name)?;
 
