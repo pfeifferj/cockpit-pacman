@@ -86,12 +86,24 @@ make build
 #### Install
 
 ```bash
-# System-wide
+# System-wide, when no cockpit-pacman package is installed
 sudo make install
 
 # Development (symlinks)
 make devel-install
 ```
+
+`make install` refuses to overwrite an installed `cockpit-pacman` or
+`cockpit-pacman-git` package. Use the package manager to update that installation.
+Package builds can stage files without modifying the running system:
+
+```bash
+make install DESTDIR="$pkgdir" PREFIX=/usr LIBEXECDIR=/usr/lib/cockpit-pacman
+```
+
+`LIBEXECDIR` selects the backend path in both the installed Cockpit manifest and
+scheduled service. Its default is `/usr/libexec/cockpit-pacman`.
+`make install-check` checks the live-install guard without writing files.
 
 ## Documentation
 
@@ -106,6 +118,12 @@ make devel-install
 make devel-install
 npm run watch
 ```
+
+The development install links frontend assets and the backend under
+`~/.local`, and its manifest selects that backend. It does not install system
+units; test scheduled work in the disposable VM. The user plugin takes
+precedence over the packaged plugin for that account. Log out of Cockpit and
+back in after installing it so the shell reads the new manifest.
 
 ## License
 

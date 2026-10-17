@@ -26,6 +26,7 @@ interface CockpitUserInfo {
 }
 
 declare const cockpit: {
+  manifests?: { pacman?: { config?: { backend?: unknown } } };
   spawn(
     args: string[],
     options?: {

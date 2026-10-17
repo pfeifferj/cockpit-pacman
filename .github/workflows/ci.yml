@@ -53,6 +53,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Test installation paths
+        run: node --test test/install.test.mjs
+
       - name: Build
         run: npm run build
 

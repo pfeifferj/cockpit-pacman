@@ -1,11 +1,13 @@
 VERSION := $(shell sed -n 's/^## \[\([0-9.]*\)\].*/\1/p;T;q' CHANGELOG.md)
 PREFIX = /usr
 DESTDIR =
+LIBEXECDIR = $(PREFIX)/libexec/cockpit-pacman
+DEVEL_PREFIX = $(HOME)/.local
 TARFILE = cockpit-pacman-$(VERSION).tar.xz
 
 BACKEND_BIN = backend/target/release/cockpit-pacman-backend
 
-.PHONY: all build build-backend build-frontend generate-types clean install devel-install lint lint-frontend lint-backend test test-frontend test-backend test-e2e test-e2e-ui check dist
+.PHONY: all build build-backend build-frontend generate-types clean install install-check devel-install lint lint-frontend lint-backend test test-frontend test-backend test-e2e test-e2e-ui check dist
 
 all: build install
 	@if [ -n "$$SUDO_USER" ] && [ -d node_modules ]; then chown -R $$SUDO_USER node_modules; fi
@@ -34,20 +36,13 @@ dist:
 	git archive --format=tar --prefix=cockpit-pacman-$(VERSION)/ HEAD | xz > $(TARFILE)
 
 install:
-	install -d $(DESTDIR)$(PREFIX)/share/cockpit/pacman
-	install -d $(DESTDIR)$(PREFIX)/libexec/cockpit-pacman
-	install -d $(DESTDIR)$(PREFIX)/lib/systemd/system
-	install -m 644 dist/* $(DESTDIR)$(PREFIX)/share/cockpit/pacman/
-	install -m 755 $(BACKEND_BIN) $(DESTDIR)$(PREFIX)/libexec/cockpit-pacman/
-	install -m 644 systemd/cockpit-pacman-scheduled.service $(DESTDIR)$(PREFIX)/lib/systemd/system/
-	install -m 644 systemd/cockpit-pacman-scheduled.timer $(DESTDIR)$(PREFIX)/lib/systemd/system/
-	install -m 644 'systemd/cockpit-pacman-failure@.service' $(DESTDIR)$(PREFIX)/lib/systemd/system/
+	node tools/install.mjs system "$(DESTDIR)" "$(PREFIX)" "$(LIBEXECDIR)" "$(BACKEND_BIN)" dist
+
+install-check:
+	node tools/install.mjs system "$(DESTDIR)" "$(PREFIX)" "$(LIBEXECDIR)" "$(BACKEND_BIN)" dist --check
 
 devel-install: build
-	mkdir -p ~/.local/share/cockpit
-	ln -snf $(CURDIR)/dist ~/.local/share/cockpit/pacman
-	mkdir -p ~/.local/libexec/cockpit-pacman
-	ln -snf $(CURDIR)/$(BACKEND_BIN) ~/.local/libexec/cockpit-pacman/cockpit-pacman-backend
+	node tools/install.mjs development "$(DEVEL_PREFIX)" "$(BACKEND_BIN)" dist
 
 # Linting
 lint: lint-frontend lint-backend
@@ -63,6 +58,7 @@ test: test-frontend test-backend
 
 test-frontend:
 	npm ci --dry-run --no-audit --no-fund
+	node --test test/install.test.mjs
 	npm test
 
 test-backend:

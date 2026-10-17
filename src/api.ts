@@ -58,7 +58,12 @@ import type {
 } from "./bindings";
 export type * from "./bindings";
 
-const BACKEND_PATH = "/usr/libexec/cockpit-pacman/cockpit-pacman-backend";
+function backendPath(): string {
+  const configured = cockpit.manifests?.pacman?.config?.backend;
+  return typeof configured === "string" && configured.startsWith("/")
+    ? configured
+    : "/usr/libexec/cockpit-pacman/cockpit-pacman-backend";
+}
 
 export type FilterType = "all" | "explicit" | "dependency" | "orphan" | "graph";
 
@@ -199,7 +204,7 @@ async function runBackend<T>(command: string, args: string[] = [], options?: { s
     spawnOpts.superuser = su;
   }
   const spawnPromise = cockpit.spawn(
-    [BACKEND_PATH, command, ...args],
+    [backendPath(), command, ...args],
     spawnOpts,
   );
 
@@ -454,7 +459,7 @@ function runStreamingBackend(
   };
 
   const proc = cockpit.spawn(
-    [BACKEND_PATH, command, ...args],
+    [backendPath(), command, ...args],
     { superuser: callbacks.superuser || "require", err: "out" }
   );
 

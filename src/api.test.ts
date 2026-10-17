@@ -1137,6 +1137,32 @@ describe("UTF-8 signoff credentials", () => {
 });
 
 
+describe("backend installation path", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("uses the absolute backend path from the installed manifest", async () => {
+    cockpit.manifests = { pacman: { config: { backend: "/home/dev/.local/libexec/cockpit-pacman/backend" } } };
+    mockSpawn.mockReturnValue(createMockSpawnPromise(JSON.stringify(mockUpdatesResponse)));
+    try {
+      await checkUpdates();
+      expect(mockSpawn.mock.lastCall?.[0][0]).toBe("/home/dev/.local/libexec/cockpit-pacman/backend");
+    } finally {
+      delete cockpit.manifests;
+    }
+  });
+
+  it("ignores a relative backend path", async () => {
+    cockpit.manifests = { pacman: { config: { backend: "backend" } } };
+    mockSpawn.mockReturnValue(createMockSpawnPromise(JSON.stringify(mockUpdatesResponse)));
+    try {
+      await checkUpdates();
+      expect(mockSpawn.mock.lastCall?.[0][0]).toBe("/usr/libexec/cockpit-pacman/cockpit-pacman-backend");
+    } finally {
+      delete cockpit.manifests;
+    }
+  });
+});
+
 describe("signoff batch API", () => {
   beforeEach(() => vi.clearAllMocks());
 
