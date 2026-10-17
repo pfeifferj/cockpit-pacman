@@ -1,0 +1,18 @@
+[package]
+name = "arch-http-client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+curl = "0.4.51"
+curl-sys = "0.4"
+url = "2"
+thiserror = "2"
+
+[build-dependencies]
+pkg-config = "0.3"
+
+[dev-dependencies]
+flate2 = "1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rcgen = "0.14"

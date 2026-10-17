@@ -68,7 +68,7 @@ jobs:
       - name: Install dependencies
         run: |
           pacman -Syu --noconfirm
-          pacman -S --noconfirm git base-devel rust pacman openssl
+          pacman -S --noconfirm git base-devel rust pacman openssl curl pkgconf jq
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -102,6 +102,12 @@ jobs:
         working-directory: backend
         run: cargo test --locked --features e2e-fixtures endpoints
 
+      - name: Check transport linkage
+        working-directory: backend
+        run: |
+          proxy_test=$(cargo test --locked -p arch-http-client --test proxy --no-run --message-format=json | jq -er 'select(.reason == "compiler-artifact" and .target.name == "proxy") | .executable')
+          readelf -d "$proxy_test" | grep -E 'NEEDED.*\[libcurl\.so'
+
       - name: Check generated TS bindings are up to date
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -110,7 +116,9 @@ jobs:
 
       - name: Build
         working-directory: backend
-        run: cargo build --release --locked
+        run: |
+          cargo build --release --locked
+          ldd target/release/cockpit-pacman-backend | grep -E 'libcurl\.so.*=> /usr/lib/'
 
   browser:
     name: Browser integration

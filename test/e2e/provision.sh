@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+pkg-config --exists libcurl
+bash test/e2e/transport-tests.sh
 cargo build --locked --manifest-path backend/Cargo.toml --features e2e-fixtures
 install -d /usr/share/cockpit/pacman /usr/libexec/cockpit-pacman /usr/local/libexec/cockpit-pacman-e2e
 install -m 0644 dist/* /usr/share/cockpit/pacman/
