@@ -8,11 +8,9 @@ use std::cmp::Ordering;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("fetching mirror status failed")]
-    Http(#[from] ureq::Error),
+    Http(#[from] arch_http_client::Error),
     #[error("parsing mirror status failed")]
     Parse(#[from] serde_json::Error),
-    #[error("reading mirror status failed")]
-    Io(#[from] std::io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -76,23 +74,13 @@ impl SortBy {
     }
 }
 
-const MAX_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
-
-/// Fetch and parse the mirror status report. The caller supplies the agent so it
-/// controls timeouts and IP family.
-pub fn fetch_from(agent: &ureq::Agent, url: &str) -> Result<Status> {
-    use std::io::Read;
-
-    let mut body = agent.get(url).call()?.into_body();
-    let mut buf = Vec::new();
-    body.as_reader()
-        .take(MAX_RESPONSE_BYTES)
-        .read_to_end(&mut buf)?;
-    Ok(serde_json::from_slice(&buf)?)
+/// Fetch and parse mirror status using the caller's limits and deadlines.
+pub fn fetch_from(client: &arch_http_client::Client, url: &str) -> Result<Status> {
+    Ok(serde_json::from_slice(&client.get(url)?.body)?)
 }
 
-pub fn fetch(agent: &ureq::Agent) -> Result<Status> {
-    fetch_from(agent, STATUS_URL)
+pub fn fetch(client: &arch_http_client::Client) -> Result<Status> {
+    fetch_from(client, STATUS_URL)
 }
 
 /// Keep active mirrors at or above `min_completion` (0.0-1.0) matching

@@ -61,7 +61,6 @@ pub fn signoff_list(creds_b64: &str) -> Result<()> {
         &username,
         &password,
         &crate::endpoints::endpoint(DEFAULT_BASE_URL, "COCKPIT_PACMAN_TEST_ARCHWEB_URL")?,
-        crate::util::detected_ip_family(),
     )?;
     let groups = session.get_signoffs()?;
     session.logout();
@@ -140,7 +139,6 @@ fn run_signoff_action(
         &username,
         &password,
         &crate::endpoints::endpoint(DEFAULT_BASE_URL, "COCKPIT_PACMAN_TEST_ARCHWEB_URL")?,
-        crate::util::detected_ip_family(),
     )?;
     let spec = SignoffSpec {
         repo: args[1].clone(),
@@ -229,7 +227,6 @@ pub fn signoff_batch(creds_b64: &str, targets: &[SignoffTarget]) -> Result<()> {
         &username,
         &password,
         &crate::endpoints::endpoint(DEFAULT_BASE_URL, "COCKPIT_PACMAN_TEST_ARCHWEB_URL")?,
-        crate::util::detected_ip_family(),
     )?;
     let response = collect_signoffs(targets, |spec| session.signoff_package(spec));
     session.logout();

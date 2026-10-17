@@ -152,7 +152,7 @@ pub fn check_security(force: bool) -> Result<()> {
         });
     }
 
-    let client = SecurityClient::new(crate::util::detected_ip_family());
+    let client = SecurityClient::new();
     let feed = load_feed(&client, force, security_cache_path().ok().as_deref())?;
     let avgs = feed.avgs;
 
@@ -200,7 +200,7 @@ pub fn security_info(name: &str) -> Result<()> {
         });
     }
 
-    let client = SecurityClient::new(crate::util::detected_ip_family());
+    let client = SecurityClient::new();
     let info = client.fetch_package(name)?;
 
     let advisories: Vec<_> = info
@@ -416,10 +416,6 @@ mod feed_tests {
         std::env::temp_dir().join(format!("cpac-feed-{tag}-{}", std::process::id()))
     }
 
-    fn ipv4() -> ureq::config::IpFamily {
-        ureq::config::IpFamily::Ipv4Only
-    }
-
     async fn serving(body: &str) -> MockServer {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -443,7 +439,7 @@ mod feed_tests {
         .expect("writes");
 
         let server = MockServer::start().await;
-        let client = SecurityClient::with_base_url(&server.uri(), ipv4());
+        let client = SecurityClient::with_base_url(&server.uri());
 
         let feed = load_feed(&client, false, Some(&path)).expect("served from cache");
         assert_eq!(feed.avgs.len(), 1);
@@ -472,7 +468,7 @@ mod feed_tests {
         .expect("writes");
 
         let server = serving(ONE_AVG).await;
-        let client = SecurityClient::with_base_url(&server.uri(), ipv4());
+        let client = SecurityClient::with_base_url(&server.uri());
 
         let feed = load_feed(&client, true, Some(&path)).expect("refetches");
         assert_eq!(
@@ -500,7 +496,7 @@ mod feed_tests {
         )
         .expect("writes");
 
-        let client = SecurityClient::with_base_url("http://127.0.0.1:1", ipv4());
+        let client = SecurityClient::with_base_url("http://127.0.0.1:1");
         let feed = load_feed(&client, false, Some(&path)).expect("falls back");
 
         assert_eq!(feed.avgs.len(), 1);
@@ -522,7 +518,7 @@ mod feed_tests {
         .expect("writes");
 
         let server = serving(ONE_AVG).await;
-        let client = SecurityClient::with_base_url(&server.uri(), ipv4());
+        let client = SecurityClient::with_base_url(&server.uri());
 
         let feed = load_feed(&client, false, Some(&path)).expect("refetches");
         assert_eq!(feed.avgs.len(), 1);
@@ -547,7 +543,7 @@ mod feed_tests {
         .expect("writes");
 
         let server = serving("<html>maintenance</html>").await;
-        let client = SecurityClient::with_base_url(&server.uri(), ipv4());
+        let client = SecurityClient::with_base_url(&server.uri());
 
         let feed = load_feed(&client, false, Some(&path)).expect("falls back");
         assert_eq!(feed.avgs.len(), 1);
@@ -558,7 +554,7 @@ mod feed_tests {
 
     #[tokio::test]
     async fn a_failed_fetch_with_no_cache_is_an_error() {
-        let client = SecurityClient::with_base_url("http://127.0.0.1:1", ipv4());
+        let client = SecurityClient::with_base_url("http://127.0.0.1:1");
         let missing = cache_file("absent");
         std::fs::remove_file(&missing).ok();
 

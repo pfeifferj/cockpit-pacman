@@ -96,6 +96,24 @@ fn request_child() {
         return;
     };
     let expected = std::env::var("PROBE_EXPECT").unwrap();
+    if matches!(expected.as_str(), "upload-timeout" | "body-timeout") {
+        let session = Session::new(Options {
+            timeout: Duration::from_secs(4),
+            upload_timeout: Some(Duration::from_millis(100)),
+            body_timeout: Some(Duration::from_millis(100)),
+            ..Options::default()
+        })
+        .unwrap();
+        let start = Instant::now();
+        let result = if expected == "upload-timeout" {
+            session.post_form(&url, &[("data", &"x".repeat(16 * 1024 * 1024))])
+        } else {
+            session.get(&url)
+        };
+        assert_eq!(result.err(), Some(Error::Timeout));
+        assert!(start.elapsed() < Duration::from_secs(3));
+        return;
+    }
     let options = Options {
         timeout: Duration::from_millis(800),
         connect_timeout: Duration::from_millis(500),
@@ -550,6 +568,26 @@ fn trusted_https_and_connect_use_system_ca() {
             ),
             _ => unreachable!(),
         }
+        thread.join().unwrap();
+    }
+}
+
+#[test]
+fn phase_deadlines_expire_before_the_total_deadline() {
+    for expected in ["upload-timeout", "body-timeout"] {
+        let listener = listener();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let thread = thread::spawn(move || {
+            let mut stream = accept(&listener);
+            if expected == "body-timeout" {
+                request(&mut stream);
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n")
+                    .unwrap();
+            }
+            thread::sleep(Duration::from_secs(3));
+        });
+        child(&url, expected, &[]);
         thread.join().unwrap();
     }
 }

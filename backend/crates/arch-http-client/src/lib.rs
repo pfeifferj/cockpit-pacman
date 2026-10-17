@@ -2,7 +2,7 @@ pub use url::Url;
 
 use curl::easy::Easy;
 use std::cell::{Cell, RefCell};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
@@ -57,6 +57,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct Options {
     pub timeout: Duration,
     pub connect_timeout: Duration,
+    pub upload_timeout: Option<Duration>,
+    pub body_timeout: Option<Duration>,
     pub max_body: usize,
     pub max_headers: usize,
     pub max_redirects: u32,
@@ -67,6 +69,8 @@ impl Default for Options {
         Self {
             timeout: Duration::from_secs(30),
             connect_timeout: Duration::from_secs(10),
+            upload_timeout: None,
+            body_timeout: None,
             max_body: 8 * 1024 * 1024,
             max_headers: 128 * 1024,
             max_redirects: 5,
@@ -265,6 +269,7 @@ fn request(
     handle.proxy_ssl_verify_host(true)?;
     handle.accept_encoding("")?;
     handle.fail_on_error(true)?;
+    handle.progress(options.upload_timeout.is_some() || options.body_timeout.is_some())?;
     handle.follow_location(!matches!(method, Method::Post(_)) && options.max_redirects > 0)?;
     handle.max_redirections(options.max_redirects)?;
     match method {
@@ -283,9 +288,29 @@ fn request(
     let header_bytes = Cell::new(0usize);
     let body_bytes = Cell::new(0usize);
     let limit = Cell::new(None);
+    let upload_started = Cell::new(None::<Instant>);
+    let body_started = Cell::new(None::<Instant>);
+    let header_status = Cell::new(0u16);
+    let timed_out = Cell::new(false);
     let body = RefCell::new(&mut response.body);
     let result = {
         let mut transfer = handle.transfer();
+        transfer.progress_function(|_, _, upload_total, uploaded| {
+            if upload_total > 0.0 && uploaded < upload_total && upload_started.get().is_none() {
+                upload_started.set(Some(Instant::now()));
+            }
+            let upload_expired = uploaded < upload_total
+                && options
+                    .upload_timeout
+                    .zip(upload_started.get())
+                    .is_some_and(|(limit, start)| start.elapsed() >= limit);
+            let body_expired = options
+                .body_timeout
+                .zip(body_started.get())
+                .is_some_and(|(limit, start)| start.elapsed() >= limit);
+            timed_out.set(upload_expired || body_expired);
+            !timed_out.get()
+        })?;
         transfer.header_function(|line| {
             header_bytes.set(header_bytes.get().saturating_add(line.len()));
             if header_bytes.get() > options.max_headers {
@@ -295,6 +320,16 @@ fn request(
             if line.starts_with(b"HTTP/") {
                 response.headers.clear();
                 body.borrow_mut().clear();
+                body_started.set(None);
+                header_status.set(
+                    std::str::from_utf8(line)
+                        .ok()
+                        .and_then(|line| line.split_whitespace().nth(1))
+                        .and_then(|status| status.parse().ok())
+                        .unwrap_or(0),
+                );
+            } else if line == b"\r\n" && header_status.get() >= 200 {
+                body_started.set(Some(Instant::now()));
             } else if let Some((name, value)) = String::from_utf8_lossy(line).split_once(':') {
                 response
                     .headers
@@ -313,6 +348,9 @@ fn request(
         })?;
         transfer.perform()
     };
+    if timed_out.get() {
+        return Err(Error::Timeout);
+    }
     if let Some(body) = limit.get() {
         return Err(if body {
             Error::BodyLimit

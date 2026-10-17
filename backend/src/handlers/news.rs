@@ -123,16 +123,12 @@ fn read_news_cache(path: &Path) -> Option<NewsCache> {
 }
 
 fn fetch_news_items_from(url: &str, days: u32) -> Result<Vec<NewsItem>> {
-    let agent = ureq::Agent::new_with_config(
-        ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(15)))
-            .ip_family(crate::util::detected_ip_family())
-            .build(),
-    );
-
-    let mut body = agent.get(url).call()?.into_body();
-    let mut buf = Vec::new();
-    body.as_reader().take(MAX_RSS_BYTES).read_to_end(&mut buf)?;
+    let client = arch_http_client::Client::new(arch_http_client::Options {
+        timeout: Duration::from_secs(15),
+        max_body: MAX_RSS_BYTES as usize,
+        ..arch_http_client::Options::default()
+    });
+    let buf = client.get(url)?.body;
 
     let channel = rss::Channel::read_from(&buf[..])?;
     let cutoff = Utc::now() - chrono::Duration::days(i64::from(days));

@@ -1541,23 +1541,23 @@ fn test_classify_message_buckets() {
 }
 
 #[test]
-fn test_classify_error_downcasts_ureq() {
+fn test_classify_error_downcasts_http() {
     use crate::util::classify_error;
 
     let host: anyhow::Error =
-        anyhow::Error::new(ureq::Error::HostNotFound).context("fetching news feed");
+        anyhow::Error::new(arch_http_client::Error::Dns).context("fetching news feed");
     assert_eq!(classify_error(&host), Some("network_error"));
 
-    let conn: anyhow::Error = anyhow::Error::new(ureq::Error::ConnectionFailed);
+    let conn: anyhow::Error = anyhow::Error::new(arch_http_client::Error::Connect);
     assert_eq!(classify_error(&conn), Some("network_error"));
 
-    let io_err = ureq::Error::Io(std::io::Error::from(std::io::ErrorKind::ConnectionRefused));
+    let io_err = arch_http_client::Error::Tls;
     assert_eq!(
         classify_error(&anyhow::Error::new(io_err)),
         Some("network_error")
     );
 
-    let not_found = anyhow::Error::new(ureq::Error::StatusCode(404));
+    let not_found = anyhow::Error::new(arch_http_client::Error::Status(404));
     assert_eq!(classify_error(&not_found), Some("not_found"));
 }
 

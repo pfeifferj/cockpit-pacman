@@ -105,17 +105,12 @@ fn parse_server_line(line: &str) -> Option<String> {
     }
 }
 
-fn status_agent() -> ureq::Agent {
-    ureq::Agent::new_with_config(
-        ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(30)))
-            .ip_family(crate::util::detected_ip_family())
-            .build(),
-    )
+fn status_client() -> arch_http_client::Client {
+    arch_http_client::Client::default()
 }
 
 pub fn fetch_mirror_status() -> Result<()> {
-    let status = arch_mirror_client::fetch(&status_agent())?;
+    let status = arch_mirror_client::fetch(&status_client())?;
 
     let mirrors: Vec<MirrorStatus> = status
         .mirrors
@@ -147,7 +142,7 @@ pub fn refresh_mirrors(
     protocol: &str,
     sort_by: &str,
 ) -> Result<()> {
-    let status = arch_mirror_client::fetch(&status_agent())?;
+    let status = arch_mirror_client::fetch(&status_client())?;
 
     let candidates = arch_mirror_client::rank(
         status.mirrors,
@@ -185,12 +180,10 @@ pub fn test_mirrors(urls: &[String], timeout_secs: u64) -> Result<()> {
     let timeout = TimeoutGuard::new(timeout_secs);
 
     let total = urls.len();
-    let agent = ureq::Agent::new_with_config(
-        ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(10)))
-            .ip_family(crate::util::detected_ip_family())
-            .build(),
-    );
+    let client = arch_http_client::Client::new(arch_http_client::Options {
+        timeout: Duration::from_secs(10),
+        ..arch_http_client::Options::default()
+    });
 
     // Probe mirrors concurrently with a bounded pool: the requests are
     // independent and I/O-bound, so a sequential loop costs ~N x per-request
@@ -213,7 +206,7 @@ pub fn test_mirrors(urls: &[String], timeout_secs: u64) -> Result<()> {
                         break;
                     }
                     let url = &urls[i];
-                    let result = test_single_mirror(&agent, url);
+                    let result = test_single_mirror(&client, url);
                     let current = completed.fetch_add(1, Ordering::Relaxed) + 1;
                     emit_event(&StreamEvent::MirrorTest {
                         url: url.clone(),
@@ -256,7 +249,7 @@ pub fn test_mirrors(urls: &[String], timeout_secs: u64) -> Result<()> {
     Ok(())
 }
 
-fn test_single_mirror(agent: &ureq::Agent, mirror_url: &str) -> MirrorTestResult {
+fn test_single_mirror(client: &arch_http_client::Client, mirror_url: &str) -> MirrorTestResult {
     let base_url = mirror_url
         .replace("$repo", "core")
         .replace("$arch", "x86_64");
@@ -265,15 +258,13 @@ fn test_single_mirror(agent: &ureq::Agent, mirror_url: &str) -> MirrorTestResult
 
     let start = Instant::now();
 
-    match agent.head(&test_url).call() {
+    match client.head(&test_url) {
         Ok(response) => {
             let latency = start.elapsed().as_millis() as u64;
 
             // Validate Content-Length to ensure mirror serves valid content
             let content_length = response
-                .headers()
-                .get("content-length")
-                .and_then(|h| h.to_str().ok())
+                .header("content-length")
                 .and_then(|s| s.parse::<u64>().ok());
 
             match content_length {

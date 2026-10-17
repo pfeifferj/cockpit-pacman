@@ -1,11 +1,11 @@
 pub mod models;
 
 use anyhow::{Context, Result};
+use arch_http_client::{Options, Session};
 use models::{SignoffGroup, SignoffSpec};
+use std::time::Duration;
 
 pub const DEFAULT_BASE_URL: &str = "https://archlinux.org";
-
-const MAX_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
 
 #[derive(serde::Deserialize)]
 struct SignoffResponse {
@@ -13,144 +13,78 @@ struct SignoffResponse {
 }
 
 pub struct SignoffSession {
-    agent: ureq::Agent,
+    client: Session,
     base_url: String,
-    csrf_token: String,
-    authenticated: std::cell::Cell<bool>,
+    logout_attempted: std::cell::Cell<bool>,
 }
 
 impl SignoffSession {
-    pub fn login(
-        username: &str,
-        password: &str,
-        base_url: &str,
-        ip_family: ureq::config::IpFamily,
-    ) -> Result<Self> {
-        let config = ureq::Agent::config_builder()
-            .timeout_global(Some(std::time::Duration::from_secs(20)))
-            .timeout_connect(Some(std::time::Duration::from_secs(10)))
-            .timeout_send_body(Some(std::time::Duration::from_secs(10)))
-            .timeout_recv_body(Some(std::time::Duration::from_secs(15)))
-            .max_redirects(3)
-            .ip_family(ip_family)
-            .build();
-        let agent = ureq::Agent::new_with_config(config);
-        let mut session = Self {
-            agent,
+    pub fn login(username: &str, password: &str, base_url: &str) -> Result<Self> {
+        let session = Self {
+            client: Session::new(Options {
+                timeout: Duration::from_secs(20),
+                connect_timeout: Duration::from_secs(10),
+                upload_timeout: Some(Duration::from_secs(10)),
+                body_timeout: Some(Duration::from_secs(15)),
+                max_body: 8 * 1024 * 1024,
+                max_redirects: 3,
+                ..Options::default()
+            })?,
             base_url: base_url.trim_end_matches('/').to_string(),
-            csrf_token: String::new(),
-            authenticated: std::cell::Cell::new(false),
+            logout_attempted: std::cell::Cell::new(false),
         };
         session.authenticate(username, password)?;
-        session.authenticated.set(true);
         Ok(session)
     }
 
-    fn extract_csrf_token(&self) -> Option<String> {
-        let jar = self.agent.cookie_jar_lock();
-        for cookie in jar.iter() {
-            if cookie.name() == "csrftoken" {
-                return Some(cookie.value().to_string());
-            }
-        }
-        None
+    fn csrf_token(&self, url: &str) -> Result<String> {
+        self.client
+            .cookie(url, "csrftoken")?
+            .context("no CSRF cookie for request")
     }
 
-    fn authenticate(&mut self, username: &str, password: &str) -> Result<()> {
-        let login_url = format!("{}/login/", self.base_url);
-
-        // GET /login/ to get CSRF cookie
-        let resp = self
-            .agent
-            .get(&login_url)
-            .call()
+    fn authenticate(&self, username: &str, password: &str) -> Result<()> {
+        let url = format!("{}/login/", self.base_url);
+        self.client
+            .get(&url)
             .context("failed to fetch login page")?;
-        {
-            use std::io::Read;
-            let mut buf = Vec::new();
-            let _ = resp
-                .into_body()
-                .as_reader()
-                .take(MAX_RESPONSE_BYTES)
-                .read_to_end(&mut buf);
-        }
-
-        let csrf_token = self
-            .extract_csrf_token()
-            .context("no CSRF token found in cookies after GET /login/")?;
-
-        // POST /login/ with credentials
-        let form = [
-            ("username", username),
-            ("password", password),
-            ("csrfmiddlewaretoken", &csrf_token),
-        ];
-
-        let _ = self
-            .agent
-            .post(&login_url)
-            .header("Referer", &login_url)
-            .config()
-            .max_redirects(0)
-            .http_status_as_error(false)
-            .build()
-            .send_form(form)
+        self.client
+            .post_form(
+                &url,
+                &[
+                    ("username", username),
+                    ("password", password),
+                    ("csrfmiddlewaretoken", &self.csrf_token(&url)?),
+                ],
+            )
             .context("login request failed")?;
-
-        // Verify we got a session cookie
-        let has_session = {
-            let jar = self.agent.cookie_jar_lock();
-            jar.iter().any(|c| c.name() == "sessionid")
-        };
-
-        if !has_session {
+        if self
+            .client
+            .cookie(
+                &format!("{}/packages/signoffs/json/", self.base_url),
+                "sessionid",
+            )?
+            .is_none()
+        {
             anyhow::bail!("authentication failed: invalid credentials");
         }
-
-        // Re-read CSRF token (Django may rotate it after login)
-        self.csrf_token = self.extract_csrf_token().unwrap_or(csrf_token);
-
         Ok(())
     }
 
     pub fn get_signoffs(&self) -> Result<Vec<SignoffGroup>> {
-        use std::io::Read;
-
-        let url = format!("{}/packages/signoffs/json/", self.base_url);
-        let mut resp = self
-            .agent
-            .get(&url)
-            .call()
+        let response = self
+            .client
+            .get(&format!("{}/packages/signoffs/json/", self.base_url))
             .context("failed to fetch signoffs")?;
-        let mut buf = Vec::new();
-        resp.body_mut()
-            .as_reader()
-            .take(MAX_RESPONSE_BYTES)
-            .read_to_end(&mut buf)
-            .context("failed to read signoffs response body")?;
-        let body = String::from_utf8(buf).context("signoffs response is not valid UTF-8")?;
-
         let response: SignoffResponse =
-            serde_json::from_str(&body).context("failed to parse signoffs JSON")?;
-
+            serde_json::from_slice(&response.body).context("failed to parse signoffs JSON")?;
         Ok(response.signoff_groups)
     }
 
-    fn post_no_redirect(&self, url: &str, form: &[(&str, &str)]) -> Result<()> {
-        let resp = self
-            .agent
-            .post(url)
-            .header("Referer", url)
-            .config()
-            .max_redirects(0)
-            .http_status_as_error(false)
-            .build()
-            .send_form(form.iter().copied())
-            .with_context(|| format!("POST {} failed", url))?;
-        let status = resp.status();
-        if status.is_client_error() || status.is_server_error() {
-            anyhow::bail!("POST {} returned {}", url, status.as_u16());
-        }
+    fn post_no_redirect(&self, url: &str) -> Result<()> {
+        self.client
+            .post_form(url, &[("csrfmiddlewaretoken", &self.csrf_token(url)?)])
+            .context("Archweb request failed")?;
         Ok(())
     }
 
@@ -159,7 +93,7 @@ impl SignoffSession {
             "{}/packages/{}/{}/{}/signoff/",
             self.base_url, spec.repo, spec.arch, spec.pkgbase
         );
-        self.post_no_redirect(&url, &[("csrfmiddlewaretoken", &self.csrf_token)])
+        self.post_no_redirect(&url)
             .with_context(|| format!("failed to sign off {}", spec.pkgbase))
     }
 
@@ -168,16 +102,24 @@ impl SignoffSession {
             "{}/packages/{}/{}/{}/signoff/revoke/",
             self.base_url, spec.repo, spec.arch, spec.pkgbase
         );
-        self.post_no_redirect(&url, &[("csrfmiddlewaretoken", &self.csrf_token)])
+        self.post_no_redirect(&url)
             .with_context(|| format!("failed to revoke signoff for {}", spec.pkgbase))
     }
 
     pub fn logout(&self) {
-        if !self.authenticated.replace(false) {
-            return;
+        if !self.logout_attempted.replace(true)
+            && self
+                .client
+                .cookie(
+                    &format!("{}/packages/signoffs/json/", self.base_url),
+                    "sessionid",
+                )
+                .ok()
+                .flatten()
+                .is_some()
+        {
+            let _ = self.post_no_redirect(&format!("{}/logout/", self.base_url));
         }
-        let url = format!("{}/logout/", self.base_url);
-        let _ = self.post_no_redirect(&url, &[("csrfmiddlewaretoken", &self.csrf_token)]);
     }
 }
 
@@ -233,85 +175,188 @@ mod tests {
 
 #[cfg(test)]
 mod session_tests {
-    use super::SignoffSession;
+    use super::{SignoffSession, SignoffSpec};
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpListener;
+    use std::thread::JoinHandle;
     use std::time::{Duration, Instant};
+
+    fn server(
+        responses: Vec<(u16, &'static str, &'static str)>,
+    ) -> (String, JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut requests = Vec::new();
+            for (status, headers, body) in responses {
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(Instant::now() < deadline, "missing HTTP request");
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(error) => panic!("accept: {error}"),
+                    }
+                };
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut reader = BufReader::new(&mut stream);
+                let mut request = String::new();
+                let mut length = 0;
+                loop {
+                    let mut header = String::new();
+                    assert_ne!(reader.read_line(&mut header).unwrap(), 0);
+                    if let Some(value) = header.to_ascii_lowercase().strip_prefix("content-length:")
+                    {
+                        length = value.trim().parse().unwrap();
+                    }
+                    request.push_str(&header);
+                    if header == "\r\n" {
+                        break;
+                    }
+                }
+                let mut bytes = vec![0; length];
+                reader.read_exact(&mut bytes).unwrap();
+                request.push_str(&String::from_utf8(bytes).unwrap());
+                requests.push(request);
+                write!(stream, "HTTP/1.1 {status} Test\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+            requests
+        });
+        (url, server)
+    }
+
+    const CSRF: &str = "Set-Cookie: csrftoken=first; Path=/\r\n";
+    const LOGIN: &str = "Set-Cookie: sessionid=session; Path=/\r\nSet-Cookie: csrftoken=second; Path=/\r\nLocation: /unexpected\r\n";
 
     #[test]
     fn logs_out_after_a_failed_read_and_does_not_logout_twice() {
         for explicit_logout in [false, true] {
-            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-            listener.set_nonblocking(true).unwrap();
-            let url = format!("http://{}", listener.local_addr().unwrap());
-            let server = std::thread::spawn(move || {
-                let deadline = Instant::now() + Duration::from_secs(5);
-                let mut requests = Vec::new();
-                for (status, cookie) in [
-                    ("200 OK", "csrftoken=test-token"),
-                    ("302 Found", "sessionid=test-session"),
-                    ("500 Internal Server Error", ""),
-                    ("200 OK", ""),
-                ] {
-                    let mut stream = loop {
-                        match listener.accept() {
-                            Ok((stream, _)) => break stream,
-                            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                                assert!(Instant::now() < deadline, "missing HTTP request");
-                                std::thread::sleep(Duration::from_millis(5));
-                            }
-                            Err(error) => panic!("accept: {error}"),
-                        }
-                    };
-                    stream
-                        .set_read_timeout(Some(Duration::from_secs(5)))
-                        .unwrap();
-                    let mut reader = BufReader::new(&mut stream);
-                    let mut first_line = String::new();
-                    assert_ne!(reader.read_line(&mut first_line).unwrap(), 0);
-                    requests.push(first_line.trim().to_string());
-                    let mut length = 0;
-                    loop {
-                        let mut header = String::new();
-                        assert_ne!(reader.read_line(&mut header).unwrap(), 0);
-                        if header == "\r\n" {
-                            break;
-                        }
-                        if let Some(value) =
-                            header.to_ascii_lowercase().strip_prefix("content-length:")
-                        {
-                            length = value.trim().parse().unwrap();
-                        }
-                    }
-                    reader.read_exact(&mut vec![0; length]).unwrap();
-                    let header = if cookie.is_empty() {
-                        String::new()
-                    } else {
-                        format!("Set-Cookie: {cookie}; Path=/\r\n")
-                    };
-                    write!(stream, "HTTP/1.1 {status}\r\n{header}Content-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
-                }
-                requests
-            });
+            let (url, server) = server(vec![
+                (200, CSRF, ""),
+                (302, LOGIN, ""),
+                (500, "", ""),
+                (200, "", ""),
+            ]);
             {
-                let session =
-                    SignoffSession::login("tester", "password", &url, ureq::config::IpFamily::Any)
-                        .unwrap();
+                let session = SignoffSession::login("tester", "password", &url).unwrap();
                 assert!(session.get_signoffs().is_err());
                 if explicit_logout {
                     session.logout();
                     session.logout();
                 }
             }
+            let requests = server.join().unwrap();
+            let paths: Vec<_> = requests.iter().map(|r| r.lines().next().unwrap()).collect();
             assert_eq!(
-                server.join().unwrap(),
+                paths,
                 [
                     "GET /login/ HTTP/1.1",
                     "POST /login/ HTTP/1.1",
                     "GET /packages/signoffs/json/ HTTP/1.1",
-                    "POST /logout/ HTTP/1.1",
+                    "POST /logout/ HTTP/1.1"
                 ]
             );
         }
+    }
+
+    #[test]
+    fn rotated_tokens_are_used_for_signoff_and_logout() {
+        let (url, server) = server(vec![
+            (200, CSRF, ""),
+            (302, LOGIN, ""),
+            (
+                200,
+                "Set-Cookie: csrftoken=third; Path=/\r\n",
+                "{\"signoff_groups\":[]}",
+            ),
+            (403, "", ""),
+            (200, "", ""),
+        ]);
+        {
+            let session = SignoffSession::login("tester", "päss☃&", &url).unwrap();
+            assert!(session.get_signoffs().unwrap().is_empty());
+            let error = session
+                .signoff_package(&SignoffSpec {
+                    repo: "core".into(),
+                    arch: "x86_64".into(),
+                    pkgbase: "linux".into(),
+                })
+                .unwrap_err();
+            assert!(
+                error
+                    .chain()
+                    .any(|e| e.downcast_ref::<arch_http_client::Error>()
+                        == Some(&arch_http_client::Error::Status(403)))
+            );
+        }
+        let requests = server.join().unwrap();
+        assert!(requests[1].contains("password=p%C3%A4ss%E2%98%83%26"));
+        assert!(requests[1].contains("csrfmiddlewaretoken=first"));
+        assert!(requests[2].contains("csrftoken=second"));
+        assert!(requests[3].starts_with("POST /packages/core/x86_64/linux/signoff/ HTTP/1.1"));
+        assert!(requests[3].contains("csrfmiddlewaretoken=third"));
+        assert!(requests[4].contains("csrfmiddlewaretoken=third"));
+    }
+
+    #[test]
+    fn failed_login_does_not_create_an_authenticated_session() {
+        let (url, server) = server(vec![(200, CSRF, ""), (200, "", "")]);
+        assert!(SignoffSession::login("tester", "wrong", &url).is_err());
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].starts_with("POST /login/ HTTP/1.1"));
+    }
+    #[test]
+    fn a_partial_login_response_still_logs_out() {
+        let (url, server) = server(vec![
+            (200, CSRF, ""),
+            (
+                200,
+                "Set-Cookie: sessionid=partial; Path=/\r\nTransfer-Encoding: chunked\r\n",
+                "2\r\nx",
+            ),
+            (200, "", ""),
+        ]);
+        assert!(SignoffSession::login("tester", "password", &url).is_err());
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[2].starts_with("POST /logout/ HTTP/1.1"));
+        assert!(requests[2].contains("sessionid=partial"));
+    }
+
+    #[test]
+    fn simultaneous_accounts_keep_distinct_cookies() {
+        let (url, server) = server(vec![
+            (200, CSRF, ""),
+            (302, LOGIN, ""),
+            (200, CSRF, ""),
+            (302, "Set-Cookie: sessionid=other; Path=/\r\n", ""),
+            (200, "", "{\"signoff_groups\":[]}"),
+            (200, "", "{\"signoff_groups\":[]}"),
+            (500, "", ""),
+            (200, "", ""),
+        ]);
+        let first = SignoffSession::login("first", "one", &url).unwrap();
+        let second = SignoffSession::login("second", "two", &url).unwrap();
+        first.get_signoffs().unwrap();
+        second.get_signoffs().unwrap();
+        first.logout();
+        first.logout();
+        drop(first);
+        drop(second);
+        let requests = server.join().unwrap();
+        assert!(requests[1].contains("username=first"));
+        assert!(requests[3].contains("username=second"));
+        assert!(requests[4].contains("sessionid=session"));
+        assert!(!requests[4].contains("sessionid=other"));
+        assert!(requests[5].contains("sessionid=other"));
+        assert!(!requests[5].contains("sessionid=session"));
+        assert!(requests[6].starts_with("POST /logout/ HTTP/1.1"));
+        assert!(requests[7].contains("sessionid=other"));
     }
 }

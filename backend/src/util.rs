@@ -4,36 +4,13 @@ use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{self, BufRead, Write};
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
-use std::sync::{Arc, Condvar, LazyLock, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant, UNIX_EPOCH};
-use ureq::config::IpFamily;
 
 use crate::models::StreamEvent;
-
-static DETECTED_IP_FAMILY: LazyLock<IpFamily> = LazyLock::new(|| {
-    // Resolve archlinux.org and probe its AAAA record with a short TCP connect.
-    let ipv6_addr = ("archlinux.org", 443)
-        .to_socket_addrs()
-        .ok()
-        .and_then(|addrs| addrs.into_iter().find(SocketAddr::is_ipv6));
-
-    let Some(addr) = ipv6_addr else {
-        return IpFamily::Any;
-    };
-
-    match TcpStream::connect_timeout(&addr, Duration::from_millis(500)) {
-        Ok(_) => IpFamily::Any,
-        Err(_) => IpFamily::Ipv4Only,
-    }
-});
-
-pub fn detected_ip_family() -> IpFamily {
-    *DETECTED_IP_FAMILY
-}
 
 static CANCELLED: AtomicBool = AtomicBool::new(false);
 
@@ -589,9 +566,7 @@ pub fn emit_failure(message: &str, fallback: &'static str) {
     });
 }
 
-/// Classify an anyhow error chain into a frontend ErrorCode. Inspects ureq and
-/// io errors in the chain first (authoritative), then falls back to keyword
-/// matching on the rendered message.
+/// Classify typed causes before falling back to the rendered error message.
 pub fn classify_error(err: &anyhow::Error) -> Option<&'static str> {
     for cause in err.chain() {
         if matches!(
@@ -600,8 +575,8 @@ pub fn classify_error(err: &anyhow::Error) -> Option<&'static str> {
         ) {
             return Some("cancelled");
         }
-        if let Some(ureq_err) = cause.downcast_ref::<ureq::Error>() {
-            return Some(classify_ureq(ureq_err));
+        if let Some(http_error) = cause.downcast_ref::<arch_http_client::Error>() {
+            return Some(classify_http(http_error));
         }
         if let Some(io_err) = cause.downcast_ref::<io::Error>()
             && let Some(code) = classify_io(io_err.kind())
@@ -612,18 +587,10 @@ pub fn classify_error(err: &anyhow::Error) -> Option<&'static str> {
     classify_message(&format!("{:#}", err))
 }
 
-fn classify_ureq(err: &ureq::Error) -> &'static str {
-    use ureq::Error;
-    match err {
-        Error::Timeout(_) => "timeout",
-        Error::HostNotFound | Error::ConnectionFailed => "network_error",
-        Error::Io(io_err) => match io_err.kind() {
-            io::ErrorKind::TimedOut => "timeout",
-            io::ErrorKind::PermissionDenied => "permission_denied",
-            _ => "network_error",
-        },
-        Error::StatusCode(404) => "not_found",
-        Error::Tls(_) => "network_error",
+fn classify_http(error: &arch_http_client::Error) -> &'static str {
+    match error {
+        arch_http_client::Error::Timeout => "timeout",
+        arch_http_client::Error::Status(404) => "not_found",
         _ => "network_error",
     }
 }

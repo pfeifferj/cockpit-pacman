@@ -1,16 +1,14 @@
 pub mod models;
 
-use std::io::Read;
+use anyhow::{Context, Result};
+use arch_http_client::{Client, Options};
+use models::{Avg, PackageInfo};
 use std::time::Duration;
 
-use anyhow::{Context, Result};
-use models::{Avg, PackageInfo};
-
 pub const DEFAULT_BASE_URL: &str = "https://security.archlinux.org";
-const MAX_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
 
 pub struct SecurityClient {
-    agent: ureq::Agent,
+    client: Client,
     base_url: String,
 }
 
@@ -18,19 +16,25 @@ pub fn parse_vulnerable(body: &str) -> Result<Vec<Avg>> {
     serde_json::from_str(body).context("failed to parse vulnerable issues JSON")
 }
 
+impl Default for SecurityClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SecurityClient {
-    pub fn new(ip_family: ureq::config::IpFamily) -> Self {
-        Self::with_base_url(DEFAULT_BASE_URL, ip_family)
+    pub fn new() -> Self {
+        Self::with_base_url(DEFAULT_BASE_URL)
     }
 
-    pub fn with_base_url(url: &str, ip_family: ureq::config::IpFamily) -> Self {
-        let config = ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(15)))
-            .timeout_connect(Some(Duration::from_secs(5)))
-            .ip_family(ip_family)
-            .build();
+    pub fn with_base_url(url: &str) -> Self {
         Self {
-            agent: ureq::Agent::new_with_config(config),
+            client: Client::new(Options {
+                timeout: Duration::from_secs(15),
+                connect_timeout: Duration::from_secs(5),
+                max_body: 2 * 1024 * 1024,
+                ..Options::default()
+            }),
             base_url: url.trim_end_matches('/').to_string(),
         }
     }
@@ -40,32 +44,23 @@ impl SecurityClient {
     }
 
     pub fn fetch_vulnerable_raw(&self) -> Result<String> {
-        let url = format!("{}/issues/vulnerable.json", self.base_url);
-        self.get_json(&url)
+        self.get_json(&format!("{}/issues/vulnerable.json", self.base_url))
             .context("failed to fetch vulnerable issues")
     }
 
     pub fn fetch_package(&self, name: &str) -> Result<PackageInfo> {
-        let url = format!("{}/package/{}.json", self.base_url, name);
         let body = self
-            .get_json(&url)
+            .get_json(&format!("{}/package/{}.json", self.base_url, name))
             .with_context(|| format!("failed to fetch security info for {}", name))?;
         serde_json::from_str(&body)
             .with_context(|| format!("failed to parse security info for {}", name))
     }
 
     fn get_json(&self, url: &str) -> Result<String> {
-        let mut body = self
-            .agent
-            .get(url)
-            .call()
-            .with_context(|| format!("GET {} failed", url))?
-            .into_body();
-        let mut buf = Vec::new();
-        body.as_reader()
-            .take(MAX_RESPONSE_BYTES)
-            .read_to_end(&mut buf)?;
-        String::from_utf8(buf).context("response is not valid UTF-8")
+        self.client
+            .get(url)?
+            .text()
+            .context("response is not valid UTF-8")
     }
 }
 

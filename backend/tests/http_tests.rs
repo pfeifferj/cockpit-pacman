@@ -10,10 +10,6 @@ fn dead_url() -> String {
     format!("http://127.0.0.1:{port}")
 }
 
-fn ipv4() -> ureq::config::IpFamily {
-    ureq::config::IpFamily::Ipv4Only
-}
-
 #[tokio::test]
 async fn a_404_from_the_security_tracker_is_an_error_not_an_empty_answer() {
     let server = MockServer::start().await;
@@ -23,7 +19,7 @@ async fn a_404_from_the_security_tracker_is_an_error_not_an_empty_answer() {
         .mount(&server)
         .await;
 
-    let client = arch_security_client::SecurityClient::with_base_url(&server.uri(), ipv4());
+    let client = arch_security_client::SecurityClient::with_base_url(&server.uri());
     let err = client.fetch_vulnerable().expect_err("404 is a failure");
 
     assert_eq!(
@@ -35,7 +31,7 @@ async fn a_404_from_the_security_tracker_is_an_error_not_an_empty_answer() {
 
 #[tokio::test]
 async fn a_refused_connection_reads_as_a_network_error() {
-    let client = arch_security_client::SecurityClient::with_base_url(&dead_url(), ipv4());
+    let client = arch_security_client::SecurityClient::with_base_url(&dead_url());
     let err = client.fetch_vulnerable().expect_err("nothing is listening");
 
     assert_eq!(classify_error(&err), Some("network_error"), "{err:#}");
@@ -74,7 +70,7 @@ async fn a_body_past_the_cap_fails_instead_of_parsing_a_truncated_feed() {
         .mount(&server)
         .await;
 
-    let client = arch_security_client::SecurityClient::with_base_url(&server.uri(), ipv4());
+    let client = arch_security_client::SecurityClient::with_base_url(&server.uri());
     client
         .fetch_vulnerable()
         .expect_err("a capped read truncates the body mid-element");
@@ -86,7 +82,7 @@ async fn a_body_past_the_cap_fails_instead_of_parsing_a_truncated_feed() {
         .respond_with(ResponseTemplate::new(200).set_body_string(under))
         .mount(&server)
         .await;
-    let client = arch_security_client::SecurityClient::with_base_url(&server.uri(), ipv4());
+    let client = arch_security_client::SecurityClient::with_base_url(&server.uri());
     assert!(!client.fetch_vulnerable().expect("parses").is_empty());
 }
 
@@ -102,7 +98,7 @@ async fn a_well_formed_feed_parses() {
         .mount(&server)
         .await;
 
-    let client = arch_security_client::SecurityClient::with_base_url(&server.uri(), ipv4());
+    let client = arch_security_client::SecurityClient::with_base_url(&server.uri());
     let avgs = client.fetch_vulnerable().expect("parses");
 
     assert_eq!(avgs.len(), 1);
@@ -126,8 +122,7 @@ async fn a_mirror_report_past_the_cap_fails_instead_of_parsing_truncated() {
         .mount(&server)
         .await;
 
-    let agent =
-        ureq::Agent::new_with_config(ureq::Agent::config_builder().ip_family(ipv4()).build());
+    let agent = arch_http_client::Client::default();
     let url = format!("{}/mirrors/status/json/", server.uri());
     assert!(arch_mirror_client::fetch_from(&agent, &url).is_err());
 }
@@ -144,8 +139,7 @@ async fn the_mirror_status_report_parses() {
         .mount(&server)
         .await;
 
-    let agent =
-        ureq::Agent::new_with_config(ureq::Agent::config_builder().ip_family(ipv4()).build());
+    let agent = arch_http_client::Client::default();
     let url = format!("{}/mirrors/status/json/", server.uri());
     let status = arch_mirror_client::fetch_from(&agent, &url).expect("parses");
 
@@ -155,8 +149,7 @@ async fn the_mirror_status_report_parses() {
 
 #[tokio::test]
 async fn a_mirror_status_failure_is_reported_not_swallowed() {
-    let agent =
-        ureq::Agent::new_with_config(ureq::Agent::config_builder().ip_family(ipv4()).build());
+    let agent = arch_http_client::Client::default();
     let url = format!("{}/mirrors/status/json/", dead_url());
 
     assert!(arch_mirror_client::fetch_from(&agent, &url).is_err());

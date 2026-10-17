@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::io::Read;
 use std::time::Duration;
 
 use crate::alpm::get_handle;
@@ -86,25 +85,17 @@ fn fetch_listing(base: &str, name: &str) -> Result<Option<String>> {
     let url =
         archive_dir_url_at(base, name).ok_or_else(|| anyhow::anyhow!("Invalid package name"))?;
 
-    let agent = ureq::Agent::new_with_config(
-        ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(30)))
-            .ip_family(crate::util::detected_ip_family())
-            .build(),
-    );
-
-    let resp = match agent.get(&url).call() {
-        Ok(r) => r,
-        Err(ureq::Error::StatusCode(404)) => return Ok(None),
-        Err(e) => return Err(e.into()),
+    let client = arch_http_client::Client::new(arch_http_client::Options {
+        timeout: Duration::from_secs(30),
+        max_body: MAX_LISTING_BYTES as usize,
+        ..arch_http_client::Options::default()
+    });
+    let response = match client.get(&url) {
+        Ok(response) => response,
+        Err(arch_http_client::Error::Status(404)) => return Ok(None),
+        Err(error) => return Err(error.into()),
     };
-
-    let mut body = resp.into_body();
-    let mut buf = Vec::new();
-    body.as_reader()
-        .take(MAX_LISTING_BYTES)
-        .read_to_end(&mut buf)?;
-    Ok(Some(String::from_utf8_lossy(&buf).into_owned()))
+    Ok(Some(String::from_utf8_lossy(&response.body).into_owned()))
 }
 
 pub fn list_archive_versions(name: &str, query: Option<&str>) -> Result<()> {
