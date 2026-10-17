@@ -20,9 +20,11 @@ export function useFailureAnnouncement(message: string | null): void {
   }, [announce, message]);
 }
 
+export type AlertHeadingLevel = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
+
 interface ErrorAlertProps {
   error: string;
-  headingLevel?: "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
+  headingLevel?: AlertHeadingLevel;
   code?: ErrorCode;
   title: string;
   lockMessage?: string;
@@ -115,6 +117,7 @@ export const ErrorAlert: React.FC<ErrorAlertProps> = ({
           retryLabel={RETRY_LABEL}
           onStateChange={setLockState}
         />
+        <ErrorDetails details={details} />
       </Alert>
     );
   }
@@ -129,7 +132,7 @@ export const ErrorAlert: React.FC<ErrorAlertProps> = ({
       actionLinks={showRetry && onRetry && <AlertActionLink onClick={onRetry}>{RETRY_LABEL}</AlertActionLink>}
     >
       {locked ? lockMessage : error}
-      {!locked && <ErrorDetails details={details} />}
+      <ErrorDetails details={details} />
     </Alert>
   );
 };

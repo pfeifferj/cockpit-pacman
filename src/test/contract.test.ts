@@ -21,7 +21,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mockSpawn } from "./setup";
-import { createMockSpawnPromise } from "./mocks";
+import { createMockSpawnPromise, createMockStreamingProcess } from "./mocks";
 import type {
   PackageListResponse,
   Package,
@@ -56,6 +56,8 @@ type StreamEventComplete = Extract<StreamEvent, { type: "complete" }>;
 type StreamEventMirrorTest = Extract<StreamEvent, { type: "mirror_test" }>;
 import {
   listInstalled,
+  previewInstall,
+  installPackage,
   checkUpdates,
   getPackageInfo,
   searchPackages,
@@ -1214,6 +1216,25 @@ describe("CLI argv contract", () => {
       "name",
       "asc",
     ]);
+  });
+
+  it("passes the repository filter after the search sort options", async () => {
+    spawnReturns({});
+    await searchPackages({ query: "vim", repo: "extra-testing" });
+    expect(lastArgv()).toEqual(["search", "vim", "0", "100", "all", "", "", "extra-testing"]);
+  });
+
+  it("binds reinstall preview and commit to the same repository and version", async () => {
+    const target = { repo: "extra-testing", version: "9.1-1", reinstall: true };
+    spawnReturns({});
+    await previewInstall("vim", target);
+    expect(lastArgv()).toEqual(["preflight-install", "vim", "extra-testing", "9.1-1", "true"]);
+    const proc = createMockStreamingProcess();
+    mockSpawn.mockReturnValueOnce(proc);
+    installPackage({ onComplete: vi.fn(), onError: vi.fn() }, "vim", ["vim-minimal"], target);
+    expect(lastArgv()).toEqual(["install-package", "vim", "", "vim-minimal", "extra-testing", "9.1-1", "true"]);
+    proc._emit(JSON.stringify({ type: "complete", success: true }) + "\n");
+    proc._complete();
   });
 
   it("history-grouped argv order", async () => {

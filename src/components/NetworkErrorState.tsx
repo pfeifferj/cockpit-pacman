@@ -13,6 +13,7 @@ interface NetworkErrorStateProps {
   /** What couldn't be loaded, e.g. "updates", "mirror status". */
   resource?: string;
   onRetry?: () => void;
+  retryLabel?: string;
   onDismiss?: () => void;
   headingLevel?: "h1" | "h2" | "h3" | "h4";
 }
@@ -25,6 +26,7 @@ interface NetworkErrorStateProps {
 export const NetworkErrorState: React.FunctionComponent<NetworkErrorStateProps> = ({
   resource,
   onRetry,
+  retryLabel = "Try again",
   onDismiss,
   headingLevel = "h2",
 }) => (
@@ -46,8 +48,8 @@ export const NetworkErrorState: React.FunctionComponent<NetworkErrorStateProps> 
       <EmptyStateFooter>
         <EmptyStateActions>
           {onRetry && (
-            <Button variant="primary" onClick={onRetry}>
-              Retry
+            <Button variant="primary" onClick={() => onRetry()}>
+              {retryLabel}
             </Button>
           )}
           {onDismiss && (

@@ -91,6 +91,9 @@ pub struct PackageDetails {
     pub provides: Vec<String>,
     pub depends: Vec<String>,
     pub optdepends: Vec<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub installed_optdepends: Option<Vec<String>>,
     pub conflicts: Vec<String>,
     pub replaces: Vec<String>,
     pub required_by: Vec<String>,
@@ -137,6 +140,9 @@ pub struct SearchResponse {
     pub total_installed: usize,
     pub total_not_installed: usize,
     pub repositories: Vec<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub repository_counts: Option<Vec<RepositoryCount>>,
 }
 
 #[derive(Serialize, Deserialize, TS)]
@@ -151,6 +157,9 @@ pub struct SyncPackageDetails {
     pub provides: Vec<String>,
     pub depends: Vec<String>,
     pub optdepends: Vec<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub installed_optdepends: Option<Vec<String>>,
     pub conflicts: Vec<String>,
     pub replaces: Vec<String>,
     #[ts(type = "number")]
@@ -162,6 +171,9 @@ pub struct SyncPackageDetails {
     #[ts(type = "number")]
     pub build_date: i64,
     pub repository: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub installed_version: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, TS)]
@@ -1048,3 +1060,21 @@ pub struct SaveReposResponse {
     #[serde(default)]
     pub warnings: Vec<String>,
 }
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct RepositoryCount {
+    pub name: String,
+    pub count: usize,
+}
+
+#[derive(Debug)]
+pub struct InvalidInput(pub String);
+
+impl std::fmt::Display for InvalidInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for InvalidInput {}

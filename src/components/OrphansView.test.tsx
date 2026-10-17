@@ -15,6 +15,7 @@ vi.mock("../api", async () => {
   return {
     ...actual,
     listOrphans: vi.fn(),
+    setInstallReason: vi.fn(),
     removeOrphans: vi.fn(),
     previewRemoveOrphans: vi.fn(),
     checkLock: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("../api", async () => {
   };
 });
 
+const mockSetInstallReason = vi.mocked(api.setInstallReason);
 const mockListOrphans = vi.mocked(api.listOrphans);
 const mockRemoveOrphans = vi.mocked(api.removeOrphans);
 const mockCheckLock = vi.mocked(api.checkLock);
@@ -108,6 +110,55 @@ describe("OrphansView", () => {
       removeEventListener: vi.fn(),
       close: vi.fn(),
     }));
+  });
+
+  it("puts the shared row verbs on every orphan row without opening details", async () => {
+    render(<OrphansView {...defaultProps} />);
+    await screen.findByText("old-dep");
+    for (const pkg of mockOrphanResponse.orphans) {
+      expect(screen.getByRole("button", { name: `Actions for ${pkg.name}` })).toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Actions for old-dep" }));
+    const menu = await screen.findByRole("menu");
+    const items = within(menu).getAllByRole("menuitem").map((item) => item.textContent);
+    expect(items[0]).toBe("View old-dep details");
+    expect(await within(menu).findByRole("menuitem", { name: "Ignore old-dep" })).toBeInTheDocument();
+    expect(items[items.length - 1]).toBe("Remove old-dep");
+    expect(defaultProps.onRowClick).not.toHaveBeenCalled();
+
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "View old-dep details" }));
+    expect(defaultProps.onRowClick).toHaveBeenCalledWith("old-dep");
+  });
+
+  it("drops an orphan marked explicitly installed from the list and the removal", async () => {
+    mockSetInstallReason.mockResolvedValueOnce({ success: true, name: "old-dep", reason: "explicit", previous: "dependency" });
+    render(<OrphansView {...defaultProps} />);
+    await screen.findByText("old-dep");
+    expect(checkbox("old-dep")).toBeChecked();
+    mockListOrphans.mockResolvedValue({ orphans: [mockOrphanResponse.orphans[0]], total_size: 5000000 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions for old-dep" }));
+    const mark = await screen.findByRole("menuitem", { name: "Mark old-dep as explicitly installed" });
+    await act(async () => {
+      fireEvent.click(mark);
+    });
+
+    expect(mockSetInstallReason).toHaveBeenCalledWith("old-dep", "explicit");
+    await waitFor(() => expect(screen.queryByText("old-dep")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Remove 1 orphan" }));
+    expect(mockPreviewRemoveOrphans).toHaveBeenLastCalledWith(["libunused"]);
+  });
+
+  it("previews a single orphan from its row menu", async () => {
+    render(<OrphansView {...defaultProps} />);
+    await screen.findByText("old-dep");
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions for old-dep" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove old-dep" }));
+
+    expect(mockPreviewRemoveOrphans).toHaveBeenCalledWith(["old-dep"]);
+    expect(await screen.findByRole("button", { name: "Remove 1 orphan" })).toBeInTheDocument();
+    expect(defaultProps.onRowClick).not.toHaveBeenCalled();
   });
 
   it("shows loading spinner initially", () => {

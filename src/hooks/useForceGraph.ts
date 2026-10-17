@@ -5,11 +5,11 @@ import {
 } from "d3-force";
 import { select } from "d3-selection";
 import "d3-transition";
-import { zoom, zoomIdentity, type ZoomBehavior } from "d3-zoom";
+import { zoom, zoomIdentity, zoomTransform, type ZoomBehavior, type ZoomTransform } from "d3-zoom";
 import { drag } from "d3-drag";
 import { DependencyNode, DependencyEdge } from "../api";
 
-/* global SVGSVGElement, SVGGElement */
+/* global SVGSVGElement, SVGGElement, SVGCircleElement */
 
 export interface ForceGraphNode extends SimulationNodeDatum {
   id: string;
@@ -33,11 +33,124 @@ export interface ForceGraphOptions {
   height: number;
   onNodeClick?: (node: ForceGraphNode) => void;
   onNodeDoubleClick?: (node: ForceGraphNode) => void;
+  /** Rebuilds with the same key keep a view the user moved; a new key starts fresh and fits. Defaults to rootId. */
+  viewKey?: string | number;
+  selectedId?: string | null;
 }
 
 export interface ForceGraphResult {
   svgRef: React.RefObject<SVGSVGElement>;
   resetView: () => void;
+  fitToContent: (padding?: number) => void;
+  focusNode: (id: string) => void;
+  /** Pans at the current zoom to reveal a node. */
+  keepNodeInView: (id: string) => void;
+}
+
+export interface FitTransform {
+  k: number;
+  x: number;
+  y: number;
+}
+
+export interface Positioned {
+  x?: number;
+  y?: number;
+  name?: string;
+}
+
+const SCALE_EXTENT: [number, number] = [0.1, 4];
+// Fit never zooms in past 1:1, so a two-node graph is not blown up to fill the view.
+const FIT_MAX_SCALE = 1;
+const LABEL_OFFSET = 14;
+const LABEL_CHAR_WIDTH = 6.5;
+const NODE_EXTENT = 12;
+const FIT_PADDING = 40;
+const KEEP_IN_VIEW_MARGIN = 16;
+const SELECTION_RING_GAP = 5;
+
+export function transitionDuration(ms: number): number {
+  const reduce = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+  return reduce ? 0 : ms;
+}
+
+function zoomTo(svgEl: SVGSVGElement, behavior: ZoomBehavior<SVGSVGElement, unknown>, t: ZoomTransform, ms: number) {
+  const svg = select(svgEl);
+  const duration = transitionDuration(ms);
+  if (duration === 0) {
+    svg.interrupt();
+    svg.call(behavior.transform, t);
+  } else {
+    svg.transition().duration(duration).call(behavior.transform, t);
+  }
+}
+
+function nodeRight(n: Positioned): number {
+  return n.name ? LABEL_OFFSET + n.name.length * LABEL_CHAR_WIDTH : NODE_EXTENT;
+}
+
+/** Fits nodes and labels inside the padded viewport. */
+export function computeFitTransform(
+  nodes: Positioned[],
+  width: number,
+  height: number,
+  padding = FIT_PADDING
+): FitTransform | null {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of nodes) {
+    if (n.x === undefined || n.y === undefined) continue;
+    const labelRight = nodeRight(n);
+    minX = Math.min(minX, n.x - NODE_EXTENT);
+    maxX = Math.max(maxX, n.x + labelRight);
+    minY = Math.min(minY, n.y - NODE_EXTENT);
+    maxY = Math.max(maxY, n.y + NODE_EXTENT);
+  }
+  if (!Number.isFinite(minX) || width <= 0 || height <= 0) return null;
+  const availW = Math.max(width - 2 * padding, 1);
+  const availH = Math.max(height - 2 * padding, 1);
+  const k = Math.max(SCALE_EXTENT[0], Math.min(FIT_MAX_SCALE, availW / (maxX - minX), availH / (maxY - minY)));
+  return {
+    k,
+    x: width / 2 - k * (minX + maxX) / 2,
+    y: height / 2 - k * (minY + maxY) / 2,
+  };
+}
+
+/** Pans to reveal a node and label; returns null when already visible. */
+export function computeKeepInView(
+  t: FitTransform,
+  node: Positioned,
+  width: number,
+  height: number,
+  margin = KEEP_IN_VIEW_MARGIN
+): FitTransform | null {
+  if (node.x === undefined || node.y === undefined || width <= 0 || height <= 0) return null;
+  const shift = (lo: number, hi: number, size: number) => {
+    if (hi > size - margin) return Math.max(size - margin - hi, margin - lo);
+    if (lo < margin) return margin - lo;
+    return 0;
+  };
+  const dx = shift(t.x + t.k * (node.x - NODE_EXTENT), t.x + t.k * (node.x + nodeRight(node)), width);
+  const dy = shift(t.y + t.k * (node.y - NODE_EXTENT), t.y + t.k * (node.y + NODE_EXTENT), height);
+  if (dx === 0 && dy === 0) return null;
+  return { k: t.k, x: t.x + dx, y: t.y + dy };
+}
+
+/** Copies x/y from the previous layout onto nodes with the same id; returns how many were seeded. */
+export function seedPositions(
+  nodes: { id: string; x?: number; y?: number }[],
+  previous: Map<string, { x: number; y: number }>
+): number {
+  let seeded = 0;
+  for (const n of nodes) {
+    const p = previous.get(n.id);
+    if (p) {
+      n.x = p.x;
+      n.y = p.y;
+      seeded++;
+    }
+  }
+  return seeded;
 }
 
 const NODE_COLORS = {
@@ -54,24 +167,77 @@ export function useForceGraph(
   options: ForceGraphOptions
 ): ForceGraphResult {
   const { width, height, onNodeClick, onNodeDoubleClick } = options;
+  const viewKey = options.viewKey ?? rootId;
   const svgRef = useRef<SVGSVGElement>(null!);
   const simulationRef = useRef<Simulation<ForceGraphNode, ForceGraphEdge> | null>(null);
   const zoomRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const graphNodesRef = useRef<ForceGraphNode[]>([]);
+  const positionsRef = useRef(new Map<string, { x: number; y: number }>());
+  const userMovedRef = useRef(false);
+  const userTransformRef = useRef<ZoomTransform | null>(null);
+  const viewKeyRef = useRef<string | number | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
+  const sizeRef = useRef({ width, height });
+  const selectedId = options.selectedId ?? null;
+
+  useEffect(() => {
+    sizeRef.current = { width, height };
+  }, [width, height]);
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+    if (!svgRef.current) return;
+    select(svgRef.current)
+      .selectAll<SVGCircleElement, ForceGraphNode>("circle.selection-ring")
+      .attr("display", (d) => d.id === selectedId ? null : "none");
+  }, [selectedId]);
 
   const resetView = useCallback(() => {
     if (!svgRef.current || !zoomRef.current) return;
-    const svg = select(svgRef.current);
-    svg.transition().duration(750).call(
-      zoomRef.current.transform,
-      zoomIdentity.translate(width / 2, height / 2)
-    );
+    userMovedRef.current = true;
+    zoomTo(svgRef.current, zoomRef.current, zoomIdentity.translate(width / 2, height / 2), 750);
+  }, [width, height]);
+
+  const fitToContent = useCallback((padding = FIT_PADDING) => {
+    if (!svgRef.current || !zoomRef.current) return;
+    const t = computeFitTransform(graphNodesRef.current, width, height, padding);
+    if (!t) return;
+    userMovedRef.current = true;
+    zoomTo(svgRef.current, zoomRef.current, zoomIdentity.translate(t.x, t.y).scale(t.k), 500);
+  }, [width, height]);
+
+  const focusNode = useCallback((id: string) => {
+    if (!svgRef.current || !zoomRef.current) return;
+    const target = graphNodesRef.current.find((n) => n.id === id);
+    if (!target || target.x === undefined || target.y === undefined) return;
+    const { k } = zoomTransform(svgRef.current);
+    userMovedRef.current = true;
+    zoomTo(svgRef.current, zoomRef.current, zoomIdentity.translate(width / 2 - k * target.x, height / 2 - k * target.y).scale(k), 500);
+  }, [width, height]);
+
+  const keepNodeInView = useCallback((id: string) => {
+    if (!svgRef.current || !zoomRef.current) return;
+    const target = graphNodesRef.current.find((n) => n.id === id);
+    if (!target) return;
+    const t = computeKeepInView(zoomTransform(svgRef.current), target, width, height);
+    if (!t) return;
+    userMovedRef.current = true;
+    zoomTo(svgRef.current, zoomRef.current, zoomIdentity.translate(t.x, t.y).scale(t.k), 500);
   }, [width, height]);
 
   useEffect(() => {
     if (!svgRef.current || nodes.length === 0) return;
+    const { width, height } = sizeRef.current;
 
     const svg = select(svgRef.current);
+    svg.interrupt();
     svg.selectAll("*").remove();
+
+    if (viewKey !== viewKeyRef.current) {
+      viewKeyRef.current = viewKey;
+      userTransformRef.current = null;
+    }
+    if (!userTransformRef.current) userMovedRef.current = false;
 
     // The backend only emits the documented reason/edge_type literals; the
     // generated wire types widen them to string, so narrow back here.
@@ -80,6 +246,8 @@ export function useForceGraph(
       reason: n.reason as ForceGraphNode["reason"],
       isRoot: n.id === rootId,
     }));
+    const seeded = seedPositions(graphNodes, positionsRef.current);
+    graphNodesRef.current = graphNodes;
 
     const graphEdges: ForceGraphEdge[] = edges.map((e) => ({
       source: e.source,
@@ -89,16 +257,17 @@ export function useForceGraph(
 
     const container = svg.append("g");
 
-    const zoomBehavior = zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.1, 4])
-      .on("zoom", (event) => {
-        container.attr("transform", event.transform);
-      });
+    // Gestures survive graph rebuilds, so the shared zoom listener must use the new container.
+    zoomRef.current ??= zoom<SVGSVGElement, unknown>().scaleExtent(SCALE_EXTENT);
+    const zoomBehavior = zoomRef.current.on("zoom", (event) => {
+      if (event.sourceEvent) userMovedRef.current = true;
+      if (userMovedRef.current) userTransformRef.current = event.transform;
+      container.attr("transform", event.transform);
+    });
 
-    zoomRef.current = zoomBehavior;
     svg.call(zoomBehavior);
     svg.on("dblclick.zoom", null);
-    svg.call(zoomBehavior.transform, zoomIdentity.translate(width / 2, height / 2));
+    svg.call(zoomBehavior.transform, userTransformRef.current ?? zoomIdentity.translate(width / 2, height / 2));
 
     const simulation = forceSimulation<ForceGraphNode>(graphNodes)
       .force("link", forceLink<ForceGraphNode, ForceGraphEdge>(graphEdges)
@@ -107,6 +276,9 @@ export function useForceGraph(
       .force("charge", forceManyBody().strength(-300))
       .force("center", forceCenter(0, 0))
       .force("collision", forceCollide().radius(30));
+
+    // Mostly-known layouts start cooler so persisting nodes stay near where the reader left them.
+    if (seeded > graphNodes.length / 2) simulation.alpha(0.3);
 
     simulationRef.current = simulation;
 
@@ -160,6 +332,14 @@ export function useForceGraph(
       .call(dragBehavior);
 
     node.append("circle")
+      .attr("class", "selection-ring")
+      .attr("r", (d) => (d.isRoot ? 12 : 8) + SELECTION_RING_GAP)
+      .attr("fill", "none")
+      .attr("stroke", "var(--pf-t--global--border--color--clicked)")
+      .attr("stroke-width", 3)
+      .attr("display", (d) => d.id === selectedIdRef.current ? null : "none");
+
+    node.append("circle")
       .attr("r", (d) => d.isRoot ? 12 : 8)
       .attr("fill", (d) => {
         if (d.isRoot) return NODE_COLORS.root;
@@ -208,11 +388,25 @@ export function useForceGraph(
       node.attr("transform", (d) => `translate(${d.x || 0},${d.y || 0})`);
     });
 
+    let fitted = false;
+    simulation.on("end", () => {
+      if (fitted || userMovedRef.current || !zoomRef.current) return;
+      fitted = true;
+      const t = computeFitTransform(graphNodes, sizeRef.current.width, sizeRef.current.height);
+      if (!t || !svgRef.current) return;
+      zoomTo(svgRef.current, zoomBehavior, zoomIdentity.translate(t.x, t.y).scale(t.k), 500);
+    });
+
     return () => {
       if (clickTimer) clearTimeout(clickTimer);
       simulation.stop();
+      const positions = new Map<string, { x: number; y: number }>();
+      for (const n of graphNodes) {
+        if (n.x !== undefined && n.y !== undefined) positions.set(n.id, { x: n.x, y: n.y });
+      }
+      positionsRef.current = positions;
     };
-  }, [nodes, edges, rootId, width, height, onNodeClick, onNodeDoubleClick]);
+  }, [nodes, edges, rootId, viewKey, onNodeClick, onNodeDoubleClick]);
 
-  return { svgRef, resetView };
+  return { svgRef, resetView, fitToContent, focusNode, keepNodeInView };
 }

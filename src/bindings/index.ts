@@ -104,7 +104,7 @@ export type OrphanResponse = { orphans: Array<OrphanPackage>, total_size: number
 
 export type Package = { name: string, version: string, description: string | null, installed_size: number, install_date: number | null, reason: string, repository: string | null, };
 
-export type PackageDetails = { name: string, version: string, description: string | null, url: string | null, licenses: Array<string>, groups: Array<string>, provides: Array<string>, depends: Array<string>, optdepends: Array<string>, conflicts: Array<string>, replaces: Array<string>, required_by: Array<string>, optional_for: Array<string>, installed_size: number, packager: string | null, architecture: string | null, build_date: number, install_date: number | null, reason: string, validation: Array<string>, repository: string | null, update_stats: UpdateStats | null, };
+export type PackageDetails = { name: string, version: string, description: string | null, url: string | null, licenses: Array<string>, groups: Array<string>, provides: Array<string>, depends: Array<string>, optdepends: Array<string>, installed_optdepends?: Array<string>, conflicts: Array<string>, replaces: Array<string>, required_by: Array<string>, optional_for: Array<string>, installed_size: number, packager: string | null, architecture: string | null, build_date: number, install_date: number | null, reason: string, validation: Array<string>, repository: string | null, update_stats: UpdateStats | null, };
 
 export type PackageListResponse = { packages: Array<Package>, total: number, total_explicit: number, total_dependency: number, repositories: Array<string>, warnings: Array<string>, };
 
@@ -154,6 +154,8 @@ export type RepoDirectiveFull = { directive_type: string, value: string, enabled
 
 export type RepoEntry = { name: string, enabled: boolean, sig_level: string | null, directives: Array<RepoDirectiveFull>, };
 
+export type RepositoryCount = { name: string, count: number, };
+
 export type RestartBlocked = "session_critical" | "cockpit_session" | "cockpit_transport";
 
 export type RestoreMirrorBackupResponse = { success: boolean, backup_path: string | null, message: string, warnings: Array<string>, };
@@ -176,7 +178,7 @@ export type ScheduledRunEntry = { timestamp: string, mode: string, success: bool
 
 export type ScheduledRunsResponse = { current_run?: ScheduledCurrentRun, runs: Array<ScheduledRunEntry>, total: number, warning?: string, };
 
-export type SearchResponse = { results: Array<SearchResult>, total: number, total_installed: number, total_not_installed: number, repositories: Array<string>, };
+export type SearchResponse = { results: Array<SearchResult>, total: number, total_installed: number, total_not_installed: number, repositories: Array<string>, repository_counts?: Array<RepositoryCount>, };
 
 export type SearchResult = { name: string, version: string, description: string | null, repository: string, installed: boolean, installed_version: string | null, };
 
@@ -227,7 +229,7 @@ export type SignoffTarget = { pkgbase: string, repo: string, arch: string, };
 
 export type StreamEvent = { "type": "log", level: string, message: string, } | { "type": "progress", operation: string, package: string, percent: number, current: number, total: number, } | { "type": "download", filename: string, event: string, downloaded?: number, total?: number, } | { "type": "event", event: string, package?: string, current?: number, total?: number, } | { "type": "complete", success: boolean, message?: string, code?: string, details?: string, } | { "type": "mirror_test", url: string, current: number, total: number, result: MirrorTestResult, };
 
-export type SyncPackageDetails = { name: string, version: string, description: string | null, url: string | null, licenses: Array<string>, groups: Array<string>, provides: Array<string>, depends: Array<string>, optdepends: Array<string>, conflicts: Array<string>, replaces: Array<string>, download_size: number, installed_size: number, packager: string | null, architecture: string | null, build_date: number, repository: string, };
+export type SyncPackageDetails = { name: string, version: string, description: string | null, url: string | null, licenses: Array<string>, groups: Array<string>, provides: Array<string>, depends: Array<string>, optdepends: Array<string>, installed_optdepends?: Array<string>, conflicts: Array<string>, replaces: Array<string>, download_size: number, installed_size: number, packager: string | null, architecture: string | null, build_date: number, repository: string, installed_version?: string, };
 
 /**
  * What a transaction would do, computed through trans_prepare without a commit.

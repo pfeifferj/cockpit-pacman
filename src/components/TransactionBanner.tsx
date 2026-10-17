@@ -7,6 +7,7 @@ import {
   useActiveTransaction,
   useTransactionOutcome,
   useTransactionProgress,
+  OWNER_ROUTES,
   type TransactionOwner,
 } from "../hooks/useMutationGate";
 import {
@@ -18,13 +19,6 @@ import {
 } from "../api";
 import { useAnnounce } from "../contexts/AnnouncerContext";
 import type { RouteOptions } from "../hooks/useRoute";
-
-const OWNER_ROUTES: Record<TransactionOwner, { slug: string; options?: RouteOptions }> = {
-  updates: { slug: "updates" },
-  cache: { slug: "cache" },
-  keyring: { slug: "keyring" },
-  orphans: { slug: "installed", options: { filter: "orphan" } },
-};
 
 const OUTCOME_SUBJECTS: Record<string, string> = {
   "upgrade": "Upgrade",

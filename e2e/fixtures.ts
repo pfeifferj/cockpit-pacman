@@ -32,7 +32,8 @@ export const test = base.extend<{ pacman: PackmanPage }>({
       },
 
       async switchTab(tabName: string) {
-        await frame.locator(`button[role="tab"]:has-text("${tabName}")`).click();
+        const name = new RegExp(`^${tabName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i");
+        await frame.getByRole("tab", { name }).click();
         await page.waitForTimeout(500);
       },
 
@@ -57,7 +58,7 @@ export { expect };
 export const GRAPH_NODES = "svg g.nodes > g";
 
 export async function graphFor(pacman: PackmanPage, name: string) {
-  const search = pacman.panel.getByPlaceholder("Search packages...");
+  const search = pacman.panel.getByPlaceholder("Search packages…");
   await search.fill(name);
   await search.press("Enter");
   await pacman.waitForLoading();

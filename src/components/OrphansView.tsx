@@ -50,6 +50,8 @@ import {
   type TransactionPreview as PreviewData,
 } from "../api";
 import { useAnnounce } from "../contexts/AnnouncerContext";
+import { PackageRowActions, fromRowActions } from "./PackageRowActions";
+import { RowSelectCell } from "./RowSelectCell";
 import { TimeAgo } from "./TimeAgo";
 import { progressPercent, progressValueText, type ProgressPlan } from "../progress";
 import { RunSession, useHeldRun, useRunInBackground, useRunSnapshot, type RunOutcome, type RunSnapshot } from "./TransactionHost";
@@ -319,7 +321,7 @@ interface OrphansViewProps {
   onViewDependencies?: (pkgName: string) => void;
 }
 
-export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansLoaded, refreshTrigger }) => {
+export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansLoaded, refreshTrigger, onViewDependencies }) => {
   const [orphanData, setOrphanData] = useState<OrphanResponse | null>(null);
   const [viewState, setViewState] = useState<ViewState>("loading");
   const [error, setError] = useState<OrphanError | null>(null);
@@ -434,6 +436,10 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
   });
 
   const retryLoad = useCallback(() => loadOrphans(), [loadOrphans]);
+  const reloadAfterReasonChange = useCallback(() => {
+    if (viewStateRef.current !== "ready" || removalRef.current) return;
+    loadOrphans(true);
+  }, [loadOrphans]);
   const runPreview = useCallback((targets: string[]) => {
     resetStaleness();
     const request = ++previewRequestRef.current;
@@ -667,16 +673,12 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
           </Tr>
         </Thead>
         <Tbody>
-          {filteredAndSorted.map((pkg: OrphanPackage, rowIndex) => (
-            <Tr key={pkg.name} isClickable onRowClick={() => onRowClick(pkg.name)} isRowSelected={selected.has(pkg.name)}>
-              <Td
-                select={{
-                  rowIndex,
-                  onSelect: () => toggleSelected(pkg.name),
-                  isSelected: selected.has(pkg.name),
-                }}
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => e.stopPropagation()}
+          {filteredAndSorted.map((pkg: OrphanPackage) => (
+            <Tr key={pkg.name} isClickable onRowClick={(event) => !fromRowActions(event) && onRowClick(pkg.name)} isRowSelected={selected.has(pkg.name)}>
+              <RowSelectCell
+                label={`Select ${pkg.name}`}
+                isSelected={selected.has(pkg.name)}
+                onSelect={() => toggleSelected(pkg.name)}
               />
               <Td dataLabel="Package">
                 <Button variant="link" isInline className="pf-v6-u-p-0">
@@ -690,6 +692,19 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
                 <Label isCompact color="grey">
                   {pkg.repository || "user"}
                 </Label>
+              </Td>
+              <Td isActionCell>
+                <PackageRowActions
+                  name={pkg.name}
+                  installedVersion={pkg.version}
+                  repository={pkg.repository}
+                  reason="dependency"
+                  onViewDetails={() => onRowClick(pkg.name)}
+                  onViewDependencies={onViewDependencies}
+                  onReasonChange={reloadAfterReasonChange}
+                  onRemove={() => runPreview([pkg.name])}
+                  removeGate={removeGate}
+                />
               </Td>
             </Tr>
           ))}

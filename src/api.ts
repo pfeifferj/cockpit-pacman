@@ -80,6 +80,7 @@ export interface ListInstalledParams {
   repo?: string;
   sortBy?: string;
   sortDir?: SortDirection;
+  signal?: AbortSignal;
 }
 
 export type InstalledFilterType = "all" | "installed" | "not-installed";
@@ -89,6 +90,7 @@ export interface SearchParams {
   offset?: number;
   limit?: number;
   installed?: InstalledFilterType;
+  repo?: string;
   sortBy?: string;
   sortDir?: SortDirection;
   signal?: AbortSignal;
@@ -319,7 +321,7 @@ export async function listInstalled(
     repo,
     sortBy,
     sortDir,
-  ], { superuser: "none" });
+  ], { superuser: "none", signal: params.signal });
 }
 
 export async function checkUpdates(): Promise<UpdatesResponse> {
@@ -355,8 +357,8 @@ export async function getPackageInfo(name: string): Promise<PackageDetails> {
 }
 
 export async function searchPackages(params: SearchParams): Promise<SearchResponse> {
-  const { query, offset = 0, limit = 100, installed = "all", sortBy = "", sortDir = "" } = params;
-  return runBackend<SearchResponse>("search", [sanitizeSearchInput(query), String(offset), String(limit), installed, sortBy, sortDir], { superuser: "none", signal: params.signal });
+  const { query, offset = 0, limit = 100, installed = "all", repo, sortBy = "", sortDir = "" } = params;
+  return runBackend<SearchResponse>("search", [sanitizeSearchInput(query), String(offset), String(limit), installed, sortBy, sortDir, ...(repo ? [repo] : [])], { superuser: "none", signal: params.signal });
 }
 
 export async function getSyncPackageInfo(name: string, repo?: string): Promise<SyncPackageDetails> {
@@ -369,9 +371,17 @@ export async function preflightUpgrade(ignore?: string[]): Promise<PreflightResp
   return runBackend<PreflightResponse>("preflight-upgrade", args);
 }
 
+export interface InstallTarget {
+  repo?: string;
+  version?: string;
+  reinstall?: boolean;
+}
+
+const installTargetArgs = (target: InstallTarget) => [target.repo ?? "", target.version ?? "", String(target.reinstall ?? false)];
+
 /** Resolves `install-package NAME` without committing. Takes the database lock. */
-export async function previewInstall(name: string): Promise<TransactionPreview> {
-  return runBackend<TransactionPreview>("preflight-install", [sanitizeSearchInput(name)]);
+export async function previewInstall(name: string, target?: InstallTarget): Promise<TransactionPreview> {
+  return runBackend<TransactionPreview>("preflight-install", [sanitizeSearchInput(name), ...(target ? installTargetArgs(target) : [])]);
 }
 
 /** Resolves `remove-package NAME` (with unneeded dependencies) without committing. */
@@ -950,10 +960,12 @@ export function installPackage(
   callbacks: UpgradeCallbacks,
   name: string,
   approvedRemovals: string[] = [],
+  target?: InstallTarget,
 ): StreamingHandle {
   const args = [sanitizeSearchInput(name)];
   args.push(callbacks.timeout === undefined ? "" : String(callbacks.timeout));
   args.push(approvedRemovals.map(pkg => sanitizeSearchInput(pkg)).join(","));
+  if (target) args.push(...installTargetArgs(target));
   return runStreamingBackend("install-package", args, callbacks, { gracefulCancel: true });
 }
 
@@ -1438,4 +1450,19 @@ export async function restoreRepoBackup(timestamp: number): Promise<RestoreRepoB
 
 export async function deleteRepoBackup(timestamp: number): Promise<RestoreRepoBackupResponse> {
   return runBackend<RestoreRepoBackupResponse>("delete-repo-backup", [String(timestamp)], { superuser: "require" });
+}
+
+export type InstallReason = "explicit" | "dependency";
+
+export interface InstallReasonResponse {
+  success: boolean;
+  name: string;
+  reason: InstallReason;
+  previous: InstallReason;
+}
+
+export async function setInstallReason(name: string, reason: InstallReason): Promise<InstallReasonResponse> {
+  const result = await runBackend<InstallReasonResponse>("set-install-reason", [name, reason]);
+  notifySystemChanged("system");
+  return result;
 }

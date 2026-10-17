@@ -19,6 +19,7 @@ test.describe("Downgrade modal", () => {
 
   test.beforeEach(async ({ pacman }) => {
     restore = undefined;
+    await pacman.page.setViewportSize({ width: 1600, height: 1000 });
     await pacman.navigateToPlugin();
     await pacman.switchTab("Installed Packages");
   });
@@ -40,11 +41,12 @@ test.describe("Downgrade modal", () => {
   });
 
   async function openDowngrade(pacman: PackmanPage) {
-    await pacman.panel.getByPlaceholder("Search packages...").fill(TARGET);
+    await pacman.panel.getByRole("textbox", { name: "Search installed packages" }).fill(TARGET);
     await pacman.panel.getByRole("button", { name: TARGET, exact: true }).click();
 
-    const details = pacman.frame.getByRole("dialog").first();
-    await details.getByRole("button", { name: "Downgrade", exact: true }).click();
+    const details = pacman.panel.locator(`[data-details-for="${TARGET}"]`);
+    await details.getByRole("button", { name: "Actions", exact: true }).click();
+    await pacman.frame.getByRole("menuitem", { name: `Downgrade ${TARGET}…`, exact: true }).click();
 
     const modal = pacman.frame.getByRole("dialog", { name: new RegExp(`^(Downgrade|Upgrade) ${TARGET}$`) });
     await expect(modal.locator("h1")).toHaveText(`Downgrade ${TARGET}`);
@@ -60,7 +62,7 @@ test.describe("Downgrade modal", () => {
     expect(await modal.evaluate((dialog) => dialog.contains(dialog.ownerDocument.activeElement))).toBe(true);
     await pacman.page.keyboard.press("Escape");
     await expect(modal).toHaveCount(0);
-    await expect(pacman.frame.getByRole("dialog").getByRole("button", { name: "Downgrade", exact: true })).toBeFocused();
+    await expect(pacman.panel.locator(`[data-details-for="${TARGET}"]`).getByRole("button", { name: "Actions", exact: true })).toBeFocused();
   });
 
   test("lists the installed version in the cache", async ({ pacman }) => {

@@ -11,6 +11,7 @@ import time
 BASE = Path('/run/cockpit-pacman-e2e')
 STATE = BASE / 'commit'
 PACKAGE = 'cockpit-pacman-e2e-commit'
+SECOND_REPO = PACKAGE + '-secondary'
 VICTIM = PACKAGE + '-old'
 EXTRA = PACKAGE + '-other'
 DEPENDENCY = PACKAGE + '-dep'
@@ -141,6 +142,31 @@ def publish(updated, signatures=False):
     os.utime(database, (timestamp, timestamp))
 
 
+def add_repository():
+    database = STATE / f'{SECOND_REPO}.db.tar.gz'
+    if database.exists():
+        raise SystemExit('The secondary fixture repository already exists')
+    run(['repo-add', str(database), str(STATE / f'{PACKAGE}-2-1-any.pkg.tar.zst')],
+        stdout=subprocess.DEVNULL)
+    replace(PACMAN_CONF, PACMAN_CONF.read_text() + f'''
+[{SECOND_REPO}]
+SigLevel = Never
+Server = file://{STATE}
+''')
+
+
+def install_update():
+    saved_hooks = [(hook, hook.read_text()) for hook in HOOKS]
+    try:
+        for hook, _content in saved_hooks:
+            hook.unlink()
+        run(['pacman', '-U', '--noconfirm', '--noscriptlet', str(STATE / f'{PACKAGE}-2-1-any.pkg.tar.zst')],
+            stdout=subprocess.DEVNULL)
+    finally:
+        for hook, content in saved_hooks:
+            hook.write_text(content)
+
+
 def publish_conflict():
     if installed_version(VICTIM) is None:
         raise SystemExit('Set up the removal fixture before publishing a conflict')
@@ -263,8 +289,9 @@ def cleanup():
             shutil.copy2(saved, path)
         elif name != 'pacman.conf':
             path.unlink(missing_ok=True)
-    for suffix in ['.db', '.db.sig', '.files', '.files.sig']:
-        (Path('/var/lib/pacman/sync') / (PACKAGE + suffix)).unlink(missing_ok=True)
+    for repository in [PACKAGE, SECOND_REPO]:
+        for suffix in ['.db', '.db.sig', '.files', '.files.sig']:
+            (Path('/var/lib/pacman/sync') / (repository + suffix)).unlink(missing_ok=True)
     for version in ['0-1', '1-1', '2-1', '3-1', '4-1']:
         for suffix in ['', '.sig']:
             (Path('/var/cache/pacman/pkg') / f'{PACKAGE}-{version}-any.pkg.tar.zst{suffix}').unlink(missing_ok=True)
@@ -286,6 +313,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=['setup', 'pre', 'scriptlet', 'post', 'release', 'state', 'term',
                                           'scheduled-start', 'scheduled-stop', 'publish-conflict', 'publish-update',
+                                          'add-repository', 'install-update',
                                           'cached-conflict', 'uninstall-target', 'unknown-signer', 'install-extra', 'removal-graph', 'cleanup'])
     parser.add_argument('--phase', choices=['pre', 'scriptlet'], default='scriptlet')
     parser.add_argument('--fail', action='store_true')
@@ -300,6 +328,10 @@ def main():
         publish_conflict()
     elif args.action == 'publish-update':
         publish(STATE / f'{PACKAGE}-2-1-any.pkg.tar.zst')
+    elif args.action == 'add-repository':
+        add_repository()
+    elif args.action == 'install-update':
+        install_update()
     elif args.action == 'cached-conflict':
         cached_conflict()
     elif args.action == 'uninstall-target':

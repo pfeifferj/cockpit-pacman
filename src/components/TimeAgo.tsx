@@ -30,10 +30,14 @@ export const TimeAgo: React.FC<TimeAgoProps> = ({
   const full = dateOnly ? formatFullDate(date) : formatFullTimestamp(date);
 
   return (
-    <Tooltip content={full}>
-      <span style={{ borderBottom: "1px dotted var(--pf-t--global--border--color--default)", cursor: "default" }}>
+    <Tooltip content={full} trigger="mouseenter focus">
+      <time
+        dateTime={date.toISOString()}
+        tabIndex={0}
+        style={{ borderBottom: "1px dotted var(--pf-t--global--border--color--default)", cursor: "default" }}
+      >
         {relative}
-      </span>
+      </time>
     </Tooltip>
   );
 };

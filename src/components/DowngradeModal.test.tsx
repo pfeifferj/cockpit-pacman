@@ -911,6 +911,106 @@ describe("DowngradeModal", () => {
     expect(await screen.findByRole("button", { name: "Downgrade bash to 5.1.016-1" })).toBeInTheDocument();
     expect(mockPreviewDowngrade).toHaveBeenCalledTimes(2);
   });
+
+  describe("with a preselected version", () => {
+    const open = (version: string) =>
+      render(
+        <DowngradeModal packageName="bash" currentVersion="5.2.015-1" preselectVersion={version} isOpen onClose={vi.fn()} />,
+      );
+
+    it("goes straight to the preview when the cache has the version", async () => {
+      open("5.1.016-1");
+      expect(await screen.findByRole("button", { name: "Downgrade bash to 5.1.016-1" })).toBeInTheDocument();
+      expect(mockPreviewDowngrade).toHaveBeenCalledWith("bash", "5.1.016-1");
+      expect(mockListArchiveVersions).not.toHaveBeenCalled();
+      expect(screen.queryByRole("grid", { name: "Available versions" })).not.toBeInTheDocument();
+    });
+
+    it("looks in the archive when the cache lacks it, and commits from the archive", async () => {
+      open("5.0.018-1");
+      const commit = await screen.findByRole("button", { name: "Downgrade bash to 5.0.018-1" });
+      expect(mockListArchiveVersions).toHaveBeenCalledWith("bash", "5.0.018-1");
+      expect(mockPreviewDowngradeArchive).toHaveBeenCalledWith("bash", archiveVersion.filename, expect.anything());
+      expect(mockPreviewDowngrade).not.toHaveBeenCalled();
+      fireEvent.click(commit);
+      expect(mockDowngradeFromArchive).toHaveBeenCalledWith(expect.anything(), "bash", archiveVersion.filename, []);
+    });
+
+    it("opens the version list with a note when neither source has it", async () => {
+      open("4.4.023-1");
+      expect(await screen.findByText("4.4.023-1 is not in the cache or the archive")).toBeInTheDocument();
+      expect(screen.getByRole("grid", { name: "Available versions" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Select 5.1.016-1" })).toBeInTheDocument();
+      expect(mockPreviewDowngrade).not.toHaveBeenCalled();
+      expect(mockPreviewDowngradeArchive).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+      await screen.findByRole("button", { name: "Select 5.0.018-1" });
+      expect(screen.queryByText(/is not in the cache/)).not.toBeInTheDocument();
+    });
+
+    it("says when the archive could not be reached", async () => {
+      mockListArchiveVersions.mockRejectedValueOnce(new Error("network unreachable"));
+      open("4.4.023-1");
+      expect(await screen.findByText("4.4.023-1 is not in the cache, and the archive could not be reached")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Select 5.1.016-1" })).toBeInTheDocument();
+    });
+
+    it("names the version and the source it is searching", async () => {
+      let resolveCache!: (r: Awaited<ReturnType<typeof api.listDowngrades>>) => void;
+      let resolveArchive!: (r: Awaited<ReturnType<typeof api.listArchiveVersions>>) => void;
+      mockListDowngrades.mockReturnValueOnce(new Promise((r) => { resolveCache = r; }));
+      mockListArchiveVersions.mockReturnValueOnce(new Promise((r) => { resolveArchive = r; }));
+      open("5.0.018-1");
+      expect(await screen.findByText("Looking for bash 5.0.018-1 in the package cache\u2026")).toBeInTheDocument();
+      await act(async () => resolveCache({ packages: [cacheVersion], total: 1 }));
+      expect(await screen.findByText("Looking for bash 5.0.018-1 in the Arch Linux Archive\u2026")).toBeInTheDocument();
+      await act(async () => resolveArchive({ packages: [archiveVersion], total: 1 }));
+      expect(await screen.findByRole("button", { name: "Downgrade bash to 5.0.018-1" })).toBeInTheDocument();
+    });
+
+    it("tries the archive again from the unreachable notice", async () => {
+      mockListArchiveVersions.mockRejectedValueOnce(new Error("network unreachable"));
+      open("5.0.018-1");
+      const retry = await screen.findByRole("button", { name: "Try the archive again" });
+      fireEvent.click(retry);
+      expect(await screen.findByRole("button", { name: "Downgrade bash to 5.0.018-1" })).toBeInTheDocument();
+      expect(mockListArchiveVersions).toHaveBeenCalledTimes(2);
+      expect(mockPreviewDowngradeArchive).toHaveBeenCalledWith("bash", archiveVersion.filename, expect.anything());
+    });
+
+    it("keeps focus on the retry when the archive is still unreachable", async () => {
+      mockListArchiveVersions.mockRejectedValue(new Error("network unreachable"));
+      open("5.0.018-1");
+      fireEvent.click(await screen.findByRole("button", { name: "Try the archive again" }));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Try the archive again" })).toHaveFocus());
+      expect(mockListArchiveVersions).toHaveBeenCalledTimes(2);
+    });
+
+    it("offers no archive retry when the archive was searched", async () => {
+      open("4.4.023-1");
+      await screen.findByText("4.4.023-1 is not in the cache or the archive");
+      expect(screen.queryByRole("button", { name: "Try the archive again" })).not.toBeInTheDocument();
+    });
+
+    it("explains an empty cache under the miss and leads to the archive", async () => {
+      mockListDowngrades.mockResolvedValue({ packages: [], total: 0 });
+      open("4.4.023-1");
+      expect(await screen.findByText("No other versions in the cache")).toBeInTheDocument();
+      expect(screen.queryByText("Choose another version below.")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Show archive versions" }));
+      expect(await screen.findByRole("button", { name: "Select 5.0.018-1" })).toBeInTheDocument();
+    });
+
+    it("explains an empty cache when the archive could not be reached", async () => {
+      mockListDowngrades.mockResolvedValue({ packages: [], total: 0 });
+      mockListArchiveVersions.mockRejectedValueOnce(new Error("network unreachable"));
+      open("4.4.023-1");
+      expect(await screen.findByText("No other versions in the cache")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Try the archive again" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Show archive versions" })).not.toBeInTheDocument();
+    });
+  });
 });
 
 

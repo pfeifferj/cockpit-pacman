@@ -80,6 +80,7 @@ fn test_package_details_serialization() {
         provides: vec!["WIREGUARD-MODULE".to_string()],
         depends: vec!["coreutils".to_string(), "kmod".to_string()],
         optdepends: vec![],
+        installed_optdepends: None,
         conflicts: vec![],
         replaces: vec![],
         required_by: vec!["linux-headers".to_string()],

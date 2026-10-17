@@ -11,6 +11,7 @@ pub mod mutation;
 pub mod news;
 pub mod pacnew;
 pub mod query;
+pub mod reason;
 pub mod reboot;
 pub mod repos;
 pub mod scheduled;
@@ -38,6 +39,7 @@ pub use pacnew::get_pacnew_status;
 pub use query::{
     check_updates, list_installed, list_orphans, local_package_info, search, sync_package_info,
 };
+pub use reason::set_install_reason;
 pub use reboot::get_reboot_status;
 pub use repos::{
     delete_repo_backup, list_repo_backups, list_repos, restore_repo_backup, save_repos,

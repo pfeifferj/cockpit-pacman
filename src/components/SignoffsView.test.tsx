@@ -59,7 +59,7 @@ describe("SignoffsView", () => {
   });
 
   it("falls back to sync package details when the local lookup fails", async () => {
-    mockGetPackageInfo.mockRejectedValue(new Error("Package 'vlc' not found"));
+    mockGetPackageInfo.mockRejectedValue(new api.BackendError("Package 'vlc' not found", "not_found"));
     mockGetSyncPackageInfo.mockResolvedValue({
       ...mockSyncPackageDetails,
       name: "vlc",

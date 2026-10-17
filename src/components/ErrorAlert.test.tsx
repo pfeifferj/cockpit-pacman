@@ -35,7 +35,7 @@ describe("ErrorAlert", () => {
     ).toBeInTheDocument();
   });
 
-  it("hides details when the database is locked", () => {
+  it("retains diagnostics when the database is locked", () => {
     render(
       <ErrorAlert
         error="failed to initialize transaction (unable to lock database)"
@@ -48,7 +48,7 @@ describe("ErrorAlert", () => {
     expect(
       screen.getByText("Database is busy, try again shortly.")
     ).toBeInTheDocument();
-    expect(screen.queryByText("internal context chain")).not.toBeInTheDocument();
+    expect(screen.getByText("internal context chain")).toBeInTheDocument();
   });
 
   it("routes a signature failure to the Keyring tab", () => {
@@ -109,7 +109,8 @@ describe("ErrorAlert", () => {
   it("hides Try again while waiting on the lock holder and offers it once stopped", async () => {
     mockCheckLock.mockResolvedValue({ locked: true, stale: false, blocking_process: "pacman", holder_unknown: false } as api.LockStatus);
     const onRetry = vi.fn();
-    render(<ErrorAlert error={LOCK_FAILURE} code="database_locked" title="Search failed" onRetry={onRetry} />);
+    render(<ErrorAlert error={LOCK_FAILURE} code="database_locked" title="Search failed" onRetry={onRetry} details="Lock held by another request" />);
+    expect(screen.getByText("Lock held by another request")).toBeInTheDocument();
     expect(await screen.findByText("pacman")).toBeInTheDocument();
     expect(screen.getByText(/Waiting for/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();

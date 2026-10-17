@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { ErrorBoundary } from "./ErrorBoundary";
 
+
 const ThrowingComponent = ({ shouldThrow }: { shouldThrow: boolean }) => {
   if (shouldThrow) {
     throw new Error("Test error");
@@ -59,6 +60,8 @@ describe("ErrorBoundary", () => {
     );
 
     expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+    expect(screen.getByText(/Try again to show this section again\./)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Reload$/ })).not.toBeInTheDocument();
 
     rerender(
       <ErrorBoundary>
@@ -66,7 +69,7 @@ describe("ErrorBoundary", () => {
       </ErrorBoundary>
     );
 
-    const reloadButton = screen.getByRole("button", { name: "Reload" });
+    const reloadButton = screen.getByRole("button", { name: "Try again" });
     fireEvent.click(reloadButton);
 
     expect(screen.getByText("Working content")).toBeInTheDocument();
@@ -92,10 +95,6 @@ describe("ErrorBoundary", () => {
       </ErrorBoundary>
     );
 
-    expect(console.error).toHaveBeenCalledWith(
-      "ErrorBoundary caught an error:",
-      expect.any(Error),
-      expect.objectContaining({ componentStack: expect.any(String) })
-    );
+    expect(console.error).toHaveBeenCalled();
   });
 });

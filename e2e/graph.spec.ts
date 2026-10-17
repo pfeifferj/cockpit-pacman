@@ -98,12 +98,13 @@ test.describe("Dependency Graph", () => {
   });
 
   test("says so when the package does not exist", async ({ pacman }) => {
-    const search = pacman.panel.getByPlaceholder("Search packages...");
+    const search = pacman.panel.getByPlaceholder("Search packages…");
     await search.fill("no-such-package-anywhere");
     await search.press("Enter");
     await pacman.waitForLoading();
 
-    await expect(pacman.panel.getByText("Package not found")).toBeVisible({ timeout: 30000 });
+    await expect(pacman.panel.getByRole("heading", { name: "Could not load dependencies of no-such-package-anywhere" })).toBeVisible();
+    await expect(pacman.panel.getByRole("button", { name: "Try again" })).toBeVisible();
     await expect(pacman.panel.locator(GRAPH_NODES)).toHaveCount(0);
   });
 });

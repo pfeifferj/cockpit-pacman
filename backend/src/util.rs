@@ -586,7 +586,7 @@ pub fn emit_failure(message: &str, fallback: &'static str) {
 /// Classify typed causes before falling back to the rendered error message.
 pub fn classify_error(err: &anyhow::Error) -> Option<&'static str> {
     for cause in err.chain() {
-        if cause.is::<crate::network::NetworkError>() {
+        if cause.is::<crate::network::NetworkError>() || cause.is::<crate::models::InvalidInput>() {
             return Some("validation_error");
         }
         if matches!(

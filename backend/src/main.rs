@@ -1,8 +1,9 @@
 use cockpit_pacman_backend::handlers::archive::preflight_downgrade_archive;
 use cockpit_pacman_backend::handlers::downgrade::preflight_downgrade;
 use cockpit_pacman_backend::handlers::mutation::{
-    preflight_install, preflight_remove, preflight_remove_orphans,
+    InstallTarget, preflight_install, preflight_remove, preflight_remove_orphans,
 };
+use cockpit_pacman_backend::handlers::set_install_reason;
 use std::env;
 use std::time::Duration;
 
@@ -29,6 +30,24 @@ use cockpit_pacman_backend::validation::{
     validate_package_name, validate_pagination, validate_refresh_protocol, validate_refresh_sort,
     validate_search_query, validate_signoff_arg,
 };
+
+fn parse_install_target(args: &[String], offset: usize) -> anyhow::Result<InstallTarget> {
+    let reinstall = match arg_opt(args, offset + 2).as_deref() {
+        None | Some("false") => false,
+        Some("true") => true,
+        Some(_) => {
+            return Err(cockpit_pacman_backend::models::InvalidInput(
+                "Invalid reinstall flag: expected true or false".into(),
+            )
+            .into());
+        }
+    };
+    Ok(InstallTarget {
+        repo: arg_opt(args, offset),
+        version: arg_opt(args, offset + 1),
+        reinstall,
+    })
+}
 
 const SYSTEMD_INVOKED: &[&str] = &["scheduled-run", "scheduled-record-interrupted"];
 
@@ -61,6 +80,7 @@ const COMMANDS: &[&str] = &[
     "set-settings",
     "add-ignored",
     "remove-ignored",
+    "set-install-reason",
     "cache-info",
     "cache-files",
     "clean-cache",
@@ -122,7 +142,8 @@ Commands:
                          Check what the upgrade will do (requires root)
                          ignore: comma-separated list of packages to skip
                          Returns conflicts, replacements, keys to import
-  preflight-install NAME Preview installing a package without committing
+  preflight-install NAME [repo] [version] [reinstall]
+                         Preview installing a package without committing
                          (requires root for the database lock)
   preflight-remove NAME  Preview removing a package and its unneeded
                          dependencies without committing (requires root)
@@ -150,7 +171,7 @@ Commands:
                          Get detailed info for an installed package
   sync-package-info NAME [REPO]
                          Get detailed info for a package from sync databases
-  search QUERY [offset] [limit] [installed] [sort_by] [sort_dir]
+  search QUERY [offset] [limit] [installed] [sort_by] [sort_dir] [repo]
                          Search packages by name/description (paginated)
                          installed: all|installed|not-installed
                          sort_by: name|repository|status
@@ -163,7 +184,7 @@ Commands:
                          Remove orphan packages (requires root)
                          timeout: seconds (default: 300)
                          names: comma-separated orphans, empty for all
-  install-package NAME [timeout] [approved-removals]
+  install-package NAME [timeout] [approved-removals] [repo] [version] [reinstall]
                          Install a package from repositories (requires root)
                          timeout: seconds (default: 300)
   remove-package NAME [timeout]
@@ -176,6 +197,8 @@ Commands:
                          security-advisories: true|false, empty leaves unchanged
   add-ignored NAME       Add a package to the ignored list (requires root)
   remove-ignored NAME    Remove a package from the ignored list (requires root)
+  set-install-reason NAME REASON
+                         Mark a package explicit or dependency (requires root)
   cache-info [offset] [limit] [search] [sort_by] [sort_dir]
                          Show cache groups (sort_by: name|version|size)
   cache-files NAME [offset] [limit]
@@ -477,6 +500,7 @@ fn main() {
                         offset,
                         limit,
                         installed_filter,
+                        arg_opt(&args, 8).filter(|repo| repo != "all").as_deref(),
                         sort_by.as_deref(),
                         sort_dir.as_deref(),
                     )
@@ -507,7 +531,8 @@ fn main() {
                 eprintln!("Error: preflight-install requires a package name");
                 std::process::exit(1);
             }
-            validate_package_name(&args[2]).and_then(|_| preflight_install(&args[2]))
+            validate_package_name(&args[2])
+                .and_then(|_| preflight_install(&args[2], &parse_install_target(&args, 3)?))
         }
         "preflight-remove" => {
             if args.len() < 3 {
@@ -543,7 +568,12 @@ fn main() {
             validate_package_name(&args[2]).and_then(|_| {
                 let approved = arg_list(&args, 4);
                 validate_names(&approved)?;
-                install_package(&args[2], timeout, &approved)
+                install_package(
+                    &args[2],
+                    timeout,
+                    &approved,
+                    &parse_install_target(&args, 5)?,
+                )
             })
         }
         "remove-package" => {
@@ -587,6 +617,12 @@ fn main() {
             }
             validate_package_name(&args[2]).and_then(|_| remove_ignored(&args[2]))
         }
+        "set-install-reason" => match (args.get(2), args.get(3)) {
+            (Some(name), Some(reason)) => set_install_reason(name, reason),
+            _ => Err(anyhow::anyhow!(
+                "set-install-reason requires NAME and REASON"
+            )),
+        },
         "cache-info" => get_cache_info(
             arg_usize(&args, 2, 0),
             arg_usize(&args, 3, 50),
@@ -990,6 +1026,61 @@ mod tests {
 
     fn svec(parts: &[&str]) -> Vec<String> {
         parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn install_target_arguments_match_preview_and_commit() -> anyhow::Result<()> {
+        let preview = parse_install_target(
+            &svec(&["bin", "preflight-install", "widget", "extra", "1-1", "true"]),
+            3,
+        )?;
+        let commit = parse_install_target(
+            &svec(&[
+                "bin",
+                "install-package",
+                "widget",
+                "300",
+                "conflicting-package",
+                "extra",
+                "1-1",
+                "true",
+            ]),
+            5,
+        )?;
+        for target in [preview, commit] {
+            assert_eq!(target.repo.as_deref(), Some("extra"));
+            assert_eq!(target.version.as_deref(), Some("1-1"));
+            assert!(target.reinstall);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn install_target_omission_keeps_legacy_defaults() -> anyhow::Result<()> {
+        for args in [
+            svec(&["bin", "preflight-install", "widget"]),
+            svec(&["bin", "preflight-install", "widget", "", "", "false"]),
+        ] {
+            let target = parse_install_target(&args, 3)?;
+            assert!(target.repo.is_none());
+            assert!(target.version.is_none());
+            assert!(!target.reinstall);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn install_target_rejects_invalid_reinstall_flags() {
+        for flag in ["yes", "1", "TRUE"] {
+            let result = parse_install_target(
+                &svec(&["bin", "preflight-install", "widget", "extra", "1-1", flag]),
+                3,
+            );
+            assert_eq!(
+                result.err().as_ref().and_then(classify_error),
+                Some("validation_error")
+            );
+        }
     }
 
     #[test]

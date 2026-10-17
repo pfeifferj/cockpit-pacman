@@ -2,7 +2,7 @@ import "@patternfly/patternfly/patternfly.css";
 import "@patternfly/patternfly/patternfly-addons.css";
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { App } from "./components/App";
+import { Root } from "./components/Root";
 
 function applyTheme() {
   const html = document.documentElement;
@@ -32,5 +32,5 @@ window.matchMedia("(prefers-color-scheme: dark)")
 const container = document.getElementById("root");
 if (container) {
   const root = createRoot(container);
-  root.render(<App />);
+  root.render(<Root />);
 }

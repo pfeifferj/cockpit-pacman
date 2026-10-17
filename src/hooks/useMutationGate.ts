@@ -7,6 +7,7 @@ import {
   type ActiveTransaction,
   type TransactionOutcome,
 } from "../api";
+import type { RouteOptions } from "./useRoute";
 import { usePageVisible } from "./usePageVisible";
 
 /** The view whose progress display belongs to a running command. */
@@ -139,3 +140,10 @@ export function useMutationGate(
 ): MutationGate {
   return mutationGate(action, permission, useActiveTransaction(), owner);
 }
+
+export const OWNER_ROUTES: Record<TransactionOwner, { slug: string; options?: RouteOptions }> = {
+  updates: { slug: "updates" },
+  cache: { slug: "cache" },
+  keyring: { slug: "keyring" },
+  orphans: { slug: "installed", options: { filter: "orphan" } },
+};

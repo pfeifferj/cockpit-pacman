@@ -18,8 +18,8 @@ test.describe("unescalated session", () => {
     const frame = await openPluginUnescalated(page);
     const installed = (await guestCommand(frame, ["pacman", "-Q", "htop"], false)).trim().split(" ")[1];
     const panel = frame.locator('[role="tabpanel"]:visible').first();
-    await frame.getByRole("tab", { name: "Installed Packages", exact: true }).click();
-    await panel.getByPlaceholder("Search packages...").fill("htop");
+    await frame.getByRole("tab", { name: "Installed packages", exact: true }).click();
+    await panel.getByRole("textbox", { name: "Search installed packages" }).fill("htop");
     const row = panel.locator("tbody tr").filter({ hasText: "htop" }).first();
     await expect(row).toContainText(installed);
 

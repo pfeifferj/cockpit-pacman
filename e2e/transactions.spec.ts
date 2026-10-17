@@ -9,10 +9,11 @@ async function archiveState(pacman: PackmanPage) {
 
 async function openArchive(pacman: PackmanPage) {
   await pacman.switchTab("Installed Packages");
-  await pacman.panel.getByPlaceholder("Search packages...").fill("htop");
+  await pacman.panel.getByRole("textbox", { name: "Search installed packages" }).fill("htop");
   await pacman.panel.getByRole("button", { name: "htop", exact: true }).click();
-  await pacman.frame.getByRole("dialog").getByRole("button", { name: "Downgrade", exact: true }).click();
-  const modal = pacman.frame.getByRole("dialog");
+  await pacman.panel.locator('[data-details-for="htop"]').getByRole("button", { name: "Actions", exact: true }).click();
+  await pacman.frame.getByRole("menuitem", { name: "Downgrade htop…", exact: true }).click();
+  const modal = pacman.frame.getByRole("dialog", { name: /^(Downgrade|Upgrade) htop$/ });
   await modal.getByRole("button", { name: "Archive", exact: true }).click();
   const row = modal.locator("tbody tr").first();
   await expect(row).toBeVisible();

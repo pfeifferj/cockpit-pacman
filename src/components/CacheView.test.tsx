@@ -394,7 +394,7 @@ describe("CacheView", () => {
   });
 
   it("falls back to sync package info for uninstalled packages", async () => {
-    mockGetPackageInfo.mockRejectedValue(new Error("Package not found"));
+    mockGetPackageInfo.mockRejectedValue(new api.BackendError("Package not found", "not_found"));
     mockGetSyncPackageInfo.mockResolvedValue({
       name: "linux",
       version: "6.7.0-arch1-1",

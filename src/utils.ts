@@ -56,3 +56,7 @@ export function plural(n: number, one: string, many = `${one}s`): string {
 export function ignoreNotice(name: string, ignored: boolean): string {
   return `${name} is ${ignored ? "now" : "no longer"} ignored during upgrades`;
 }
+
+export const REPO_NAME_RE = /^[A-Za-z0-9._-]+$/;
+
+export const errorText = (error: unknown): string => error instanceof Error ? error.message : String(error);

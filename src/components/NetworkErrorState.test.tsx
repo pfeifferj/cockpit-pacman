@@ -22,10 +22,18 @@ describe("NetworkErrorState", () => {
     const onDismiss = vi.fn();
     render(<NetworkErrorState onRetry={onRetry} onDismiss={onDismiss} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(onRetry).toHaveBeenCalledTimes(1);
     expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls onRetry without the click event and uses the given label", () => {
+    const onRetry = vi.fn();
+    render(<NetworkErrorState onRetry={onRetry} retryLabel="Retry sync" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry sync" }));
+    expect(onRetry).toHaveBeenCalledWith();
   });
 
   it("omits the footer when no actions are given", () => {

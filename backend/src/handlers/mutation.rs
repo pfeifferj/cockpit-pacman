@@ -734,10 +734,94 @@ pub fn remove_orphans(
     )
 }
 
+#[derive(Default)]
+pub struct InstallTarget {
+    pub repo: Option<String>,
+    pub version: Option<String>,
+    pub reinstall: bool,
+}
+
+impl InstallTarget {
+    fn validate(&self) -> Result<()> {
+        use crate::models::InvalidInput;
+
+        if self.reinstall && (self.repo.is_none() || self.version.is_none()) {
+            return Err(InvalidInput(
+                "Reinstall requires a repository and the installed version".into(),
+            )
+            .into());
+        }
+        if let Some(repo) = self.repo.as_deref() {
+            crate::validation::validate_repo_name(repo)
+                .map_err(|error| InvalidInput(error.to_string()))?;
+        }
+        if let Some(version) = self.version.as_deref() {
+            crate::validation::validate_version(version)
+                .map_err(|error| InvalidInput(error.to_string()))?;
+        }
+        Ok(())
+    }
+}
+
+fn check_install_version(
+    name: &str,
+    available: &str,
+    installed: Option<&str>,
+    target: &InstallTarget,
+) -> Result<()> {
+    let Some(expected) = target.version.as_deref() else {
+        return Ok(());
+    };
+    if available != expected {
+        return Err(crate::models::InvalidInput(format!(
+            "The repository version of {name} changed. Expected {expected}; found {available}. Refresh the package details."
+        ))
+        .into());
+    }
+    if !target.reinstall
+        && let Some(installed) = installed
+    {
+        return Err(crate::models::InvalidInput(format!(
+            "{name} {installed} is already installed. Refresh the package details before choosing another action."
+        ))
+        .into());
+    }
+    if target.reinstall && installed != Some(expected) {
+        return Err(crate::models::InvalidInput(format!(
+            "The installed version of {name} changed. Expected {expected}; found {}. Refresh the package details.",
+            installed.unwrap_or("not installed")
+        ))
+        .into());
+    }
+    Ok(())
+}
+
+fn install_target<'a>(
+    localdb: &'a alpm::Db,
+    syncdbs: alpm::AlpmList<'a, &'a alpm::Db>,
+    name: &str,
+    target: &InstallTarget,
+) -> Result<&'a alpm::Package> {
+    target.validate()?;
+    let package = syncdbs
+        .iter()
+        .filter(|db| target.repo.as_deref().is_none_or(|repo| db.name() == repo))
+        .find_map(|db| db.pkg(name).ok())
+        .ok_or_else(|| {
+            crate::models::InvalidInput(format!(
+                "Package '{name}' not found in the selected repositories"
+            ))
+        })?;
+    let installed = localdb.pkg(name).ok().map(|pkg| pkg.version().as_str());
+    check_install_version(name, package.version().as_str(), installed, target)?;
+    Ok(package)
+}
+
 pub fn install_package(
     name: &str,
     timeout_secs: Option<u64>,
     approved_removals: &[String],
+    target: &InstallTarget,
 ) -> Result<()> {
     crate::network::require_network()?;
     let (mut handle, timeout) = begin_mutation(
@@ -750,14 +834,6 @@ pub fn install_package(
 
     check_cancel_early!(&timeout);
 
-    let not_found = || fail_complete(format!("Package '{}' not found in any repository", name));
-
-    // Resolved before taking the transaction (and the db lock), so a missing
-    // package is reported as such even when another operation holds the lock.
-    if !handle.syncdbs().iter().any(|db| db.pkg(name).is_ok()) {
-        return Err(not_found());
-    }
-
     let mut tx = match TransactionGuard::new(&mut handle, TransFlag::NONE) {
         Ok(tx) => tx,
         Err(e) => {
@@ -766,9 +842,7 @@ pub fn install_package(
         }
     };
 
-    let Some(pkg) = tx.syncdbs().iter().find_map(|db| db.pkg(name).ok()) else {
-        return Err(not_found());
-    };
+    let pkg = install_target(tx.localdb(), tx.syncdbs(), name, target)?;
     if let Err(e) = tx.add_pkg(pkg) {
         return Err(add_pkg_failure(name, e));
     }
@@ -977,17 +1051,12 @@ pub(crate) fn build_preview(
 }
 
 /// Previews an install without committing; a held lock returns database_locked.
-pub fn preflight_install(name: &str) -> Result<()> {
+pub fn preflight_install(name: &str, target: &InstallTarget) -> Result<()> {
     setup_signal_handler()?;
 
     let mut handle = get_handle()?;
     let state = Rc::new(RefCell::new(PreflightState::default()));
     record_questions(&mut handle, &state);
-
-    let not_found = || format!("Package '{}' not found in any repository", name);
-    if !handle.syncdbs().iter().any(|db| db.pkg(name).is_ok()) {
-        return emit_preview_error(not_found());
-    }
 
     if is_cancelled() {
         anyhow::bail!("Operation cancelled");
@@ -995,8 +1064,9 @@ pub fn preflight_install(name: &str) -> Result<()> {
 
     let mut tx = TransactionGuard::new(&mut handle, TransFlag::NONE)?;
 
-    let Some(pkg) = tx.syncdbs().iter().find_map(|db| db.pkg(name).ok()) else {
-        return emit_preview_error(not_found());
+    let pkg = match install_target(tx.localdb(), tx.syncdbs(), name, target) {
+        Ok(pkg) => pkg,
+        Err(error) => return emit_preview_error(error.to_string()),
     };
     if let Err(e) = tx.add_pkg(pkg) {
         return emit_preview_error(format!("Failed to add '{}' to transaction: {}", name, e));
@@ -1088,6 +1158,249 @@ pub fn preflight_remove_orphans(names: &[String]) -> Result<()> {
     };
 
     finish_preview(&mut tx, &selected, true, &state, warnings)
+}
+
+#[cfg(test)]
+mod install_target_tests {
+    use super::{InstallTarget, TransactionGuard, install_target};
+    use alpm::{Alpm, SigLevel, TransFlag};
+    use anyhow::{Context, Result};
+    use std::path::PathBuf;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Fixture(PathBuf);
+
+    impl Fixture {
+        fn new(installed: Option<&str>) -> Result<Self> {
+            static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
+            let fixture = Self(std::env::temp_dir().join(format!(
+                "cpac-install-target-{}-{}",
+                std::process::id(),
+                NEXT_ID.fetch_add(1, Ordering::Relaxed)
+            )));
+            std::fs::create_dir_all(fixture.0.join("db/sync"))?;
+            fixture.set_installed(installed)?;
+            fixture.write_repo("core", "widget", "2-1")?;
+            fixture.write_repo("extra", "widget", "1-1")?;
+            fixture.write_repo("unrelated", "other", "1-1")?;
+            Ok(fixture)
+        }
+
+        fn set_installed(&self, version: Option<&str>) -> Result<()> {
+            let local = self.0.join("db/local");
+            if local.exists() {
+                std::fs::remove_dir_all(&local)?;
+            }
+            std::fs::create_dir_all(&local)?;
+            std::fs::write(local.join("ALPM_DB_VERSION"), "9\n")?;
+            if let Some(version) = version {
+                let package = local.join(format!("widget-{version}"));
+                std::fs::create_dir(&package)?;
+                std::fs::write(
+                    package.join("desc"),
+                    format!(
+                        "%NAME%\nwidget\n\n%VERSION%\n{version}\n\n%REASON%\n0\n\n%ARCH%\nany\n\n"
+                    ),
+                )?;
+                std::fs::write(package.join("files"), "")?;
+            }
+            Ok(())
+        }
+
+        fn write_repo(&self, repo: &str, name: &str, version: &str) -> Result<()> {
+            let directory = self.0.join(format!("repo-{repo}"));
+            let entry = format!("{name}-{version}");
+            let package = directory.join(&entry);
+            std::fs::create_dir_all(&package)?;
+            std::fs::write(
+                package.join("desc"),
+                format!(
+                    "%NAME%\n{name}\n\n%VERSION%\n{version}\n\n%ARCH%\nany\n\n\
+                     %FILENAME%\n{name}-{version}-any.pkg.tar.zst\n\n%CSIZE%\n100\n\n%ISIZE%\n200\n\n"
+                ),
+            )?;
+            let output = Command::new("tar")
+                .arg("-cf")
+                .arg(self.0.join(format!("db/sync/{repo}.db")))
+                .arg("-C")
+                .arg(directory)
+                .arg("--")
+                .arg(entry)
+                .output()?;
+            anyhow::ensure!(
+                output.status.success(),
+                "Cannot create repository fixture: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            Ok(())
+        }
+
+        fn handle(&self) -> Result<Alpm> {
+            let database = self.0.join("db");
+            let handle = Alpm::new(
+                self.0.to_str().context("Invalid fixture root")?,
+                database.to_str().context("Invalid fixture database path")?,
+            )?;
+            for repo in ["core", "extra", "unrelated"] {
+                handle.register_syncdb(repo, SigLevel::NONE)?;
+            }
+            Ok(handle)
+        }
+
+        fn prepare(&self, target: &InstallTarget) -> Result<(String, String)> {
+            let mut handle = self.handle()?;
+            let mut tx = TransactionGuard::new(&mut handle, TransFlag::NONE)?;
+            let package = install_target(tx.localdb(), tx.syncdbs(), "widget", target)?;
+            let selected = (
+                package
+                    .db()
+                    .context("Missing repository")?
+                    .name()
+                    .to_string(),
+                package.version().to_string(),
+            );
+            tx.add_pkg(package)
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+            tx.prepare().map_err(anyhow::Error::msg)?;
+            Ok(selected)
+        }
+
+        fn assert_rejected(&self, target: &InstallTarget) -> Result<()> {
+            let error = self.prepare(target).err().context("Target was accepted")?;
+            assert_eq!(
+                crate::util::classify_error(&error),
+                Some("validation_error")
+            );
+            assert!(!self.0.join("db/db.lck").exists());
+            Ok(())
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn target(repo: &str, version: &str, reinstall: bool) -> InstallTarget {
+        InstallTarget {
+            repo: Some(repo.into()),
+            version: Some(version.into()),
+            reinstall,
+        }
+    }
+
+    #[test]
+    fn selected_repository_overrides_default_priority() -> Result<()> {
+        let fixture = Fixture::new(None)?;
+        assert_eq!(
+            fixture.prepare(&InstallTarget::default())?,
+            ("core".into(), "2-1".into())
+        );
+        assert_eq!(
+            fixture.prepare(&target("extra", "1-1", false))?,
+            ("extra".into(), "1-1".into())
+        );
+        assert!(!fixture.0.join("db/db.lck").exists());
+        assert!(fixture.handle()?.localdb().pkg("widget").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn missing_repository_or_package_never_falls_back() -> Result<()> {
+        let fixture = Fixture::new(None)?;
+        fixture.assert_rejected(&target("disabled", "2-1", false))?;
+        fixture.assert_rejected(&target("unrelated", "2-1", false))
+    }
+
+    #[test]
+    fn a_matching_version_in_another_repository_is_not_selected() -> Result<()> {
+        let fixture = Fixture::new(None)?;
+        fixture.assert_rejected(&target("extra", "2-1", false))
+    }
+
+    #[test]
+    fn repository_version_drift_requires_a_new_preview() -> Result<()> {
+        let fixture = Fixture::new(None)?;
+        let target = target("extra", "1-1", false);
+        fixture.prepare(&target)?;
+        fixture.write_repo("extra", "widget", "3-1")?;
+        fixture.assert_rejected(&target)
+    }
+
+    #[test]
+    fn reinstall_rechecks_the_installed_version() -> Result<()> {
+        let fixture = Fixture::new(Some("1-1"))?;
+        let target = target("extra", "1-1", true);
+        assert_eq!(fixture.prepare(&target)?, ("extra".into(), "1-1".into()));
+        for installed in [Some("2-1"), Some("0.9-1"), None] {
+            fixture.set_installed(installed)?;
+            fixture.assert_rejected(&target)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn pinned_install_refuses_a_package_installed_after_preview() -> Result<()> {
+        let fixture = Fixture::new(None)?;
+        let target = target("extra", "1-1", false);
+        fixture.prepare(&target)?;
+        for installed in ["0.9-1", "1-1", "2-1"] {
+            fixture.set_installed(Some(installed))?;
+            fixture.assert_rejected(&target)?;
+            assert_eq!(
+                fixture
+                    .handle()?
+                    .localdb()
+                    .pkg("widget")?
+                    .version()
+                    .as_str(),
+                installed
+            );
+        }
+        assert_eq!(
+            fixture.prepare(&InstallTarget::default())?,
+            ("core".into(), "2-1".into())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn reinstall_requires_both_repository_and_version() -> Result<()> {
+        let fixture = Fixture::new(Some("1-1"))?;
+        for target in [
+            InstallTarget {
+                reinstall: true,
+                ..Default::default()
+            },
+            InstallTarget {
+                repo: Some("extra".into()),
+                reinstall: true,
+                ..Default::default()
+            },
+            InstallTarget {
+                version: Some("1-1".into()),
+                reinstall: true,
+                ..Default::default()
+            },
+        ] {
+            fixture.assert_rejected(&target)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn malformed_target_fields_are_validation_errors() -> Result<()> {
+        let fixture = Fixture::new(None)?;
+        for target in [
+            target("../extra", "1-1", false),
+            target("extra", "../1-1", false),
+        ] {
+            fixture.assert_rejected(&target)?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

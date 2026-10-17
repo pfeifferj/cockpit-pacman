@@ -68,13 +68,13 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           status="danger"
         >
           <EmptyStateBody>
-            An error occurred while rendering this section. You can try reloading
-            to recover.
+            An error occurred while rendering this section. Try again to show this
+            section again.
           </EmptyStateBody>
           <EmptyStateFooter>
             <EmptyStateActions>
               <Button variant="primary" onClick={this.handleReload}>
-                Reload
+                Try again
               </Button>
             </EmptyStateActions>
             {(error || errorInfo) && (

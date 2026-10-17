@@ -63,6 +63,7 @@ const RUN_STATE: Record<RunStatus, ModalState> = {
 };
 
 interface ActionConfig {
+  reinstall?: boolean;
   warnPendingUpdates?: boolean;
   verb: string;
   /** Consequence text above the preview; `preview` is absent while it loads. */
@@ -70,7 +71,7 @@ interface ActionConfig {
   /** Commit button text; `dependencies` is dependencyCount of the preview. */
   confirmLabel: (pkg: string, dependencies?: number) => string;
   /** Resolves the transaction without committing. Without it the modal opens on the confirm step. */
-  preview?: (name: string) => Promise<PreviewData>;
+  preview?: (name: string, target?: import("../api").InstallTarget) => Promise<PreviewData>;
   /** Packages in the preview beyond the target itself. */
   dependencyCount: (preview: PreviewData) => number;
   /** The preview's blocked_by lists installed dependents of the target, so the user can resolve the block from the graph. */
@@ -84,12 +85,13 @@ interface ActionConfig {
   stopVerb: string;
   successTitle: string;
   successText: (pkg: string) => string;
-  run: (callbacks: UpgradeCallbacks, name: string, approvedRemovals?: string[]) => StreamingHandle;
+  run: (callbacks: UpgradeCallbacks, name: string, approvedRemovals?: string[], target?: import("../api").InstallTarget) => StreamingHandle;
 }
 
 interface PackageActionModalProps {
   packageName: string;
   packageVersion: string;
+  packageRepository?: string;
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: () => void;
@@ -100,6 +102,7 @@ interface PackageActionModalProps {
 export const PackageActionModal: React.FC<PackageActionModalProps & { config: ActionConfig }> = ({
   packageName,
   packageVersion,
+  packageRepository,
   isOpen,
   onClose,
   onSuccess,
@@ -183,7 +186,9 @@ export const PackageActionModal: React.FC<PackageActionModalProps & { config: Ac
       return;
     }
     setState("previewing");
-    config.preview(packageName).then(
+    const target = packageRepository || config.reinstall
+      ? { repo: packageRepository, version: packageVersion, reinstall: config.reinstall } : undefined;
+    (target ? config.preview(packageName, target) : config.preview(packageName)).then(
       (result) => {
         if (request !== previewRequestRef.current) return;
         setPreview(result);
@@ -201,7 +206,7 @@ export const PackageActionModal: React.FC<PackageActionModalProps & { config: Ac
         announce("Could not check what will change");
       }
     );
-  }, [config, packageName, announce, resetStale]);
+  }, [config, packageName, packageRepository, packageVersion, announce, resetStale]);
 
   useEffect(() => {
     if (state !== "previewing") return;
@@ -277,7 +282,12 @@ export const PackageActionModal: React.FC<PackageActionModalProps & { config: Ac
     const next = new RunSession(`${config.verb} ${packageName}`);
     handedOffRef.current = false;
     setSession(next);
-    next.start((callbacks) => config.run(callbacks, packageName, preview?.remove.map(p => p.name) ?? []), UNKNOWN_PLAN, onSuccess);
+    next.start((callbacks) => {
+      const consent = preview?.remove.map(p => p.name) ?? [];
+      return packageRepository || config.reinstall
+        ? config.run(callbacks, packageName, consent, { repo: packageRepository, version: packageVersion, reinstall: config.reinstall })
+        : config.run(callbacks, packageName, consent);
+    }, UNKNOWN_PLAN, onSuccess);
   };
 
   const handleRunInBackground = () => {
@@ -291,6 +301,7 @@ export const PackageActionModal: React.FC<PackageActionModalProps & { config: Ac
           config={config}
           packageName={packageName}
           packageVersion={packageVersion}
+          packageRepository={packageRepository}
           isOpen
           onClose={close}
           session={handed}
@@ -646,6 +657,19 @@ export const installConfig: ActionConfig = {
   successTitle: "Package installed",
   successText: (pkg) => `${pkg} has been installed.`,
   run: installPackage,
+};
+
+export const reinstallConfig: ActionConfig = {
+  ...installConfig,
+  reinstall: true,
+  verb: "Reinstall",
+  confirmPrompt: (pkg) => <>Reinstall <strong>{pkg}</strong>?</>,
+  confirmLabel: (pkg, dependencies = 0) => `Reinstall ${pkg}${withDependencies(dependencies)}`,
+  failureTitle: (pkg) => `Cannot reinstall ${pkg}`,
+  runningText: "Reinstalling",
+  stopVerb: "reinstalling",
+  successTitle: "Package reinstalled",
+  successText: (pkg) => `${pkg} has been reinstalled.`,
 };
 
 const removedDependencies = (p: PreviewData) => p.remove.filter((r) => r.reason === "dependency").length;

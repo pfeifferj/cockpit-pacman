@@ -40,7 +40,7 @@ test.describe("Orphans Tab", () => {
     await pacman.panel.locator("table tbody tr").first().click();
 
     await expect(
-      pacman.frame.locator('[class*="modal"], [role="dialog"]').first()
+      pacman.panel.locator("[data-details-for]").getByRole("button", { name: "Close package details", exact: true })
     ).toBeVisible({ timeout: 10000 });
   });
 });

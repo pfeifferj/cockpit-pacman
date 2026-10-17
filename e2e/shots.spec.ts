@@ -25,9 +25,9 @@ test.describe("docs screenshots", () => {
     await pacman.waitForLoading();
     await pacman.panel.locator("table tbody tr td a, table tbody tr td button").first().click();
 
-    const dialog = pacman.frame.locator('[role="dialog"]').first();
-    await dialog.waitFor();
-    await dialog.locator(".pf-v6-c-spinner").first().waitFor({ state: "hidden", timeout: 30000 });
+    const details = pacman.panel.locator("[data-details-for]");
+    await details.getByRole("button", { name: "Close package details", exact: true }).waitFor();
+    await details.locator(".pf-v6-c-spinner").first().waitFor({ state: "hidden", timeout: 30000 });
     await pacman.page.waitForTimeout(500);
     await pacman.page.screenshot({ path: `${IMG}/details.png` });
   });

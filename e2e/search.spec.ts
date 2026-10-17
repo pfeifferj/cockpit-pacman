@@ -91,7 +91,7 @@ test.describe("Search Packages Tab", () => {
     const firstRow = pacman.panel.locator("table tbody tr").first();
     await firstRow.click();
 
-    const modal = pacman.frame.locator('[class*="modal"], [role="dialog"]').first();
-    await expect(modal).toBeVisible({ timeout: 10000 });
+    const details = pacman.panel.locator("[data-details-for]");
+    await expect(details.getByRole("button", { name: "Close package details", exact: true })).toBeVisible({ timeout: 10000 });
   });
 });

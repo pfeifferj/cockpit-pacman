@@ -247,6 +247,7 @@ fn package_details_build_date_is_always_i64_not_null() {
         provides: vec![],
         depends: vec![],
         optdepends: vec![],
+        installed_optdepends: None,
         conflicts: vec![],
         replaces: vec![],
         required_by: vec![],
@@ -283,6 +284,7 @@ fn package_details_array_fields_always_present() {
         provides: vec![],
         depends: vec!["glibc".into()],
         optdepends: vec![],
+        installed_optdepends: None,
         conflicts: vec![],
         replaces: vec![],
         required_by: vec![],
@@ -332,6 +334,7 @@ fn update_stats_nested_shape() {
         provides: vec![],
         depends: vec![],
         optdepends: vec![],
+        installed_optdepends: None,
         conflicts: vec![],
         replaces: vec![],
         required_by: vec![],
@@ -434,6 +437,7 @@ fn search_response_has_all_count_fields() {
         total_installed: 10,
         total_not_installed: 32,
         repositories: vec!["core".into()],
+        repository_counts: None,
     };
     let v = to_json(&response);
 
@@ -482,6 +486,7 @@ fn sync_package_details_has_download_size_not_install_date() {
         provides: vec![],
         depends: vec![],
         optdepends: vec![],
+        installed_optdepends: None,
         conflicts: vec![],
         replaces: vec![],
         download_size: 150_000_000,
@@ -490,6 +495,7 @@ fn sync_package_details_has_download_size_not_install_date() {
         architecture: None,
         build_date: 1_704_067_200,
         repository: "core".into(),
+        installed_version: None,
     };
     let v = to_json(&details);
 

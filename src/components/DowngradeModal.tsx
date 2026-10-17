@@ -83,6 +83,8 @@ interface DowngradeModalProps {
   /** Runs instead of onClose when an error action leaves for another tab. */
   onNavigateAway?: () => void;
   appendTo?: () => HTMLElement;
+  /** Preview this version from cache or archive, when available. */
+  preselectVersion?: string;
   /** A run already in progress and the version it installs, shown instead of the version list. */
   background?: { session: RunSession; version: CachedVersion; source: DowngradeSource };
 }
@@ -94,6 +96,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
   onClose,
   onNavigateAway,
   appendTo,
+  preselectVersion,
   background,
 }) => {
   const [localState, setState] = useState<ModalState>("loading");
@@ -128,6 +131,10 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
   });
   const [versionFilter, setVersionFilter] = useState("");
   const [serverResults, setServerResults] = useState<{ query: string; packages: CachedVersion[]; failed: boolean } | null>(null);
+  const [preselectMiss, setPreselectMiss] = useState<{ version: string; archiveChecked: boolean } | null>(null);
+  const [preselectLookup, setPreselectLookup] = useState<{ version: string; source: DowngradeSource } | null>(null);
+  const retryArchiveRef = useRef<HTMLElement>(null);
+  const focusRetryRef = useRef(false);
   const [confirmingStop, setConfirmingStop] = useState(false);
   const stopAsked = confirmingStop && state === "downgrading";
   const cancelButtonRef = useRef<HTMLElement>(null);
@@ -207,6 +214,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
     setState("loading");
     setError(null);
     setErrorCode(undefined);
+    setPreselectLookup(null);
     try {
       const response = src === "archive"
         ? await listArchiveVersions(packageName)
@@ -224,6 +232,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
   }, [packageName]);
 
   const resumingRef = useRef(background !== undefined);
+  const initialLoadRef = useRef<() => void>(() => {});
   useEffect(() => {
     if (!isOpen) return;
     if (resumingRef.current) {
@@ -236,12 +245,14 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
       setSession(null);
       setVersionFilter("");
       setServerResults(null);
-      void loadVersions("cache");
+      setPreselectMiss(null);
+      initialLoadRef.current();
     });
   }, [isOpen, loadVersions]);
 
   const handleSourceChange = (src: DowngradeSource) => {
     if (src === source) return;
+    setPreselectMiss(null);
     setSource(src);
     setActiveSortIndex(null);
     setVersionFilter("");
@@ -266,7 +277,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
     };
   }, []);
 
-  const startPreview = (version: CachedVersion) => {
+  const startPreview = (version: CachedVersion, src: DowngradeSource = source) => {
     abortPreview();
     const request = previewRequestRef.current;
     setSelectedVersion(version);
@@ -278,7 +289,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
     staleness.reset();
     setState("previewing");
     let pending: Promise<PreviewData>;
-    if (source === "archive") {
+    if (src === "archive") {
       const controller = new AbortController();
       previewAbortRef.current = controller;
       pending = previewDowngradeArchive(packageName, version.filename, {
@@ -310,6 +321,62 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
       },
     );
   };
+
+  // Cache first, as it needs no download; the archive is searched for the exact version past its listing cap.
+  const preselect = async (wanted: string) => {
+    const loadId = ++loadIdRef.current;
+    setState("loading");
+    setError(null);
+    setErrorCode(undefined);
+    setPreselectMiss(null);
+    setPreselectLookup({ version: wanted, source: "cache" });
+    const cache = await listDowngrades(packageName).then((r) => r.packages, () => null);
+    if (loadId !== loadIdRef.current) return;
+    const cached = cache?.find((v) => v.version === wanted);
+    if (cache && cached) {
+      setPreselectLookup(null);
+      setVersions(cache);
+      startPreview(cached, "cache");
+      return;
+    }
+    setPreselectLookup({ version: wanted, source: "archive" });
+    const archive = await listArchiveVersions(packageName, wanted).then((r) => r.packages, () => null);
+    if (loadId !== loadIdRef.current) return;
+    setPreselectLookup(null);
+    const archived = archive?.find((v) => v.version === wanted);
+    if (archive && archived) {
+      focusRetryRef.current = false;
+      setSource("archive");
+      setVersions(archive);
+      startPreview(archived, "archive");
+      return;
+    }
+    setPreselectMiss({ version: wanted, archiveChecked: archive !== null });
+    if (cache) {
+      setVersions(cache);
+      setState("select");
+    } else {
+      void loadVersions("cache");
+    }
+  };
+
+  const retryArchive = (wanted: string) => {
+    focusRetryRef.current = true;
+    void preselect(wanted);
+  };
+
+  useEffect(() => {
+    if (!focusRetryRef.current || state === "loading") return;
+    focusRetryRef.current = false;
+    retryArchiveRef.current?.focus();
+  }, [state, preselectMiss]);
+
+  useEffect(() => {
+    initialLoadRef.current = () => {
+      if (preselectVersion) void preselect(preselectVersion);
+      else void loadVersions("cache");
+    };
+  });
 
   const backToVersions = () => {
     abortPreview();
@@ -500,6 +567,15 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
   const renderContent = () => {
     switch (state) {
       case "loading":
+        if (preselectLookup) {
+          return (
+            <EmptyState
+              headingLevel="h3"
+              icon={Spinner}
+              titleText={`Looking for ${packageName} ${preselectLookup.version} in the ${preselectLookup.source === "archive" ? "Arch Linux Archive" : "package cache"}\u2026`}
+            />
+          );
+        }
         return (
           <EmptyState headingLevel="h2" icon={Spinner} titleText="Loading versions">
             <EmptyStateBody>
@@ -540,7 +616,37 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
         return (
           <>
             {sourceToggle}
-            {versions.length === 0 ? (
+            {preselectMiss && (
+              <Alert component="h2" variant="info" isInline className="pf-v6-u-mb-md" title={preselectMiss.archiveChecked
+                ? `${preselectMiss.version} is not in the cache or the archive`
+                : `${preselectMiss.version} is not in the cache, and the archive could not be reached`}
+                actionLinks={!preselectMiss.archiveChecked && (
+                  <AlertActionLink innerRef={retryArchiveRef} onClick={() => retryArchive(preselectMiss.version)}>
+                    Try the archive again
+                  </AlertActionLink>
+                )}
+              >
+                {versions.length > 0 && "Choose another version below."}
+              </Alert>
+            )}
+            {versions.length === 0 && preselectMiss ? (
+              <EmptyState headingLevel="h2" titleText="No other versions in the cache">
+                <EmptyStateBody>
+                  {preselectMiss.archiveChecked
+                    ? `The package cache holds no other version of ${packageName}. The archive may have a different one.`
+                    : `The package cache holds no other version of ${packageName}. Try the archive again once it can be reached.`}
+                </EmptyStateBody>
+                {preselectMiss.archiveChecked && (
+                  <EmptyStateFooter>
+                    <EmptyStateActions>
+                      <Button variant="secondary" onClick={() => handleSourceChange("archive")}>
+                        Show archive versions
+                      </Button>
+                    </EmptyStateActions>
+                  </EmptyStateFooter>
+                )}
+              </EmptyState>
+            ) : versions.length === 0 ? (
               <EmptyState headingLevel="h2" titleText="No versions available">
                 <EmptyStateBody>
                   {source === "archive"

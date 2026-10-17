@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import { TimeAgo } from "./TimeAgo";
 
 describe("TimeAgo", () => {
@@ -57,5 +57,27 @@ describe("TimeAgo", () => {
     expect(el.closest("[aria-describedby]") || el.parentElement).toBeTruthy();
     // Tooltip content should be date-only (no time component)
     expect(el.getAttribute("aria-label") ?? "").not.toContain(":");
+  });
+});
+
+describe("TimeAgo keyboard access", () => {
+  it("renders a focusable time element with a machine-readable date", () => {
+    render(<TimeAgo timestamp="2026-04-10T12:00:00Z" />);
+    const el = screen.getByText(/ago$/);
+    expect(el.tagName).toBe("TIME");
+    expect(el).toHaveAttribute("dateTime", "2026-04-10T12:00:00.000Z");
+    expect(el).toHaveAttribute("tabindex", "0");
+  });
+
+  it("shows the full timestamp when focused", async () => {
+    render(<TimeAgo timestamp="2026-04-10T12:00:00Z" dateOnly />);
+    const el = screen.getByText(/ago$/);
+    act(() => el.focus());
+    expect(await screen.findByRole("tooltip")).toBeInTheDocument();
+  });
+
+  it("keeps the fallback out of the tab order", () => {
+    const { container } = render(<TimeAgo timestamp={null} />);
+    expect(container.querySelector("[tabindex]")).toBeNull();
   });
 });

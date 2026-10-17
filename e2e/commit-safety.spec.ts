@@ -323,7 +323,7 @@ test.describe("package transaction boundaries", () => {
     await pacman.switchTab("Search Packages");
     await pacman.panel.getByPlaceholder(/Search/).first().fill(PACKAGE);
     await pacman.panel.getByRole("button", { name: PACKAGE, exact: true }).click();
-    await pacman.frame.getByRole("dialog").getByRole("button", { name: "Install", exact: true }).click();
+    await pacman.panel.locator(`[data-details-for="${PACKAGE}"]`).getByRole("button", { name: `Install ${PACKAGE}`, exact: true }).click();
     const dialog = pacman.frame.getByRole("dialog", { name: `Install ${PACKAGE}` });
     await expect(dialog.getByRole("button", { name: `Install ${PACKAGE}`, exact: true })).toBeVisible();
     return dialog;
