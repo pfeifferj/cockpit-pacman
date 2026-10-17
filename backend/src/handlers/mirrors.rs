@@ -5,6 +5,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
+use crate::backups::BackupStore;
 use crate::models::{
     BackupSource, MirrorBackup, MirrorBackupListResponse, MirrorEntry, MirrorListResponse,
     MirrorStatus, MirrorStatusResponse, MirrorTestResult, RefreshMirrorsResponse,
@@ -313,7 +314,6 @@ fn test_single_mirror(agent: &ureq::Agent, mirror_url: &str) -> MirrorTestResult
 }
 
 const MAX_BACKUPS: usize = 5;
-const BACKUP_DIR: &str = "/etc/pacman.d";
 const BACKUP_NAME_PREFIX: &str = "mirrorlist.backup.";
 const BACKUP_PREFIX: &str = "/etc/pacman.d/mirrorlist.backup.";
 const BACKUP_META_PATH: &str = "/etc/pacman.d/.mirrorlist-backups.meta.json";
@@ -333,8 +333,6 @@ pub fn save_mirrorlist(mirrors: &[MirrorEntry]) -> Result<()> {
         }
     }
 
-    let path = Path::new(MIRRORLIST_PATH);
-
     // Build content first
     let mut content = String::new();
     content.push_str("##\n");
@@ -353,33 +351,27 @@ pub fn save_mirrorlist(mirrors: &[MirrorEntry]) -> Result<()> {
         }
     }
 
-    // Serialize the whole write/backup/rename/cleanup cycle against other
-    // mirrorlist mutations (save, restore, delete) sharing this lock.
-    let backup_path = crate::util::with_file_lock(Path::new(LOCK_PATH), || {
-        let backup_path = if path.exists() {
-            let backup = crate::util::unique_backup_path(BACKUP_PREFIX);
-            fs::copy(path, &backup)?;
-            Some(backup)
-        } else {
-            None
-        };
-
-        crate::util::write_bytes_atomic_with_mode(path, content.as_bytes(), 0o644)?;
-
-        // Clean up old backups, keeping only the most recent MAX_BACKUPS
-        cleanup_old_backups();
-        note_backup(&backup_path, BackupSource::Manual);
-
-        Ok(backup_path)
+    let store = backup_store();
+    let result = crate::util::with_file_lock(store.lock, || {
+        store.replace_locked(content.as_bytes(), BackupSource::Manual)
     })?;
 
-    let response = SaveMirrorlistResponse {
+    emit_json(&SaveMirrorlistResponse {
         success: true,
-        backup_path,
+        backup_path: result.backup_path,
         message: format!("Saved {} mirrors to {}", mirrors.len(), MIRRORLIST_PATH),
-    };
+        warnings: result.warnings,
+    })
+}
 
-    emit_json(&response)
+fn backup_store() -> BackupStore<'static> {
+    BackupStore {
+        target: Path::new(MIRRORLIST_PATH),
+        lock: Path::new(LOCK_PATH),
+        manifest: Path::new(BACKUP_META_PATH),
+        name_prefix: BACKUP_NAME_PREFIX,
+        keep: MAX_BACKUPS,
+    }
 }
 
 fn count_mirrors_in_file(path: &Path) -> Result<EntryCounts> {
@@ -421,145 +413,39 @@ fn ensure_mirrors_restorable(backup: &Path) -> Result<()> {
 }
 
 pub fn list_mirror_backups() -> Result<()> {
-    let parent = Path::new("/etc/pacman.d");
-    let mut backups: Vec<MirrorBackup> = Vec::new();
-    let provenance = crate::util::read_backup_provenance(Path::new(BACKUP_META_PATH));
-
-    for entry in fs::read_dir(parent)? {
-        let entry = entry?;
-        let name = match entry.file_name().into_string() {
-            Ok(n) => n,
-            Err(_) => continue,
-        };
-
-        let timestamp_str = match name.strip_prefix(BACKUP_NAME_PREFIX) {
-            Some(s) => s,
-            None => continue,
-        };
-
-        let timestamp: i64 = match timestamp_str.parse() {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-
-        let metadata = entry.metadata()?;
-        let size = metadata.len();
-
-        let counts = count_mirrors_in_file(&entry.path()).unwrap_or_default();
-
-        let date = chrono::DateTime::from_timestamp(timestamp, 0)
-            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
-            .unwrap_or_else(|| "Unknown".to_string());
-
-        let source = provenance.get(&timestamp).copied().unwrap_or_default();
-
-        backups.push(MirrorBackup {
-            timestamp,
-            date,
-            enabled_count: counts.enabled,
-            total_count: counts.total,
-            size,
-            source,
-        });
-    }
-
-    backups.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
-
-    emit_json(&MirrorBackupListResponse { backups })
+    let (entries, warnings) = backup_store().list(count_mirrors_in_file)?;
+    let backups = entries
+        .into_iter()
+        .map(|entry| MirrorBackup {
+            timestamp: entry.timestamp,
+            date: entry.date,
+            enabled_count: entry.counts.enabled,
+            total_count: entry.counts.total,
+            size: entry.size,
+            source: entry.source,
+        })
+        .collect();
+    emit_json(&MirrorBackupListResponse { backups, warnings })
 }
 
 pub fn restore_mirror_backup(timestamp: i64) -> Result<()> {
-    let backup_path = format!("{}{}", BACKUP_PREFIX, timestamp);
-
-    let pre_restore_backup = crate::util::with_file_lock(Path::new(LOCK_PATH), || {
-        let backup = Path::new(&backup_path);
-
-        if !backup.exists() {
-            anyhow::bail!("Backup not found: {}", backup_path);
-        }
-
-        ensure_mirrors_restorable(backup)?;
-        let contents = fs::read(backup)?;
-
-        let mirrorlist = Path::new(MIRRORLIST_PATH);
-
-        // Create a backup of the current mirrorlist before restoring
-        let pre_restore_backup = if mirrorlist.exists() {
-            let path = crate::util::unique_backup_path(BACKUP_PREFIX);
-            fs::copy(mirrorlist, &path)?;
-            Some(path)
-        } else {
-            None
-        };
-
-        crate::util::write_bytes_atomic(mirrorlist, &contents)?;
-
-        note_backup(&pre_restore_backup, BackupSource::Auto);
-        cleanup_old_backups();
-
-        Ok(pre_restore_backup)
-    })?;
-
-    let response = RestoreMirrorBackupResponse {
-        success: true,
-        backup_path: pre_restore_backup,
-        message: format!("Restored mirrorlist from backup {}", backup_path),
-    };
-
-    emit_json(&response)
-}
-
-pub fn delete_mirror_backup(timestamp: i64) -> Result<()> {
-    let backup_path = format!("{}{}", BACKUP_PREFIX, timestamp);
-
-    crate::util::with_file_lock(Path::new(LOCK_PATH), || {
-        let backup = Path::new(&backup_path);
-
-        if !backup.exists() {
-            anyhow::bail!("Backup not found: {}", backup_path);
-        }
-
-        fs::remove_file(backup)?;
-        reconcile_backups();
-        Ok(())
-    })?;
-
+    let result = backup_store().restore(timestamp, ensure_mirrors_restorable)?;
     emit_json(&RestoreMirrorBackupResponse {
         success: true,
-        backup_path: None,
-        message: format!("Deleted backup {}", backup_path),
+        backup_path: result.backup_path,
+        message: format!("Restored mirrorlist from backup {BACKUP_PREFIX}{timestamp}"),
+        warnings: result.warnings,
     })
 }
 
-fn cleanup_old_backups() {
-    crate::util::prune_old_backups(
-        Path::new(BACKUP_DIR),
-        BACKUP_NAME_PREFIX,
-        MAX_BACKUPS,
-        Path::new(BACKUP_META_PATH),
-    );
-}
-
-fn note_backup(backup: &Option<String>, source: BackupSource) {
-    if let Some(b) = backup
-        && let Some(ts) = crate::util::backup_timestamp(b, BACKUP_PREFIX)
-    {
-        crate::util::record_backup_provenance(
-            Path::new(BACKUP_META_PATH),
-            Path::new(BACKUP_DIR),
-            BACKUP_NAME_PREFIX,
-            ts,
-            source,
-        );
-    }
-}
-
-fn reconcile_backups() {
-    crate::util::reconcile_backup_provenance(
-        Path::new(BACKUP_META_PATH),
-        Path::new(BACKUP_DIR),
-        BACKUP_NAME_PREFIX,
-    );
+pub fn delete_mirror_backup(timestamp: i64) -> Result<()> {
+    let warnings = backup_store().delete(timestamp)?;
+    emit_json(&RestoreMirrorBackupResponse {
+        success: true,
+        backup_path: None,
+        message: format!("Deleted backup {BACKUP_PREFIX}{timestamp}"),
+        warnings,
+    })
 }
 
 #[cfg(test)]

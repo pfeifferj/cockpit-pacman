@@ -619,6 +619,8 @@ pub struct SaveMirrorlistResponse {
     pub success: bool,
     pub backup_path: Option<String>,
     pub message: String,
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, TS)]
@@ -657,6 +659,8 @@ pub struct MirrorBackup {
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct MirrorBackupListResponse {
     pub backups: Vec<MirrorBackup>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, TS)]
@@ -665,6 +669,8 @@ pub struct RestoreMirrorBackupResponse {
     pub success: bool,
     pub backup_path: Option<String>,
     pub message: String,
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, TS)]
@@ -832,6 +838,7 @@ pub struct RepoEntry {
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct ListReposResponse {
     pub repos: Vec<RepoEntry>,
+    pub revision: String,
 }
 
 #[derive(Serialize, Deserialize, TS)]
@@ -840,4 +847,7 @@ pub struct SaveReposResponse {
     pub success: bool,
     pub backup_path: Option<String>,
     pub message: String,
+    pub revision: String,
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }

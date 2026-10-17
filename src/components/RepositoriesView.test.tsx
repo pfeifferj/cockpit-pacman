@@ -10,13 +10,20 @@ vi.mock("../api", async () => {
     ...actual,
     listRepos: vi.fn(),
     saveRepos: vi.fn(),
+    listRepoBackups: vi.fn(),
+    restoreRepoBackup: vi.fn(),
+    deleteRepoBackup: vi.fn(),
   };
 });
 
 const mockListRepos = vi.mocked(api.listRepos);
 const mockSaveRepos = vi.mocked(api.saveRepos);
+const mockListRepoBackups = vi.mocked(api.listRepoBackups);
+const mockRestoreRepoBackup = vi.mocked(api.restoreRepoBackup);
+const mockDeleteRepoBackup = vi.mocked(api.deleteRepoBackup);
 
 const mockRepoResponse: ListReposResponse = {
+  revision: "loaded-revision",
   repos: [
     {
       name: "core",
@@ -41,7 +48,8 @@ describe("RepositoriesView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockListRepos.mockResolvedValue(mockRepoResponse);
-    mockSaveRepos.mockResolvedValue({ success: true, backup_path: null, message: "Saved" });
+    mockSaveRepos.mockResolvedValue({ success: true, backup_path: null, message: "Saved", revision: "saved-revision", warnings: [] });
+    mockListRepoBackups.mockResolvedValue({ backups: [], warnings: [] });
   });
 
   afterEach(() => {
@@ -76,15 +84,16 @@ describe("RepositoriesView", () => {
   });
 
   it("shows error state on API failure", async () => {
-    mockListRepos.mockRejectedValue(new Error("Permission denied"));
+    mockListRepos.mockRejectedValue(new api.BackendError("Permission denied", "permission_denied", "Could not read /etc/pacman.conf"));
     render(<RepositoriesView />);
     await waitFor(() => {
       expect(screen.getByText(/Error loading repositories/i)).toBeInTheDocument();
     });
+    expect(screen.getByText("Could not read /etc/pacman.conf")).toBeInTheDocument();
   });
 
   it("shows empty state when repos array is empty", async () => {
-    mockListRepos.mockResolvedValue({ repos: [] });
+    mockListRepos.mockResolvedValue({ repos: [], revision: "empty-revision" });
     render(<RepositoriesView />);
     await waitFor(() => {
       expect(screen.getByText(/No repositories found/i)).toBeInTheDocument();
@@ -171,11 +180,88 @@ describe("RepositoriesView", () => {
     });
 
     const savedRepos = mockSaveRepos.mock.calls[0][0];
+    expect(mockSaveRepos.mock.calls[0][1]).toBe("loaded-revision");
     expect(savedRepos).toHaveLength(2);
     expect(savedRepos[0].name).toBe("core");
     expect(savedRepos[0].enabled).toBe(false);
     expect(savedRepos[1].name).toBe("extra");
     expect(savedRepos[1].enabled).toBe(true);
+  });
+
+  it("keeps edits after a stale save until the user confirms reloading", async () => {
+    mockSaveRepos.mockRejectedValueOnce(new api.BackendError("Repository configuration changed since it was loaded. Reload repositories before saving.", "validation_error", "Loaded revision differs from /etc/pacman.conf"));
+    render(<RepositoriesView />);
+    const core = await screen.findByLabelText("Enable repository core");
+    fireEvent.click(core);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save Changes" })); });
+    expect(screen.getByText(/configuration changed since it was loaded/)).toBeInTheDocument();
+    expect(screen.getByText("Loaded revision differs from /etc/pacman.conf")).toBeInTheDocument();
+    expect(screen.getByLabelText("Enable repository core")).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Save Changes" })).toBeEnabled();
+    expect(mockListRepos).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload repositories" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(screen.getByLabelText("Enable repository core")).not.toBeChecked();
+    expect(mockListRepos).toHaveBeenCalledTimes(1);
+
+    mockListRepos.mockResolvedValue({ ...mockRepoResponse, revision: "fresh-revision" });
+    fireEvent.click(screen.getByRole("button", { name: "Reload repositories" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Discard edits and reload" })); });
+    expect(screen.getByLabelText("Enable repository core")).toBeChecked();
+    fireEvent.click(screen.getByLabelText("Enable repository core"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save Changes" })); });
+    expect(mockSaveRepos.mock.lastCall?.[1]).toBe("fresh-revision");
+    expect(screen.queryByText("Loaded revision differs from /etc/pacman.conf")).not.toBeInTheDocument();
+  });
+
+  it("preserves backend details when backup history fails", async () => {
+    mockListRepoBackups.mockRejectedValue(new api.BackendError("Backups could not be read", "permission_denied", "Directory /etc is not readable"));
+    render(<RepositoriesView />);
+    await screen.findByLabelText("Enable repository core");
+    await act(async () => { fireEvent.click(screen.getByText("Backup history")); });
+    expect(screen.getByText("Directory /etc is not readable")).toBeInTheDocument();
+  });
+
+  it("shows maintenance warnings alongside a successful repository save", async () => {
+    mockSaveRepos.mockResolvedValue({ success: true, backup_path: null, message: "Saved", revision: "saved-revision", warnings: ["Backup provenance could not be saved"] });
+    render(<RepositoriesView />);
+    fireEvent.click(await screen.findByLabelText("Enable repository core"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save Changes" })); });
+    expect(screen.getByRole("heading", { name: "Repositories saved" })).toBeInTheDocument();
+    expect(screen.getByText("Backup provenance could not be saved")).toBeInTheDocument();
+  });
+
+  it("retains restore and listing warnings and reloads the repository revision", async () => {
+    mockListRepoBackups.mockResolvedValue({
+      backups: [{ timestamp: 100, date: "1970-01-01", repo_count: 2, enabled_count: 2, size: 200, source: "manual" }],
+      warnings: ["One backup could not be read"],
+    });
+    mockRestoreRepoBackup.mockResolvedValue({ success: true, backup_path: "/etc/pacman.conf.backup.101", message: "Restored", warnings: ["Old backup could not be pruned"] });
+    mockListRepos.mockResolvedValueOnce(mockRepoResponse).mockResolvedValue({ ...mockRepoResponse, revision: "restored-revision" });
+    render(<RepositoriesView />);
+    await screen.findByLabelText("Enable repository core");
+    await act(async () => { fireEvent.click(screen.getByText("Backup history")); });
+    expect(screen.getByText("One backup could not be read")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+    const dialog = screen.getByRole("dialog", { name: "Restore pacman.conf backup" });
+    await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "Restore" })); });
+    expect(screen.getByText("Old backup could not be pruned")).toBeInTheDocument();
+    expect(screen.getByText("One backup could not be read")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Enable repository core"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save Changes" })); });
+    expect(mockSaveRepos.mock.lastCall?.[1]).toBe("restored-revision");
+  });
+
+  it("shows backup deletion warnings after reloading the history", async () => {
+    mockListRepoBackups.mockResolvedValue({ backups: [{ timestamp: 100, date: "1970-01-01", repo_count: 2, enabled_count: 2, size: 200, source: "manual" }], warnings: [] });
+    mockDeleteRepoBackup.mockResolvedValue({ success: true, backup_path: null, message: "Deleted", warnings: ["Backup provenance could not be saved"] });
+    render(<RepositoriesView />);
+    await screen.findByLabelText("Enable repository core");
+    await act(async () => { fireEvent.click(screen.getByText("Backup history")); });
+    await act(async () => { fireEvent.click(screen.getByLabelText("Delete backup from 1970-01-01")); });
+    expect(mockDeleteRepoBackup).toHaveBeenCalledWith(100);
+    expect(screen.getByText("Backup provenance could not be saved")).toBeInTheDocument();
   });
 
   it("selecting SigLevel Never prompts and does not apply until confirmed", async () => {

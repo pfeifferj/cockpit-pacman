@@ -40,7 +40,7 @@ export type KeyringState = "ready" | "uninitialized" | "undetermined";
 
 export type KeyringStatusResponse = { keys: Array<KeyringKey>, total: number, master_key_initialized: boolean, status: KeyringState, warnings: Array<string>, };
 
-export type ListReposResponse = { repos: Array<RepoEntry>, };
+export type ListReposResponse = { repos: Array<RepoEntry>, revision: string, };
 
 export type LockRemoveResult = { removed: boolean, error?: string, };
 
@@ -54,7 +54,7 @@ export type LogResponse = { entries: Array<LogEntry>, total: number, total_upgra
 
 export type MirrorBackup = { timestamp: number, date: string, enabled_count: number, total_count: number, size: number, source: BackupSource, };
 
-export type MirrorBackupListResponse = { backups: Array<MirrorBackup>, };
+export type MirrorBackupListResponse = { backups: Array<MirrorBackup>, warnings: Array<string>, };
 
 export type MirrorEntry = { url: string, enabled: boolean, comment: string | null, };
 
@@ -108,7 +108,7 @@ export type ReplacementInfo = { old_package: string, new_package: string, };
 
 export type RepoBackup = { timestamp: number, date: string, repo_count: number, enabled_count: number, size: number, source: BackupSource, };
 
-export type RepoBackupListResponse = { backups: Array<RepoBackup>, };
+export type RepoBackupListResponse = { backups: Array<RepoBackup>, warnings: Array<string>, };
 
 export type RepoDirectiveFull = { directive_type: string, value: string, enabled: boolean, };
 
@@ -116,13 +116,13 @@ export type RepoEntry = { name: string, enabled: boolean, sig_level: string | nu
 
 export type RestartBlocked = "session_critical" | "cockpit_session" | "cockpit_transport";
 
-export type RestoreMirrorBackupResponse = { success: boolean, backup_path: string | null, message: string, };
+export type RestoreMirrorBackupResponse = { success: boolean, backup_path: string | null, message: string, warnings: Array<string>, };
 
-export type RestoreRepoBackupResponse = { success: boolean, backup_path: string | null, message: string, };
+export type RestoreRepoBackupResponse = { success: boolean, backup_path: string | null, message: string, warnings: Array<string>, };
 
-export type SaveMirrorlistResponse = { success: boolean, backup_path: string | null, message: string, };
+export type SaveMirrorlistResponse = { success: boolean, backup_path: string | null, message: string, warnings: Array<string>, };
 
-export type SaveReposResponse = { success: boolean, backup_path: string | null, message: string, };
+export type SaveReposResponse = { success: boolean, backup_path: string | null, message: string, revision: string, warnings: Array<string>, };
 
 export type ScheduleConfig = { enabled: boolean, mode: string, schedule: string, max_packages: number, timer_active: boolean, timer_next_run: string | null, 
 /**

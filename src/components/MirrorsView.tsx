@@ -58,6 +58,8 @@ import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import { useSortableTable } from "../hooks/useSortableTable";
 import { usePagination } from "../hooks/usePagination";
 import { StatBox } from "./StatBox";
+import { BackupWarnings } from "./BackupWarnings";
+import { ErrorDetails } from "./ErrorDetails";
 import { CompactPagination } from "./CompactPagination";
 import {
   MirrorEntry,
@@ -190,6 +192,13 @@ function normalizeMirrorUrl(url: string): string {
   return normalized.replace(/\/*$/, "") + "/";
 }
 
+const HttpMirrorWarning: React.FC = () => (
+  <Alert variant="warning" isInline title="HTTP does not protect package database transfers" className="pf-v6-u-mt-md">
+    With DatabaseOptional, unsigned package databases can be changed or replayed by a network attacker to hide updates.
+    Use HTTPS when available.
+  </Alert>
+);
+
 export const MirrorsView: React.FC = () => {
   const [state, setState] = useState<ViewState>("loading");
   const [mirrorData, setMirrorData] = useState<MirrorListResponse | null>(null);
@@ -197,6 +206,11 @@ export const MirrorsView: React.FC = () => {
   const [statusData, setStatusData] = useState<MirrorStatusResponse | null>(null);
   const [statusStale, setStatusStale] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<string | undefined>();
+  const [operationWarnings, setOperationWarnings] = useState<string[]>([]);
+  const [backupWarnings, setBackupWarnings] = useState<string[]>([]);
+  const [backupError, setBackupError] = useState<string | null>(null);
+  const [backupErrorDetails, setBackupErrorDetails] = useState<string | undefined>();
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   useBackdropClose(confirmModalOpen, () => setConfirmModalOpen(false));
   const [hasChanges, setHasChanges] = useState(false);
@@ -215,6 +229,7 @@ export const MirrorsView: React.FC = () => {
   const [refreshProtocol, setRefreshProtocol] = useState<RefreshMirrorsProtocol>("https");
   const [refreshSortBy, setRefreshSortBy] = useState<RefreshMirrorsSortBy>("score");
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [refreshErrorDetails, setRefreshErrorDetails] = useState<string | undefined>();
   const [refreshErrorCode, setRefreshErrorCode] = useState<ErrorCode | undefined>(undefined);
   useBackdropClose(refreshModalOpen, () => { if (!refreshLoading) setRefreshModalOpen(false); });
   const [backups, setBackups] = useState<MirrorBackup[]>([]);
@@ -243,6 +258,7 @@ export const MirrorsView: React.FC = () => {
     initialAutoRunRef.current = false;
     setState("loading");
     setError(null);
+    setErrorDetails(undefined);
     try {
       const response = await listMirrors();
       setMirrorData(response);
@@ -260,6 +276,7 @@ export const MirrorsView: React.FC = () => {
     } catch (ex) {
       setState("error");
       setError(ex instanceof Error ? ex.message : String(ex));
+      setErrorDetails(ex instanceof BackendError ? ex.details : undefined);
     }
   }, [applyStatusToMirrors]);
 
@@ -300,6 +317,7 @@ export const MirrorsView: React.FC = () => {
         setMirrors(prev => applyStatusToMirrors(prev, stale));
       } else {
         setError(ex instanceof Error ? ex.message : String(ex));
+        setErrorDetails(ex instanceof BackendError ? ex.details : undefined);
       }
     } finally {
       setIsFetchingStatus(false);
@@ -308,11 +326,17 @@ export const MirrorsView: React.FC = () => {
 
   const loadBackups = useCallback(async () => {
     setBackupsLoading(true);
+    setBackupWarnings([]);
+    setBackupError(null);
+    setBackupErrorDetails(undefined);
     try {
       const response = await listMirrorBackups();
       setBackups(response.backups);
-    } catch {
+      setBackupWarnings(response.warnings ?? []);
+    } catch (ex) {
       setBackups([]);
+      setBackupError(ex instanceof Error ? ex.message : String(ex));
+      setBackupErrorDetails(ex instanceof BackendError ? ex.details : undefined);
     } finally {
       setBackupsLoading(false);
     }
@@ -329,12 +353,16 @@ export const MirrorsView: React.FC = () => {
     setRestoreConfirmTimestamp(null);
     setRestoringTimestamp(timestamp);
     setError(null);
+    setErrorDetails(undefined);
+    setOperationWarnings([]);
     try {
-      await restoreMirrorBackup(timestamp);
+      const response = await restoreMirrorBackup(timestamp);
+      setOperationWarnings(response.warnings ?? []);
       await loadMirrors();
       await loadBackups();
     } catch (ex) {
       setError(ex instanceof Error ? ex.message : String(ex));
+      setErrorDetails(ex instanceof BackendError ? ex.details : undefined);
     } finally {
       setRestoringTimestamp(null);
     }
@@ -357,12 +385,19 @@ export const MirrorsView: React.FC = () => {
   const handleDeleteSelected = async () => {
     if (selectedBackups.size === 0) return;
     setDeletingBackups(true);
+    setError(null);
+    setErrorDetails(undefined);
+    setOperationWarnings([]);
     const results = await Promise.allSettled(
       Array.from(selectedBackups).map(ts => deleteMirrorBackup(ts))
     );
-    const failed = results.filter(r => r.status === "rejected").length;
-    if (failed > 0) {
-      setError(`Failed to delete ${failed} of ${selectedBackups.size} backup${selectedBackups.size !== 1 ? "s" : ""}`);
+    const failed = results.filter(r => r.status === "rejected");
+    setOperationWarnings(results.flatMap(result => result.status === "fulfilled" ? result.value.warnings ?? [] : []));
+    if (failed.length > 0) {
+      setError(`Failed to delete ${failed.length} of ${selectedBackups.size} backup${selectedBackups.size !== 1 ? "s" : ""}`);
+      setErrorDetails(failed.map(({ reason }) => reason instanceof BackendError
+        ? [reason.message, reason.details].filter(Boolean).join("\n")
+        : reason instanceof Error ? reason.message : String(reason)).join("\n\n"));
     }
     await loadBackups();
     setSelectedBackups(new Set());
@@ -388,9 +423,10 @@ export const MirrorsView: React.FC = () => {
           setIsTesting(false);
           cancelRef.current = null;
         },
-        onError: (err) => {
+        onError: (err, _code, details) => {
           setIsTesting(false);
           setError(err);
+          setErrorDetails(details);
           cancelRef.current = null;
         },
         timeout: 120,
@@ -424,18 +460,23 @@ export const MirrorsView: React.FC = () => {
   const startSave = async () => {
     setConfirmModalOpen(false);
     setState("saving");
+    setError(null);
+    setErrorDetails(undefined);
+    setOperationWarnings([]);
     try {
       const mirrorsToSave: MirrorEntry[] = mirrors.map(({ url, enabled, comment }) => ({
         url,
         enabled,
         comment,
       }));
-      await saveMirrorlist(mirrorsToSave);
+      const response = await saveMirrorlist(mirrorsToSave);
+      setOperationWarnings(response.warnings ?? []);
       setState("success");
       setHasChanges(false);
     } catch (ex) {
-      setState("error");
+      setState("ready");
       setError(ex instanceof Error ? ex.message : String(ex));
+      setErrorDetails(ex instanceof BackendError ? ex.details : undefined);
     }
   };
 
@@ -469,6 +510,7 @@ export const MirrorsView: React.FC = () => {
   const handleOpenRefreshModal = () => {
     setRefreshPreview(null);
     setRefreshError(null);
+    setRefreshErrorDetails(undefined);
     setRefreshModalOpen(true);
   };
 
@@ -476,6 +518,7 @@ export const MirrorsView: React.FC = () => {
     setRefreshLoading(true);
     setRefreshPreview(null);
     setRefreshError(null);
+    setRefreshErrorDetails(undefined);
     setRefreshErrorCode(undefined);
     try {
       const result = await refreshMirrors({
@@ -487,6 +530,7 @@ export const MirrorsView: React.FC = () => {
       setRefreshPreview(result);
     } catch (ex) {
       setRefreshError(ex instanceof Error ? ex.message : String(ex));
+      setRefreshErrorDetails(ex instanceof BackendError ? ex.details : undefined);
       setRefreshErrorCode(ex instanceof BackendError ? ex.code : undefined);
     } finally {
       setRefreshLoading(false);
@@ -628,7 +672,10 @@ export const MirrorsView: React.FC = () => {
       <Card>
         <CardBody>
           <EmptyState headingLevel="h2" icon={ExclamationCircleIcon} titleText="Error loading mirrors" status="danger">
-            <EmptyStateBody>{sanitizeErrorMessage(error)}</EmptyStateBody>
+            <EmptyStateBody>
+              {sanitizeErrorMessage(error)}
+              <ErrorDetails details={errorDetails} />
+            </EmptyStateBody>
             <EmptyStateFooter>
               <EmptyStateActions>
                 <Button variant="primary" onClick={loadMirrors}>Retry</Button>
@@ -656,6 +703,7 @@ export const MirrorsView: React.FC = () => {
     return (
       <Card>
         <CardBody>
+          <BackupWarnings warnings={operationWarnings} />
           <EmptyState headingLevel="h2" icon={CheckCircleIcon} titleText="Mirrorlist saved">
             <EmptyStateBody>
               The mirrorlist has been saved. A backup was created.
@@ -696,9 +744,11 @@ export const MirrorsView: React.FC = () => {
 
   return (
     <>
+      <BackupWarnings warnings={operationWarnings} />
       {error && (
         <Alert variant="warning" title="Error" className="pf-v6-u-mb-md">
           {sanitizeErrorMessage(error)}
+          <ErrorDetails details={errorDetails} />
         </Alert>
       )}
       {(isFetchingStatus || isTesting) && (
@@ -944,11 +994,17 @@ export const MirrorsView: React.FC = () => {
           isExpanded={backupsExpanded}
           className="pf-v6-u-mt-lg"
         >
+          <BackupWarnings warnings={backupWarnings} />
           {backupsLoading ? (
             <Flex alignItems={{ default: "alignItemsCenter" }} spaceItems={{ default: "spaceItemsSm" }} className="pf-v6-u-py-md">
               <FlexItem><Spinner size="md" /></FlexItem>
               <FlexItem>Loading backups...</FlexItem>
             </Flex>
+          ) : backupError ? (
+            <Alert variant="danger" isInline title="Backup history could not be loaded">
+              {sanitizeErrorMessage(backupError)}
+              <ErrorDetails details={backupErrorDetails} />
+            </Alert>
           ) : backups.length === 0 ? (
             <Content component={ContentVariants.p} className="pf-v6-u-py-md" style={{ color: "var(--pf-t--global--text--color--subtle)" }}>
               No backups found. Backups are created automatically when saving the mirrorlist.
@@ -1010,8 +1066,8 @@ export const MirrorsView: React.FC = () => {
                       <Tooltip
                         content={
                           backup.source === "manual"
-                            ? "Taken when you saved. Kept ahead of automatic ones when old backups are pruned."
-                            : "Taken automatically before a restore. Pruned first."
+                            ? "Taken when you saved. Manual backups have priority after reserving the latest undo backup."
+                            : "Taken before a restore. The latest undo backup is kept; older automatic backups are pruned before manual backups."
                         }
                       >
                         <Label isCompact color={backup.source === "manual" ? "blue" : "grey"}>
@@ -1065,6 +1121,7 @@ export const MirrorsView: React.FC = () => {
               <strong>{mirrors.filter(m => m.enabled).length}</strong> mirrors will be enabled.
             </Content>
           </Content>
+          {mirrors.some(mirror => mirror.enabled && mirror.url.startsWith("http://")) && <HttpMirrorWarning />}
         </ModalBody>
         <ModalFooter>
           <Button key="confirm" variant="primary" onClick={startSave}>
@@ -1125,6 +1182,7 @@ export const MirrorsView: React.FC = () => {
                 <FormSelectOption value="http" label="HTTP only" />
                 <FormSelectOption value="all" label="All protocols" />
               </FormSelect>
+              {refreshProtocol !== "https" && <HttpMirrorWarning />}
             </FormGroup>
             <FormGroup
               label="Sort by"
@@ -1173,9 +1231,12 @@ export const MirrorsView: React.FC = () => {
               >
                 The host may be offline. Check its network connection or the{" "}
                 <a href={ARCH_STATUS_URL} target="_blank" rel="noopener noreferrer">Arch Linux status page</a>.
+                <ErrorDetails details={refreshErrorDetails} />
               </Alert>
             ) : (
-              <Alert variant="danger" isInline isPlain title={refreshError} className="pf-v6-u-mt-md" />
+              <Alert variant="danger" isInline isPlain title={refreshError} className="pf-v6-u-mt-md">
+                <ErrorDetails details={refreshErrorDetails} />
+              </Alert>
             )
           )}
 
@@ -1271,8 +1332,9 @@ export const MirrorsView: React.FC = () => {
         variant={ModalVariant.small}
         isOpen={restoreConfirmTimestamp !== null}
         onClose={() => setRestoreConfirmTimestamp(null)}
+        aria-labelledby="mirror-restore-title"
       >
-        <ModalHeader title="Restore mirrorlist backup?" />
+        <ModalHeader title="Restore mirrorlist backup?" labelId="mirror-restore-title" />
         <ModalBody>
           <Content>
             <Content component={ContentVariants.p}>

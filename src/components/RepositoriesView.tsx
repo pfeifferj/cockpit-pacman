@@ -4,6 +4,7 @@ import {
   CardBody,
   CardTitle,
   Button,
+  Alert,
   EmptyState,
   EmptyStateBody,
   EmptyStateActions,
@@ -49,6 +50,8 @@ import {
   Td,
 } from "@patternfly/react-table";
 import { StatBox } from "./StatBox";
+import { BackupWarnings } from "./BackupWarnings";
+import { ErrorDetails } from "./ErrorDetails";
 import {
   RepoEntry,
   RepoBackup,
@@ -59,6 +62,7 @@ import {
   restoreRepoBackup,
   deleteRepoBackup,
   formatSize,
+  BackendError,
 } from "../api";
 import { sanitizeErrorMessage } from "../utils";
 
@@ -86,7 +90,12 @@ function isInsecureSigLevel(value: string): boolean {
 export const RepositoriesView: React.FC = () => {
   const [state, setState] = useState<ViewState>("loading");
   const [repos, setRepos] = useState<RepoEntry[]>([]);
+  const [revision, setRevision] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<string | undefined>();
+  const [operationWarnings, setOperationWarnings] = useState<string[]>([]);
+  const [backupWarnings, setBackupWarnings] = useState<string[]>([]);
+  const [reloadRequested, setReloadRequested] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [searchFilter, setSearchFilter] = useState("");
   const [pendingSearchFilter, setPendingSearchFilter] = useState<string | null>(null);
@@ -102,6 +111,7 @@ export const RepositoriesView: React.FC = () => {
   const [backupsLoading, setBackupsLoading] = useState(false);
   const [backupBusy, setBackupBusy] = useState<number | null>(null);
   const [backupError, setBackupError] = useState<string | null>(null);
+  const [backupErrorDetails, setBackupErrorDetails] = useState<string | undefined>();
   const [restoreTarget, setRestoreTarget] = useState<number | null>(null);
   const [pendingSigLevel, setPendingSigLevel] = useState<{
     index: number;
@@ -111,14 +121,17 @@ export const RepositoriesView: React.FC = () => {
   const loadRepos = useCallback(async () => {
     setState("loading");
     setError(null);
+    setErrorDetails(undefined);
     try {
       const response: ListReposResponse = await listRepos();
       setRepos(response.repos);
+      setRevision(response.revision);
       setHasChanges(false);
       setState("ready");
     } catch (ex) {
       setState("error");
       setError(ex instanceof Error ? ex.message : String(ex));
+      setErrorDetails(ex instanceof BackendError ? ex.details : undefined);
     }
   }, []);
 
@@ -128,6 +141,7 @@ export const RepositoriesView: React.FC = () => {
       .then((response: ListReposResponse) => {
         if (cancelled) return;
         setRepos(response.repos);
+        setRevision(response.revision);
         setHasChanges(false);
         setState("ready");
       })
@@ -135,30 +149,42 @@ export const RepositoriesView: React.FC = () => {
         if (cancelled) return;
         setState("error");
         setError(ex instanceof Error ? ex.message : String(ex));
+        setErrorDetails(ex instanceof BackendError ? ex.details : undefined);
       });
     return () => { cancelled = true; };
   }, []);
 
   const handleSave = async () => {
+    if (!revision) return;
     setState("saving");
+    setError(null);
+    setErrorDetails(undefined);
+    setOperationWarnings([]);
     try {
-      await saveRepos(repos);
+      const response = await saveRepos(repos, revision);
+      setRevision(response.revision);
+      setOperationWarnings(response.warnings ?? []);
       setState("success");
       setHasChanges(false);
     } catch (ex) {
-      setState("error");
+      setState("ready");
       setError(ex instanceof Error ? ex.message : String(ex));
+      setErrorDetails(ex instanceof BackendError ? ex.details : undefined);
     }
   };
 
   const loadBackups = useCallback(async () => {
     setBackupsLoading(true);
     setBackupError(null);
+    setBackupErrorDetails(undefined);
+    setBackupWarnings([]);
     try {
       const response = await listRepoBackups();
       setBackups(response.backups);
+      setBackupWarnings(response.warnings ?? []);
     } catch (ex) {
       setBackupError(ex instanceof Error ? ex.message : String(ex));
+      setBackupErrorDetails(ex instanceof BackendError ? ex.details : undefined);
       setBackups([]);
     } finally {
       setBackupsLoading(false);
@@ -176,12 +202,16 @@ export const RepositoriesView: React.FC = () => {
     setRestoreTarget(null);
     setBackupBusy(timestamp);
     setBackupError(null);
+    setBackupErrorDetails(undefined);
+    setOperationWarnings([]);
     try {
-      await restoreRepoBackup(timestamp);
+      const response = await restoreRepoBackup(timestamp);
+      setOperationWarnings(response.warnings ?? []);
       await loadRepos();
       await loadBackups();
     } catch (ex) {
       setBackupError(ex instanceof Error ? ex.message : String(ex));
+      setBackupErrorDetails(ex instanceof BackendError ? ex.details : undefined);
     } finally {
       setBackupBusy(null);
     }
@@ -190,11 +220,15 @@ export const RepositoriesView: React.FC = () => {
   const handleDeleteBackup = async (timestamp: number) => {
     setBackupBusy(timestamp);
     setBackupError(null);
+    setBackupErrorDetails(undefined);
+    setOperationWarnings([]);
     try {
-      await deleteRepoBackup(timestamp);
+      const response = await deleteRepoBackup(timestamp);
+      setOperationWarnings(response.warnings ?? []);
       await loadBackups();
     } catch (ex) {
       setBackupError(ex instanceof Error ? ex.message : String(ex));
+      setBackupErrorDetails(ex instanceof BackendError ? ex.details : undefined);
     } finally {
       setBackupBusy(null);
     }
@@ -341,7 +375,10 @@ export const RepositoriesView: React.FC = () => {
             titleText="Error loading repositories"
             status="danger"
           >
-            <EmptyStateBody>{sanitizeErrorMessage(error)}</EmptyStateBody>
+            <EmptyStateBody>
+              {sanitizeErrorMessage(error)}
+              <ErrorDetails details={errorDetails} />
+            </EmptyStateBody>
             <EmptyStateFooter>
               <EmptyStateActions>
                 <Button variant="primary" onClick={loadRepos}>
@@ -377,6 +414,7 @@ export const RepositoriesView: React.FC = () => {
     return (
       <Card>
         <CardBody>
+          <BackupWarnings warnings={operationWarnings} />
           <EmptyState
             headingLevel="h2"
             icon={CheckCircleIcon}
@@ -425,6 +463,14 @@ export const RepositoriesView: React.FC = () => {
 
   return (
     <>
+    {error && (
+      <Alert variant="danger" isInline title="Repositories could not be saved" className="pf-v6-u-mb-md">
+        <p>{sanitizeErrorMessage(error)}</p>
+        <ErrorDetails details={errorDetails} />
+        <Button variant="link" isInline onClick={() => setReloadRequested(true)}>Reload repositories</Button>
+      </Alert>
+    )}
+    <BackupWarnings warnings={operationWarnings} />
     <Card>
       <CardBody>
         <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
@@ -465,7 +511,7 @@ export const RepositoriesView: React.FC = () => {
               />
             </ToolbarItem>
             <ToolbarItem>
-              <Button variant="primary" onClick={handleSave} isDisabled={!hasChanges}>
+              <Button variant="primary" onClick={handleSave} isDisabled={!hasChanges || !revision}>
                 Save Changes
               </Button>
             </ToolbarItem>
@@ -705,13 +751,17 @@ export const RepositoriesView: React.FC = () => {
             onToggle={handleBackupsToggle}
             isExpanded={backupsExpanded}
           >
+            <BackupWarnings warnings={backupWarnings} />
             {backupsLoading ? (
               <Flex alignItems={{ default: "alignItemsCenter" }} spaceItems={{ default: "spaceItemsSm" }}>
                 <FlexItem><Spinner size="md" /></FlexItem>
                 <FlexItem>Loading backups...</FlexItem>
               </Flex>
             ) : backupError ? (
-              <Label color="red">{sanitizeErrorMessage(backupError)}</Label>
+              <Alert variant="danger" isInline title="Backup operation failed">
+                {sanitizeErrorMessage(backupError)}
+                <ErrorDetails details={backupErrorDetails} />
+              </Alert>
             ) : backups.length === 0 ? (
               <div className="pf-v6-u-color-200">
                 No backups yet. A backup is created automatically each time you save.
@@ -765,6 +815,21 @@ export const RepositoriesView: React.FC = () => {
 
       </CardBody>
     </Card>
+    <Modal
+      variant={ModalVariant.small}
+      isOpen={reloadRequested}
+      onClose={() => setReloadRequested(false)}
+      aria-labelledby="repo-reload-title"
+    >
+      <ModalHeader title="Reload repositories?" labelId="repo-reload-title" />
+      <ModalBody>Your unsaved edits will be discarded and the current configuration will be loaded.</ModalBody>
+      <ModalFooter>
+        <Button variant="danger" onClick={() => { setReloadRequested(false); void loadRepos(); }}>
+          Discard edits and reload
+        </Button>
+        <Button variant="link" onClick={() => setReloadRequested(false)}>Keep editing</Button>
+      </ModalFooter>
+    </Modal>
     <Modal
       variant={ModalVariant.small}
       isOpen={pendingSearchFilter !== null}

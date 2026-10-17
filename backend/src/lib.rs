@@ -1,6 +1,7 @@
 #![cfg_attr(not(test), warn(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod alpm;
+pub mod backups;
 pub mod config;
 pub mod db;
 mod endpoints;

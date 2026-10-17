@@ -29,7 +29,18 @@ import {
   StreamEvent,
   BackendError,
   isNetworkErrorCode,
+  listMirrorBackups,
 } from "./api";
+
+it("reads protected mirror undo backups with administrative access", async () => {
+  mockSpawn.mockClear();
+  mockSpawn.mockReturnValue(createMockSpawnPromise(JSON.stringify({ backups: [], warnings: [] })));
+  await listMirrorBackups();
+  expect(mockSpawn).toHaveBeenCalledExactlyOnceWith(
+    ["/usr/libexec/cockpit-pacman/cockpit-pacman-backend", "list-mirror-backups"],
+    { superuser: "require", err: "message" },
+  );
+});
 
 describe.each([
   { kind: "services", api: servicesDismissal },

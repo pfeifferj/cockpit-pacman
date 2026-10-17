@@ -6,13 +6,13 @@ use std::fs::File;
 use std::io::{self, BufRead, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::os::fd::{AsRawFd, FromRawFd};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::sync::{Arc, Condvar, LazyLock, Mutex, OnceLock};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 use ureq::config::IpFamily;
 
-use crate::models::{BackupSource, StreamEvent};
+use crate::models::StreamEvent;
 
 static DETECTED_IP_FAMILY: LazyLock<IpFamily> = LazyLock::new(|| {
     // Resolve archlinux.org and probe its AAAA record with a short TCP connect.
@@ -388,162 +388,6 @@ where
     result
 }
 
-/// Return a backup path of the form `{prefix}{unix_secs}` that does not yet
-/// exist, advancing the second counter on collision. Callers hold the relevant
-/// file lock, so the existence check is race-free against other backend
-/// processes and two saves in the same wall-clock second won't clobber a
-/// backup. The suffix stays a plain unix-seconds integer so the listing/restore
-/// parsers keep working.
-pub fn unique_backup_path(prefix: &str) -> String {
-    let mut secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO)
-        .as_secs();
-    loop {
-        let candidate = format!("{prefix}{secs}");
-        if !Path::new(&candidate).exists() {
-            return candidate;
-        }
-        secs += 1;
-    }
-}
-
-/// Given (path, filename-timestamp) pairs, return the paths to delete so only
-/// the `keep` entries with the highest timestamps survive. Ranking is by the
-/// timestamp embedded in the filename, never the file's mtime, so a restored or
-/// copied backup (which gets a fresh mtime) is not mistaken for the newest.
-pub fn backups_to_prune(
-    mut entries: Vec<(PathBuf, i64, BackupSource)>,
-    keep: usize,
-) -> Vec<PathBuf> {
-    if entries.len() <= keep {
-        return Vec::new();
-    }
-    entries.sort_by_key(|(_, ts, source)| {
-        (
-            !matches!(source, BackupSource::Manual),
-            std::cmp::Reverse(*ts),
-        )
-    });
-    entries.into_iter().skip(keep).map(|(p, _, _)| p).collect()
-}
-
-/// Remove all but the `keep` most recent backups in `parent` whose name starts
-/// with `name_prefix`, ranked by the unix-seconds suffix in the filename. Files
-/// whose suffix is not an integer are ignored (matching the listing logic), so
-/// they neither count toward `keep` nor get deleted. Best-effort: scan and
-/// remove failures are logged, not propagated, so cleanup never fails a save.
-pub fn prune_old_backups(parent: &Path, name_prefix: &str, keep: usize, manifest: &Path) {
-    let read_dir = match std::fs::read_dir(parent) {
-        Ok(rd) => rd,
-        Err(e) => {
-            eprintln!(
-                "Warning: failed to scan {:?} for old backups: {}",
-                parent, e
-            );
-            return;
-        }
-    };
-
-    let provenance = read_backup_provenance(manifest);
-    let entries: Vec<(PathBuf, i64, BackupSource)> = read_dir
-        .filter_map(|entry| entry.ok())
-        .filter_map(|entry| {
-            let name = entry.file_name().into_string().ok()?;
-            let ts = backup_timestamp(&name, name_prefix)?;
-            Some((
-                entry.path(),
-                ts,
-                provenance.get(&ts).copied().unwrap_or_default(),
-            ))
-        })
-        .collect();
-
-    for path in backups_to_prune(entries, keep) {
-        if let Err(e) = std::fs::remove_file(&path) {
-            eprintln!("Warning: failed to remove old backup {:?}: {}", path, e);
-        }
-    }
-}
-
-/// Parse the unix-seconds suffix out of a backup name or path with the given
-/// prefix. `prefix` is a filename prefix or a full-path prefix depending on the
-/// caller; both are a plain `strip_prefix` + integer parse.
-pub fn backup_timestamp(name_or_path: &str, prefix: &str) -> Option<i64> {
-    name_or_path.strip_prefix(prefix)?.parse().ok()
-}
-
-/// Timestamps of every backup file in `parent` whose name starts with
-/// `name_prefix`, parsed from the unix-seconds suffix.
-fn existing_backup_timestamps(parent: &Path, name_prefix: &str) -> std::collections::HashSet<i64> {
-    let mut set = std::collections::HashSet::new();
-    if let Ok(rd) = std::fs::read_dir(parent) {
-        for entry in rd.flatten() {
-            if let Ok(name) = entry.file_name().into_string()
-                && let Some(ts) = backup_timestamp(&name, name_prefix)
-            {
-                set.insert(ts);
-            }
-        }
-    }
-    set
-}
-
-/// Read the timestamp-to-source map recording how each backup was created. A
-/// missing or corrupt manifest yields an empty map; callers default unlisted
-/// backups to Manual so backups predating the manifest still render.
-pub fn read_backup_provenance(manifest: &Path) -> std::collections::BTreeMap<i64, BackupSource> {
-    read_provenance_raw(manifest)
-        .into_iter()
-        .filter_map(|(ts, value)| serde_json::from_value(value).ok().map(|src| (ts, src)))
-        .collect()
-}
-
-fn read_provenance_raw(manifest: &Path) -> std::collections::BTreeMap<i64, serde_json::Value> {
-    std::fs::read_to_string(manifest)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
-}
-
-/// Record `timestamp`'s provenance and drop entries whose backup file no longer
-/// exists, keeping the manifest bounded as backups are pruned. Best-effort: a
-/// write failure is logged, not propagated, so it never fails the enclosing
-/// save/restore. Callers hold the backup set's file lock.
-pub fn record_backup_provenance(
-    manifest: &Path,
-    backup_dir: &Path,
-    name_prefix: &str,
-    timestamp: i64,
-    source: BackupSource,
-) {
-    let live = existing_backup_timestamps(backup_dir, name_prefix);
-    let mut map = read_provenance_raw(manifest);
-    map.insert(
-        timestamp,
-        serde_json::to_value(source).unwrap_or(serde_json::Value::Null),
-    );
-    map.retain(|ts, _| *ts == timestamp || live.contains(ts));
-    if let Err(e) = write_json_atomic_with_mode(manifest, &map, 0o644) {
-        eprintln!(
-            "Warning: failed to write backup provenance {:?}: {}",
-            manifest, e
-        );
-    }
-}
-
-/// Drop manifest entries whose backup file no longer exists. Call after a
-/// backup is deleted so the manifest doesn't retain a stale source. Best-effort.
-pub fn reconcile_backup_provenance(manifest: &Path, backup_dir: &Path, name_prefix: &str) {
-    let live = existing_backup_timestamps(backup_dir, name_prefix);
-    let mut map = read_provenance_raw(manifest);
-    let before = map.len();
-    map.retain(|ts, _| live.contains(ts));
-    if map.len() != before {
-        let _ = write_json_atomic_with_mode(manifest, &map, 0o644);
-    }
-}
-
 /// Run a command and capture its output, killing it and returning an error if it
 /// doesn't finish within `timeout`. `wait_with_output` drains stdout/stderr and
 /// reaps on a worker thread (so a hung child can't deadlock on a full pipe),
@@ -593,11 +437,14 @@ pub fn write_json_atomic_with_mode<T: Serialize>(path: &Path, state: &T, mode: u
     write_json_atomic_inner(path, state, Some(mode))
 }
 
-fn sync_parent_dir(path: &Path) {
-    let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) else {
-        return;
-    };
-    let _ = File::open(parent).and_then(|dir| dir.sync_all());
+fn sync_parent_dir(path: &Path) -> Result<()> {
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    File::open(parent)
+        .and_then(|dir| dir.sync_all())
+        .with_context(|| format!("Failed to sync directory {}", parent.display()))
 }
 
 fn write_json_atomic_inner<T: Serialize>(path: &Path, state: &T, mode: Option<u32>) -> Result<()> {
@@ -625,16 +472,15 @@ fn write_json_atomic_inner<T: Serialize>(path: &Path, state: &T, mode: Option<u3
             .with_context(|| format!("Failed to create temp file {:?}", tmp_path))?;
         tmp.write_all(content.as_bytes())
             .with_context(|| format!("Failed to write temp file {:?}", tmp_path))?;
-        let _ = tmp.sync_all();
         if let Some(m) = mode {
             std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(m))
                 .with_context(|| format!("Failed to set permissions on {:?}", tmp_path))?;
         }
+        tmp.sync_all()
+            .with_context(|| format!("Failed to sync {}", tmp_path.display()))?;
         std::fs::rename(&tmp_path, path)
             .with_context(|| format!("Failed to rename {:?} to {:?}", tmp_path, path))?;
-        if mode.is_some() {
-            sync_parent_dir(path);
-        }
+        sync_parent_dir(path)?;
         Ok(())
     })();
 
@@ -645,19 +491,9 @@ fn write_json_atomic_inner<T: Serialize>(path: &Path, state: &T, mode: Option<u3
 }
 
 /// Write `bytes` to `path` via a temp file in the same directory, fsync, then
-/// atomic rename, so a crash mid-restore can't leave a truncated target. Callers
+/// atomically rename. Set `mode` before publishing the file. The caller must
 /// hold the relevant file lock.
-pub fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
-    write_bytes_atomic_inner(path, bytes, None)
-}
-
-/// Like [`write_bytes_atomic`], but chmods the temp file to `mode` before the
-/// rename so the target never appears with looser permissions, even briefly.
 pub fn write_bytes_atomic_with_mode(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
-    write_bytes_atomic_inner(path, bytes, Some(mode))
-}
-
-fn write_bytes_atomic_inner(path: &Path, bytes: &[u8], mode: Option<u32>) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
@@ -675,14 +511,13 @@ fn write_bytes_atomic_inner(path: &Path, bytes: &[u8], mode: Option<u32>) -> Res
             .with_context(|| format!("Failed to create temp file {:?}", tmp_path))?;
         tmp.write_all(bytes)
             .with_context(|| format!("Failed to write temp file {:?}", tmp_path))?;
-        let _ = tmp.sync_all();
-        if let Some(m) = mode {
-            std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(m))
-                .with_context(|| format!("Failed to set permissions on {:?}", tmp_path))?;
-        }
+        std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(mode))
+            .with_context(|| format!("Failed to set permissions on {:?}", tmp_path))?;
+        tmp.sync_all()
+            .with_context(|| format!("Failed to sync {}", tmp_path.display()))?;
         std::fs::rename(&tmp_path, path)
             .with_context(|| format!("Failed to rename {:?} to {:?}", tmp_path, path))?;
-        sync_parent_dir(path);
+        sync_parent_dir(path)?;
         Ok(())
     })();
 
@@ -944,14 +779,12 @@ macro_rules! check_cancel_early {
 #[cfg(test)]
 mod tests {
     use super::{
-        ERROR_CODES, backups_to_prune, classify_error, classify_message, config_path,
-        enqueue_capped, list_cache_packages, output_with_timeout, read_backup_provenance,
-        reconcile_backup_provenance, record_backup_provenance, write_bytes_atomic,
+        ERROR_CODES, classify_error, classify_message, config_path, enqueue_capped,
+        list_cache_packages, output_with_timeout, write_bytes_atomic_with_mode,
         write_event_flushed, write_json_atomic_with_mode,
     };
-    use crate::models::{BackupSource, StreamEvent};
+    use crate::models::StreamEvent;
     use std::collections::VecDeque;
-    use std::path::PathBuf;
     use std::time::Duration;
 
     fn ev(n: usize) -> (String, bool) {
@@ -1092,7 +925,7 @@ mod tests {
         let target = dir.join("mirrorlist");
         std::fs::write(&target, b"old contents").unwrap();
 
-        write_bytes_atomic(&target, b"new contents").unwrap();
+        write_bytes_atomic_with_mode(&target, b"new contents", 0o644).unwrap();
 
         assert_eq!(std::fs::read(&target).unwrap(), b"new contents");
         let stray: Vec<_> = std::fs::read_dir(&dir)
@@ -1101,71 +934,6 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().contains(".tmp."))
             .collect();
         assert!(stray.is_empty(), "temp file left behind: {stray:?}");
-
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    #[allow(clippy::unwrap_used)]
-    fn backup_provenance_records_and_reconciles() {
-        let dir = std::env::temp_dir().join(format!("cpac-prov-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let prefix = "cfg.backup.";
-        let manifest = dir.join(".meta.json");
-        for ts in [100i64, 200, 300] {
-            std::fs::write(dir.join(format!("{prefix}{ts}")), b"x").unwrap();
-        }
-
-        record_backup_provenance(&manifest, &dir, prefix, 100, BackupSource::Manual);
-        record_backup_provenance(&manifest, &dir, prefix, 200, BackupSource::Auto);
-        let map = read_backup_provenance(&manifest);
-        assert_eq!(map.get(&100), Some(&BackupSource::Manual));
-        assert_eq!(map.get(&200), Some(&BackupSource::Auto));
-        assert_eq!(map.get(&300), None);
-
-        std::fs::remove_file(dir.join(format!("{prefix}100"))).unwrap();
-        reconcile_backup_provenance(&manifest, &dir, prefix);
-        assert_eq!(read_backup_provenance(&manifest).get(&100), None);
-        assert_eq!(
-            read_backup_provenance(&manifest).get(&200),
-            Some(&BackupSource::Auto)
-        );
-
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    #[allow(clippy::unwrap_used)]
-    fn an_unknown_provenance_value_survives_a_write() {
-        let dir = std::env::temp_dir().join(format!("cpac-prov-unknown-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let prefix = "cfg.backup.";
-        let manifest = dir.join(".meta.json");
-        for ts in [100i64, 200, 300] {
-            std::fs::write(dir.join(format!("{prefix}{ts}")), b"x").unwrap();
-        }
-        std::fs::write(
-            &manifest,
-            br#"{"100":"manual","200":"scheduled","300":"auto"}"#,
-        )
-        .unwrap();
-
-        let map = read_backup_provenance(&manifest);
-        assert_eq!(map.get(&100), Some(&BackupSource::Manual));
-        assert_eq!(map.get(&300), Some(&BackupSource::Auto));
-        assert_eq!(map.get(&200), None, "an unreadable value is not guessed at");
-
-        record_backup_provenance(&manifest, &dir, prefix, 400, BackupSource::Auto);
-
-        let written = std::fs::read_to_string(&manifest).unwrap();
-        assert!(
-            written.contains("scheduled"),
-            "a value this build cannot read must not be dropped by writing: {written}"
-        );
-        assert_eq!(
-            read_backup_provenance(&manifest).get(&400),
-            Some(&BackupSource::Auto)
-        );
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1270,65 +1038,6 @@ mod tests {
         assert_eq!(read, vec!["c"]);
 
         std::fs::remove_file(&path).unwrap();
-    }
-
-    fn entry(ts: i64) -> (PathBuf, i64, BackupSource) {
-        sourced(ts, BackupSource::Auto)
-    }
-
-    fn sourced(ts: i64, source: BackupSource) -> (PathBuf, i64, BackupSource) {
-        (
-            PathBuf::from(format!("/etc/pacman.d/mirrorlist.backup.{ts}")),
-            ts,
-            source,
-        )
-    }
-
-    #[test]
-    fn backups_to_prune_keeps_highest_timestamps() {
-        // Shuffled input order; the lowest two timestamps must be pruned
-        // regardless of input or file mtime.
-        let entries = vec![
-            entry(4),
-            entry(7),
-            entry(1),
-            entry(5),
-            entry(3),
-            entry(6),
-            entry(2),
-        ];
-        let pruned = backups_to_prune(entries, 5);
-        assert_eq!(pruned, vec![entry(2).0, entry(1).0]);
-    }
-
-    #[test]
-    fn backups_to_prune_evicts_automatic_before_manual() {
-        let entries = vec![
-            sourced(1, BackupSource::Manual),
-            sourced(5, BackupSource::Auto),
-            sourced(6, BackupSource::Auto),
-            sourced(7, BackupSource::Auto),
-        ];
-
-        let pruned = backups_to_prune(entries, 3);
-
-        assert_eq!(
-            pruned,
-            vec![sourced(5, BackupSource::Auto).0],
-            "the oldest automatic goes, not the older manual"
-        );
-    }
-
-    #[test]
-    fn backups_to_prune_noop_under_cap() {
-        let entries = vec![entry(1), entry(2), entry(3)];
-        assert!(backups_to_prune(entries, 5).is_empty());
-    }
-
-    #[test]
-    fn backups_to_prune_equal_to_cap() {
-        let entries = vec![entry(1), entry(2), entry(3), entry(4), entry(5)];
-        assert!(backups_to_prune(entries, 5).is_empty());
     }
 
     #[test]

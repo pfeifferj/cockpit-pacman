@@ -234,7 +234,7 @@ Commands:
   version                Print the backend version, for the frontend to compare against
   remove-stale-lock      Remove a stale database lock (requires root)
   list-repos             List configured repositories from pacman.conf
-  save-repos <json>      Save repositories to pacman.conf (requires root)
+  save-repos <json> <revision>  Save repositories to pacman.conf (requires root)
   list-repo-backups      List available pacman.conf backups
   restore-repo-backup <timestamp>
                          Restore a pacman.conf backup (requires root)
@@ -763,8 +763,10 @@ fn main() {
         "version" => emit_json(&serde_json::json!({ "version": env!("CARGO_PKG_VERSION") })),
         "list-repos" => list_repos(),
         "save-repos" => {
-            if args.len() < 3 {
-                eprintln!("Error: save-repos requires a JSON array of repositories");
+            if args.len() < 4 {
+                eprintln!(
+                    "Error: save-repos requires a JSON array of repositories and its revision"
+                );
                 std::process::exit(1);
             }
             validate_json_payload_size(&args[2])
@@ -772,7 +774,7 @@ fn main() {
                     serde_json::from_str::<Vec<RepoEntry>>(&args[2])
                         .map_err(|e| anyhow::anyhow!("Invalid JSON: {}", e))
                 })
-                .and_then(|repos| save_repos(&repos))
+                .and_then(|repos| save_repos(&repos, &args[3]))
         }
         "list-repo-backups" => list_repo_backups(),
         "restore-repo-backup" => {

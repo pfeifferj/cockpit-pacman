@@ -821,7 +821,7 @@ export interface MirrorTestCallbacks {
   onTestResult?: (result: MirrorTestResult, current: number, total: number) => void;
   onData?: (data: string) => void;
   onComplete: () => void;
-  onError: (error: string, code?: ErrorCode) => void;
+  onError: (error: string, code?: ErrorCode, details?: string) => void;
   timeout?: number;
 }
 
@@ -884,7 +884,7 @@ export async function refreshMirrors(params: RefreshMirrorsParams = {}): Promise
 }
 
 export async function listMirrorBackups(): Promise<MirrorBackupListResponse> {
-  return runBackend<MirrorBackupListResponse>("list-mirror-backups", [], { superuser: "none" });
+  return runBackend<MirrorBackupListResponse>("list-mirror-backups", [], { superuser: "require" });
 }
 
 export async function restoreMirrorBackup(timestamp: number): Promise<RestoreMirrorBackupResponse> {
@@ -980,8 +980,8 @@ export async function listRepos(): Promise<ListReposResponse> {
   return runBackend<ListReposResponse>("list-repos", [], { superuser: "none" });
 }
 
-export async function saveRepos(repos: RepoEntry[]): Promise<SaveReposResponse> {
-  return runBackend<SaveReposResponse>("save-repos", [JSON.stringify(repos)], { superuser: "require" });
+export async function saveRepos(repos: RepoEntry[], revision: string): Promise<SaveReposResponse> {
+  return runBackend<SaveReposResponse>("save-repos", [JSON.stringify(repos), revision], { superuser: "require" });
 }
 
 export async function listRepoBackups(): Promise<RepoBackupListResponse> {

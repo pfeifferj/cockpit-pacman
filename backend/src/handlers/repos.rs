@@ -1,9 +1,11 @@
 use anyhow::Result;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 use ts_rs::TS;
 
+use crate::backups::{BackupResult, BackupStore};
 use crate::models::{
     BackupSource, ListReposResponse, RepoDirectiveFull, RepoEntry, SaveReposResponse,
 };
@@ -13,7 +15,6 @@ use crate::validation::{validate_directive_value, validate_repo_name};
 const PACMAN_CONF_PATH: &str = "/etc/pacman.conf";
 const BACKUP_PREFIX: &str = "/etc/pacman.conf.backup.";
 const BACKUP_NAME_PREFIX: &str = "pacman.conf.backup.";
-const BACKUP_DIR: &str = "/etc";
 const BACKUP_META_PATH: &str = "/etc/.pacman-conf-backups.meta.json";
 const LOCK_PATH: &str = "/etc/pacman.conf.lock";
 const MAX_BACKUPS: usize = 5;
@@ -327,7 +328,10 @@ pub fn list_repos() -> Result<()> {
 
     let repos: Vec<RepoEntry> = conf.repos.iter().map(repo_section_to_entry).collect();
 
-    emit_json(&ListReposResponse { repos })
+    emit_json(&ListReposResponse {
+        repos,
+        revision: revision(&content),
+    })
 }
 
 fn ensure_repos_usable(repos: &[RepoEntry]) -> Result<()> {
@@ -343,7 +347,36 @@ fn ensure_repos_usable(repos: &[RepoEntry]) -> Result<()> {
     Ok(())
 }
 
-pub fn save_repos(repos: &[RepoEntry]) -> Result<()> {
+fn revision(content: &str) -> String {
+    format!("{:x}", Sha256::digest(content.as_bytes()))
+}
+
+fn backup_store() -> BackupStore<'static> {
+    BackupStore {
+        target: Path::new(PACMAN_CONF_PATH),
+        lock: Path::new(LOCK_PATH),
+        manifest: Path::new(BACKUP_META_PATH),
+        name_prefix: BACKUP_NAME_PREFIX,
+        keep: MAX_BACKUPS,
+    }
+}
+
+pub fn save_repos(repos: &[RepoEntry], expected_revision: &str) -> Result<()> {
+    let (result, revision) = save_repos_to(repos, expected_revision, &backup_store())?;
+    emit_json(&SaveReposResponse {
+        success: true,
+        backup_path: result.backup_path,
+        message: format!("Saved {} repositories to {}", repos.len(), PACMAN_CONF_PATH),
+        revision,
+        warnings: result.warnings,
+    })
+}
+
+fn save_repos_to(
+    repos: &[RepoEntry],
+    expected_revision: &str,
+    store: &BackupStore<'_>,
+) -> Result<(BackupResult, String)> {
     ensure_repos_usable(repos)?;
 
     for entry in repos {
@@ -363,12 +396,12 @@ pub fn save_repos(repos: &[RepoEntry]) -> Result<()> {
         }
     }
 
-    let path = Path::new(PACMAN_CONF_PATH);
-
-    // Serialize the whole read/modify/backup/rename cycle so concurrent saves
-    // can't lose each other's edits or clobber a backup.
-    let backup_path = crate::util::with_file_lock(Path::new(LOCK_PATH), || {
-        let original = fs::read_to_string(path)?;
+    crate::util::with_file_lock(store.lock, || {
+        let original = fs::read_to_string(store.target)?;
+        anyhow::ensure!(
+            revision(&original) == expected_revision,
+            "Repository configuration changed since it was loaded. Reload repositories before saving."
+        );
         let mut conf = parse_conf(&original);
 
         let mut preserved: std::collections::HashMap<String, RepoSection> =
@@ -403,26 +436,8 @@ pub fn save_repos(repos: &[RepoEntry]) -> Result<()> {
 
         let new_content = serialize_conf(&conf);
 
-        let backup_path = if path.exists() {
-            let backup = crate::util::unique_backup_path(BACKUP_PREFIX);
-            fs::copy(path, &backup)?;
-            Some(backup)
-        } else {
-            None
-        };
-
-        crate::util::write_bytes_atomic_with_mode(path, new_content.as_bytes(), 0o644)?;
-
-        cleanup_old_backups();
-        note_backup(&backup_path, BackupSource::Manual);
-
-        Ok(backup_path)
-    })?;
-
-    emit_json(&SaveReposResponse {
-        success: true,
-        backup_path,
-        message: format!("Saved {} repositories to {}", repos.len(), PACMAN_CONF_PATH),
+        let result = store.replace_locked(new_content.as_bytes(), BackupSource::Manual)?;
+        Ok((result, revision(&new_content)))
     })
 }
 
@@ -443,6 +458,7 @@ pub struct RepoBackup {
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct RepoBackupListResponse {
     pub backups: Vec<RepoBackup>,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Serialize, TS)]
@@ -452,21 +468,20 @@ pub struct RestoreRepoBackupResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backup_path: Option<String>,
     pub message: String,
+    pub warnings: Vec<String>,
 }
 
-fn count_repos_in_file(path: &Path) -> EntryCounts {
-    let Ok(content) = fs::read_to_string(path) else {
-        return EntryCounts::default();
-    };
+fn count_repos_in_file(path: &Path) -> Result<EntryCounts> {
+    let content = fs::read_to_string(path)?;
     let conf = parse_conf(&content);
-    EntryCounts {
+    Ok(EntryCounts {
         enabled: conf.repos.iter().filter(|r| r.enabled).count(),
         total: conf.repos.len(),
-    }
+    })
 }
 
 fn ensure_repos_restorable(backup: &Path) -> Result<()> {
-    let enabled = count_repos_in_file(backup).enabled;
+    let enabled = count_repos_in_file(backup)?.enabled;
     if enabled == 0 {
         anyhow::bail!(
             "Backup {} has no enabled repositories, refusing to restore",
@@ -477,146 +492,39 @@ fn ensure_repos_restorable(backup: &Path) -> Result<()> {
 }
 
 pub fn list_repo_backups() -> Result<()> {
-    let parent = Path::new(PACMAN_CONF_PATH)
-        .parent()
-        .unwrap_or(Path::new("/etc"));
-    let mut backups: Vec<RepoBackup> = Vec::new();
-
-    let read_dir = match fs::read_dir(parent) {
-        Ok(rd) => rd,
-        Err(_) => return emit_json(&RepoBackupListResponse { backups }),
-    };
-    let provenance = crate::util::read_backup_provenance(Path::new(BACKUP_META_PATH));
-
-    for entry in read_dir.flatten() {
-        let name = match entry.file_name().into_string() {
-            Ok(n) => n,
-            Err(_) => continue,
-        };
-        let timestamp_str = match name.strip_prefix(BACKUP_NAME_PREFIX) {
-            Some(s) => s,
-            None => continue,
-        };
-        let timestamp: i64 = match timestamp_str.parse() {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-        let counts = count_repos_in_file(&entry.path());
-        let date = chrono::DateTime::from_timestamp(timestamp, 0)
-            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
-            .unwrap_or_else(|| "Unknown".to_string());
-
-        let source = provenance.get(&timestamp).copied().unwrap_or_default();
-
-        backups.push(RepoBackup {
-            timestamp,
-            date,
-            repo_count: counts.total,
-            enabled_count: counts.enabled,
-            size,
-            source,
-        });
-    }
-
-    backups.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
-    emit_json(&RepoBackupListResponse { backups })
+    let (entries, warnings) = backup_store().list(count_repos_in_file)?;
+    let backups = entries
+        .into_iter()
+        .map(|entry| RepoBackup {
+            timestamp: entry.timestamp,
+            date: entry.date,
+            repo_count: entry.counts.total,
+            enabled_count: entry.counts.enabled,
+            size: entry.size,
+            source: entry.source,
+        })
+        .collect();
+    emit_json(&RepoBackupListResponse { backups, warnings })
 }
 
 pub fn restore_repo_backup(timestamp: i64) -> Result<()> {
-    let backup_path = format!("{}{}", BACKUP_PREFIX, timestamp);
-
-    let pre_restore_backup = crate::util::with_file_lock(Path::new(LOCK_PATH), || {
-        let backup = Path::new(&backup_path);
-        if !backup.exists() {
-            anyhow::bail!("Backup not found: {}", backup_path);
-        }
-
-        ensure_repos_restorable(backup)?;
-        let contents = fs::read(backup)?;
-
-        let conf = Path::new(PACMAN_CONF_PATH);
-
-        // Back up the current pacman.conf before overwriting it, so a restore is
-        // itself reversible.
-        let pre_restore_backup = if conf.exists() {
-            let p = crate::util::unique_backup_path(BACKUP_PREFIX);
-            fs::copy(conf, &p)?;
-            Some(p)
-        } else {
-            None
-        };
-
-        crate::util::write_bytes_atomic(conf, &contents)?;
-
-        note_backup(&pre_restore_backup, BackupSource::Auto);
-        cleanup_old_backups();
-
-        Ok(pre_restore_backup)
-    })?;
-
+    let result = backup_store().restore(timestamp, ensure_repos_restorable)?;
     emit_json(&RestoreRepoBackupResponse {
         success: true,
-        backup_path: pre_restore_backup,
-        message: format!("Restored pacman.conf from backup {}", backup_path),
+        backup_path: result.backup_path,
+        message: format!("Restored pacman.conf from backup {BACKUP_PREFIX}{timestamp}"),
+        warnings: result.warnings,
     })
 }
 
 pub fn delete_repo_backup(timestamp: i64) -> Result<()> {
-    let backup_path = format!("{}{}", BACKUP_PREFIX, timestamp);
-
-    crate::util::with_file_lock(Path::new(LOCK_PATH), || {
-        let backup = Path::new(&backup_path);
-        if !backup.exists() {
-            anyhow::bail!("Backup not found: {}", backup_path);
-        }
-        fs::remove_file(backup)?;
-        reconcile_backups();
-        Ok(())
-    })?;
-
+    let warnings = backup_store().delete(timestamp)?;
     emit_json(&RestoreRepoBackupResponse {
         success: true,
         backup_path: None,
-        message: format!("Deleted backup {}", backup_path),
+        message: format!("Deleted backup {BACKUP_PREFIX}{timestamp}"),
+        warnings,
     })
-}
-
-/// Keep only the most recent MAX_BACKUPS pacman.conf backups. Best-effort:
-/// failures are logged, not propagated, so cleanup never fails a save. Callers
-/// hold the pacman.conf lock.
-fn cleanup_old_backups() {
-    let parent = Path::new(PACMAN_CONF_PATH)
-        .parent()
-        .unwrap_or(Path::new("/etc"));
-    crate::util::prune_old_backups(
-        parent,
-        BACKUP_NAME_PREFIX,
-        MAX_BACKUPS,
-        Path::new(BACKUP_META_PATH),
-    );
-}
-
-fn note_backup(backup: &Option<String>, source: BackupSource) {
-    if let Some(b) = backup
-        && let Some(ts) = crate::util::backup_timestamp(b, BACKUP_PREFIX)
-    {
-        crate::util::record_backup_provenance(
-            Path::new(BACKUP_META_PATH),
-            Path::new(BACKUP_DIR),
-            BACKUP_NAME_PREFIX,
-            ts,
-            source,
-        );
-    }
-}
-
-fn reconcile_backups() {
-    crate::util::reconcile_backup_provenance(
-        Path::new(BACKUP_META_PATH),
-        Path::new(BACKUP_DIR),
-        BACKUP_NAME_PREFIX,
-    );
 }
 
 #[cfg(test)]
@@ -772,7 +680,51 @@ mod round_trip {
 
 #[cfg(test)]
 mod tests {
-    use super::ensure_repos_restorable;
+    use super::{
+        backup_store, ensure_repos_restorable, parse_conf, repo_section_to_entry, revision,
+        save_repos_to,
+    };
+
+    #[test]
+    fn a_stale_save_preserves_external_edits_and_a_fresh_save_can_delete_them() {
+        let directory = std::env::temp_dir().join(format!("cpac-repos-cas-{}", std::process::id()));
+        std::fs::create_dir(&directory).unwrap();
+        let target = directory.join("pacman.conf");
+        let lock = directory.join("lock");
+        let manifest = directory.join("meta.json");
+        let store = crate::backups::BackupStore {
+            target: &target,
+            lock: &lock,
+            manifest: &manifest,
+            ..backup_store()
+        };
+        let original =
+            "[options]\nHoldPkg = pacman glibc\n\n[core]\nInclude = /etc/pacman.d/mirrorlist\n";
+        let repos: Vec<_> = parse_conf(original)
+            .repos
+            .iter()
+            .map(repo_section_to_entry)
+            .collect();
+        let changed =
+            format!("{original}\n[external]\nServer = https://example.test/$repo/os/$arch\n");
+        std::fs::write(&target, &changed).unwrap();
+
+        assert!(save_repos_to(&repos, &revision(original), &store).is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), changed);
+        assert!(!manifest.exists());
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 2);
+
+        let (result, saved_revision) = save_repos_to(&repos, &revision(&changed), &store).unwrap();
+        let saved = std::fs::read_to_string(&target).unwrap();
+        assert_eq!(parse_conf(&saved).repos.len(), 1);
+        assert_eq!(saved_revision, revision(&saved));
+        assert_eq!(
+            std::fs::read_to_string(result.backup_path.unwrap()).unwrap(),
+            changed
+        );
+        assert!(result.warnings.is_empty());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn a_backup_whose_sections_are_all_commented_is_refused() {

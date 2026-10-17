@@ -13,6 +13,7 @@ vi.mock("../api", async () => {
     saveMirrorlist: vi.fn(),
     listMirrorBackups: vi.fn(),
     restoreMirrorBackup: vi.fn(),
+    deleteMirrorBackup: vi.fn(),
   };
 });
 
@@ -22,6 +23,7 @@ const mockTestMirrors = vi.mocked(api.testMirrors);
 const mockSaveMirrorlist = vi.mocked(api.saveMirrorlist);
 const mockListMirrorBackups = vi.mocked(api.listMirrorBackups);
 const mockRestoreMirrorBackup = vi.mocked(api.restoreMirrorBackup);
+const mockDeleteMirrorBackup = vi.mocked(api.deleteMirrorBackup);
 
 const mockMirrorResponse: api.MirrorListResponse = {
   mirrors: [
@@ -47,6 +49,7 @@ describe("MirrorsView", () => {
     vi.clearAllMocks();
     window.localStorage.clear();
     mockListMirrors.mockResolvedValue(mockMirrorResponse);
+    mockListMirrorBackups.mockResolvedValue({ backups: [], warnings: [] });
     mockFetchMirrorStatus.mockResolvedValue({
       mirrors: [],
       total: 0,
@@ -230,6 +233,7 @@ describe("MirrorsView", () => {
 
   it("saves mirrorlist on confirm", async () => {
     mockSaveMirrorlist.mockResolvedValue({
+      warnings: [],
       success: true,
       backup_path: "/etc/pacman.d/mirrorlist.bak",
       message: "Mirrorlist saved",
@@ -315,6 +319,7 @@ describe("MirrorsView", () => {
 
   it("loads backups when expanding backup history", async () => {
     mockListMirrorBackups.mockResolvedValue({
+      warnings: [],
       backups: [
         {
           timestamp: 1704067200,
@@ -349,6 +354,7 @@ describe("MirrorsView", () => {
 
   it("distinguishes a backup you took from one taken for you", async () => {
     mockListMirrorBackups.mockResolvedValue({
+      warnings: [],
       backups: [
         {
           timestamp: 1704067200,
@@ -386,7 +392,7 @@ describe("MirrorsView", () => {
   });
 
   it("shows empty state when no backups exist", async () => {
-    mockListMirrorBackups.mockResolvedValue({ backups: [] });
+    mockListMirrorBackups.mockResolvedValue({ backups: [], warnings: [] });
 
     render(<MirrorsView />);
 
@@ -403,8 +409,95 @@ describe("MirrorsView", () => {
     });
   });
 
+  it("reports unavailable backup history instead of claiming there are no backups", async () => {
+    mockListMirrorBackups.mockRejectedValue(new api.BackendError("Permission denied", "permission_denied", "Directory /etc/pacman.d is not readable"));
+    render(<MirrorsView />);
+    await screen.findByText(/mirror1\.example\.com/);
+    await act(async () => { fireEvent.click(screen.getByText("Backup history")); });
+    expect(screen.getByText("Backup history could not be loaded")).toBeInTheDocument();
+    expect(screen.getByText("Directory /etc/pacman.d is not readable")).toBeInTheDocument();
+    expect(screen.queryByText(/No backups found/)).not.toBeInTheDocument();
+  });
+
+  it("preserves backend details from a failed mirror test", async () => {
+    mockTestMirrors.mockImplementation((callbacks) => {
+      window.queueMicrotask(() => callbacks.onError?.("Mirror test failed", "internal_error", "Failed to create the HTTP client"));
+      return { cancel: vi.fn(), forceStop: vi.fn() };
+    });
+    render(<MirrorsView />);
+    expect(await screen.findByText("Mirror test failed")).toBeInTheDocument();
+    expect(screen.getByText("Failed to create the HTTP client")).toBeInTheDocument();
+  });
+
+  it("preserves each backend failure when deleting several backups", async () => {
+    mockListMirrorBackups.mockResolvedValue({ backups: [100, 200].map(timestamp => ({ timestamp, date: "1970-01-01", total_count: 2, enabled_count: 2, size: 200, source: "manual" })), warnings: [] });
+    mockDeleteMirrorBackup.mockRejectedValueOnce(new api.BackendError("Could not delete first backup", "permission_denied", "First backup is read-only"));
+    mockDeleteMirrorBackup.mockRejectedValueOnce(new api.BackendError("Could not delete second backup", "internal_error", "Second backup directory could not be synced"));
+    render(<MirrorsView />);
+    await screen.findByText(/mirror1\.example\.com/);
+    await act(async () => { fireEvent.click(screen.getByText("Backup history")); });
+    fireEvent.click(screen.getByLabelText("Select all backups"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Delete (2)" })); });
+    expect(screen.getByText("Failed to delete 2 of 2 backups")).toBeInTheDocument();
+    expect(screen.getByText(/First backup is read-only/)).toHaveTextContent("Second backup directory could not be synced");
+  });
+
+  it("shows backup maintenance warnings after a successful save", async () => {
+    mockSaveMirrorlist.mockResolvedValue({ success: true, backup_path: "/etc/pacman.d/mirrorlist.backup.100", message: "Saved", warnings: ["Backup provenance could not be saved"] });
+    render(<MirrorsView />);
+    await screen.findByText(/mirror1\.example\.com/);
+    fireEvent.click(screen.getAllByRole("switch")[1]);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save Changes" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save Mirrorlist" })); });
+    expect(screen.getByRole("heading", { name: "Mirrorlist saved" })).toBeInTheDocument();
+    expect(screen.getByText("Backup provenance could not be saved")).toBeInTheDocument();
+  });
+
+  it("shows deletion warnings after the backup history reloads", async () => {
+    mockListMirrorBackups.mockResolvedValue({ backups: [{ timestamp: 100, date: "1970-01-01", total_count: 2, enabled_count: 2, size: 200, source: "manual" }], warnings: ["One backup could not be read"] });
+    mockDeleteMirrorBackup.mockResolvedValue({ success: true, backup_path: null, message: "Deleted", warnings: ["Backup provenance could not be saved"] });
+    render(<MirrorsView />);
+    await screen.findByText(/mirror1\.example\.com/);
+    await act(async () => { fireEvent.click(screen.getByText("Backup history")); });
+    expect(screen.getByText("One backup could not be read")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Select all backups"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Delete (1)" })); });
+    expect(mockDeleteMirrorBackup).toHaveBeenCalledWith(100);
+    expect(screen.getByText("Backup provenance could not be saved")).toBeInTheDocument();
+    expect(screen.getByText("One backup could not be read")).toBeInTheDocument();
+  });
+
+  it("warns when HTTP is selected while keeping HTTPS as the default", async () => {
+    render(<MirrorsView />);
+    const refresh = await screen.findByRole("button", { name: "Refresh" });
+    await waitFor(() => expect(refresh).toBeEnabled());
+    fireEvent.click(refresh);
+    const protocol = screen.getByLabelText("Protocol");
+    expect(protocol).toHaveValue("https");
+    expect(screen.queryByText("HTTP does not protect package database transfers")).not.toBeInTheDocument();
+    fireEvent.change(protocol, { target: { value: "http" } });
+    expect(screen.getByText("HTTP does not protect package database transfers")).toBeInTheDocument();
+    fireEvent.change(protocol, { target: { value: "all" } });
+    expect(screen.getByText("HTTP does not protect package database transfers")).toBeInTheDocument();
+    fireEvent.change(protocol, { target: { value: "https" } });
+    expect(screen.queryByText("HTTP does not protect package database transfers")).not.toBeInTheDocument();
+  });
+
+  it("warns before saving enabled HTTP mirrors", async () => {
+    mockListMirrors.mockResolvedValue({ ...mockMirrorResponse, mirrors: [{ ...mockMirrorResponse.mirrors[0], url: "http://mirror1.example.com/$repo/os/$arch" }, mockMirrorResponse.mirrors[1]] });
+    render(<MirrorsView />);
+    await screen.findByText(/mirror1\.example\.com/);
+    fireEvent.click(screen.getAllByRole("switch")[1]);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save Changes" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(screen.getByText("HTTP does not protect package database transfers")).toBeInTheDocument();
+    expect(mockSaveMirrorlist).not.toHaveBeenCalled();
+  });
+
   it("shows restore confirmation modal", async () => {
     mockListMirrorBackups.mockResolvedValue({
+      warnings: [],
       backups: [
         {
           timestamp: 1704067200,
@@ -442,6 +535,7 @@ describe("MirrorsView", () => {
 
   it("restores backup and reloads mirrors", async () => {
     mockListMirrorBackups.mockResolvedValue({
+      warnings: [],
       backups: [
         {
           timestamp: 1704067200,
@@ -454,6 +548,7 @@ describe("MirrorsView", () => {
       ],
     });
     mockRestoreMirrorBackup.mockResolvedValue({
+      warnings: [],
       success: true,
       backup_path: "/etc/pacman.d/mirrorlist.backup.1704067201",
       message: "Restored",

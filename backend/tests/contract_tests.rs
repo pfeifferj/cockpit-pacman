@@ -1449,6 +1449,7 @@ fn orphan_package_shape() {
 #[test]
 fn save_mirrorlist_response_shape() {
     let resp = SaveMirrorlistResponse {
+        warnings: vec![],
         success: true,
         backup_path: Some("/etc/pacman.d/mirrorlist.bak".into()),
         message: "Saved successfully".into(),
@@ -1459,6 +1460,7 @@ fn save_mirrorlist_response_shape() {
     assert_string(&v, "message");
 
     let failed = SaveMirrorlistResponse {
+        warnings: vec![],
         success: false,
         backup_path: None,
         message: "Failed to write".into(),
@@ -1483,6 +1485,7 @@ fn refresh_mirrors_response_shape() {
 #[test]
 fn restore_mirror_backup_response_shape() {
     let resp = RestoreMirrorBackupResponse {
+        warnings: vec![],
         success: true,
         backup_path: Some("/var/backups/mirrorlist.1704067200".into()),
         message: "Restored".into(),

@@ -1208,6 +1208,7 @@ fn test_mirror_backup_serialization() {
 #[test]
 fn test_mirror_backup_list_response_serialization() {
     let response = MirrorBackupListResponse {
+        warnings: vec![],
         backups: vec![
             MirrorBackup {
                 timestamp: 1704067200,
@@ -1236,14 +1237,21 @@ fn test_mirror_backup_list_response_serialization() {
 
 #[test]
 fn test_mirror_backup_list_response_empty() {
-    let response = MirrorBackupListResponse { backups: vec![] };
+    let response = MirrorBackupListResponse {
+        warnings: vec![],
+        backups: vec![],
+    };
     let json = serde_json::to_string(&response).unwrap();
-    assert_eq!(json, "{\"backups\":[]}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&json).unwrap(),
+        serde_json::json!({"backups": [], "warnings": []})
+    );
 }
 
 #[test]
 fn test_restore_mirror_backup_response_serialization() {
     let response = RestoreMirrorBackupResponse {
+        warnings: vec![],
         success: true,
         backup_path: Some("/etc/pacman.d/mirrorlist.backup.1704067200".to_string()),
         message: "Restored mirrorlist from backup".to_string(),
@@ -1258,6 +1266,7 @@ fn test_restore_mirror_backup_response_serialization() {
 #[test]
 fn test_restore_mirror_backup_response_no_backup_path() {
     let response = RestoreMirrorBackupResponse {
+        warnings: vec![],
         success: true,
         backup_path: None,
         message: "Restored mirrorlist".to_string(),
