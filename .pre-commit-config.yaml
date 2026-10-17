@@ -21,13 +21,14 @@ repos:
 
       - id: cargo-fmt
         name: cargo fmt
-        entry: cargo fmt --manifest-path backend/Cargo.toml --
+        entry: cargo fmt --manifest-path backend/Cargo.toml --all --check
         language: system
         files: \.rs$
+        pass_filenames: false
 
       - id: cargo-clippy
         name: cargo clippy
-        entry: cargo clippy --manifest-path backend/Cargo.toml -- -D warnings
+        entry: cargo clippy --manifest-path backend/Cargo.toml --locked --workspace --all-targets -- -D warnings
         language: system
         files: \.rs$
         pass_filenames: false

@@ -273,7 +273,7 @@ mod tests {
         let versions = build_archive_versions(&html, "bash", "x86_64", None, None);
         let archs: Vec<&str> = versions
             .iter()
-            .map(|v| v.filename.rsplit('-').nth(0).unwrap())
+            .map(|v| v.filename.rsplit('-').next().unwrap())
             .collect();
         assert_eq!(versions.len(), 2);
         assert!(

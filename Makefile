@@ -13,12 +13,12 @@ all: build install
 build: build-backend build-frontend
 
 build-backend:
-	cd backend && cargo build --release
+	cd backend && cargo build --release --locked
 
 # Regenerate the TypeScript wire types from the Rust serde structs (ts-rs).
 # The export logic lives in #[cfg(test)] code, so this runs via cargo test.
 generate-types:
-	cd backend && cargo test --quiet export_bindings
+	cd backend && cargo test --locked --quiet export_bindings
 
 build-frontend: generate-types
 	npm ci
@@ -56,7 +56,7 @@ lint-frontend:
 	npm run lint
 
 lint-backend:
-	cd backend && cargo clippy -- -D warnings
+	cd backend && cargo clippy --locked --workspace --all-targets -- -D warnings
 
 # Testing
 test: test-frontend test-backend
@@ -66,7 +66,7 @@ test-frontend:
 	npm test
 
 test-backend:
-	cd backend && cargo test
+	cd backend && cargo test --locked --workspace
 
 test-e2e:
 	npm run test:e2e

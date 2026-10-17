@@ -3,6 +3,10 @@ name = "cockpit-pacman-backend"
 version = "0.3.8"
 edition = "2024"
 
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
 [features]
 integration-tests = []
 e2e-fixtures = []
@@ -22,7 +26,7 @@ anyhow = "1"
 ctrlc = { version = "3", features = ["termination"] }
 chrono = "0.4"
 libc = "0.2"
-pacman-key = "0.4.0"
+pacman-key = { version = "0.4.0", path = "crates/pacman-key" }
 pacman-log = "0.2.1"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 rss = "2"

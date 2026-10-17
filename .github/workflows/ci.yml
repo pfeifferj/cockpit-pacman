@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -58,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container:
-      image: archlinux:latest
+      image: archlinux@sha256:4e77cf2ea5f410e6f8be5abf93ccf17ce2436e87a138c167208356711a405dbd
     steps:
       - name: Install dependencies
         run: |
@@ -82,20 +85,20 @@ jobs:
 
       - name: Format check
         working-directory: backend
-        run: cargo fmt --check
+        run: cargo fmt --all --check
 
       - name: Clippy
         working-directory: backend
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       # The Arch container has the real pacman state the gated tests need.
       - name: Test
         working-directory: backend
-        run: cargo test --features integration-tests
+        run: cargo test --locked --workspace --features integration-tests
 
       - name: Test fixture endpoint restrictions
         working-directory: backend
-        run: cargo test --features e2e-fixtures endpoints
+        run: cargo test --locked --features e2e-fixtures endpoints
 
       - name: Check generated TS bindings are up to date
         run: |
@@ -105,7 +108,7 @@ jobs:
 
       - name: Build
         working-directory: backend
-        run: cargo build --release
+        run: cargo build --release --locked
 
   browser:
     name: Browser integration
