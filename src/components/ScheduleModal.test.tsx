@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, cleanup, fireEvent, act } from "@testing-library/react";
 import { ScheduleModal } from "./ScheduleModal";
 import * as api from "../api";
 
@@ -152,4 +152,78 @@ describe("ScheduleModal run history", () => {
     expect(screen.getByText("Unknown")).toBeInTheDocument();
   });
 
+});
+
+describe("ScheduleModal timer and running service state", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetScheduleConfig.mockResolvedValue(config);
+    mockGetScheduledRuns.mockResolvedValue({ runs: [], total: 0 });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("distinguishes an unavailable timer from an inactive timer", async () => {
+    mockGetScheduleConfig.mockResolvedValue({
+      ...config, timer_active: null, timer_error: "Could not query systemd",
+    });
+    render(<ScheduleModal isOpen onClose={() => {}} />);
+    expect(await screen.findByText("Timer status unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Could not query systemd")).toBeInTheDocument();
+    expect(screen.getByText("Unknown")).toBeInTheDocument();
+    expect(screen.queryByText("Inactive")).not.toBeInTheDocument();
+    expect(screen.queryByText("Timer and saved settings differ")).not.toBeInTheDocument();
+    expect(screen.getByRole("switch")).toBeChecked();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+
+  it.each([true, false])("can repair timer drift when enabled is %s without changing settings", async enabled => {
+    const mismatched = { ...config, enabled, timer_active: !enabled };
+    mockGetScheduleConfig.mockResolvedValueOnce(mismatched).mockResolvedValue({ ...mismatched, timer_active: enabled });
+    vi.mocked(api.setScheduleConfig).mockResolvedValue({ success: true, message: "Schedule saved" });
+    render(<ScheduleModal isOpen onClose={() => {}} />);
+    expect(await screen.findByText("Timer and saved settings differ")).toBeInTheDocument();
+    const save = screen.getByRole("button", { name: "Save" });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    await waitFor(() => expect(api.setScheduleConfig).toHaveBeenCalledWith({
+      enabled, mode: config.mode, schedule: config.schedule, max_packages: config.max_packages,
+    }));
+    await waitFor(() => expect(screen.queryByText("Timer and saved settings differ")).not.toBeInTheDocument());
+    expect(save).toBeDisabled();
+  });
+
+  it("keeps the running service separate from the last completed run", async () => {
+    mockGetScheduledRuns.mockResolvedValue({
+      runs: [run({ packages_upgraded: 9 })], total: 1,
+      current_run: { state: "activating", started_at: "2026-10-11T10:00:00Z", invocation_id: "running" },
+    });
+    render(<ScheduleModal isOpen onClose={() => {}} />);
+    expect(await screen.findByText("Scheduled upgrade is running")).toBeInTheDocument();
+    expect(screen.getByText("Success")).toBeInTheDocument();
+    expect(screen.getByText("9 upgraded")).toBeInTheDocument();
+  });
+
+  it("polls the service through stopping and completion, then stops polling when closed", async () => {
+    vi.useFakeTimers();
+    mockGetScheduledRuns
+      .mockResolvedValueOnce({ runs: [], total: 0, current_run: { state: "active", started_at: null, invocation_id: "running" } })
+      .mockResolvedValueOnce({ runs: [], total: 0, current_run: { state: "deactivating", started_at: null, invocation_id: "running" } })
+      .mockResolvedValue({ runs: [run({ packages_upgraded: 2 })], total: 1 });
+    let view: ReturnType<typeof render>;
+    await act(async () => { view = render(<ScheduleModal isOpen onClose={() => {}} />); });
+    expect(screen.getByText("Scheduled upgrade is running")).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(screen.getByText("Scheduled upgrade is stopping")).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(screen.queryByText("Scheduled upgrade is stopping")).not.toBeInTheDocument();
+    expect(screen.getByText("2 upgraded")).toBeInTheDocument();
+    expect(mockGetScheduledRuns).toHaveBeenCalledTimes(3);
+    expect(mockGetScheduleConfig).toHaveBeenCalledTimes(1);
+    view!.rerender(<ScheduleModal isOpen={false} onClose={() => {}} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
+    expect(mockGetScheduledRuns).toHaveBeenCalledTimes(3);
+  });
 });

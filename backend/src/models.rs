@@ -492,7 +492,18 @@ pub struct ScheduledRunEntry {
 
 #[derive(Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct ScheduledCurrentRun {
+    pub state: String,
+    pub started_at: Option<String>,
+    pub invocation_id: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct ScheduledRunsResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub current_run: Option<ScheduledCurrentRun>,
     pub runs: Vec<ScheduledRunEntry>,
     pub total: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]

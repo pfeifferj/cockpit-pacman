@@ -1,8 +1,7 @@
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
-use std::fs::{self, File, OpenOptions};
-use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::fs::{self, File};
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -303,22 +302,13 @@ impl AppConfig {
             // config.json still names the old schedule.
             let previous = fs::read(TIMER_DROP_IN_PATH).ok();
 
-            // Write drop-in file with restrictive permissions
             let drop_in_content =
                 format!("[Timer]\nOnCalendar=\nOnCalendar={}\n", schedule.schedule);
-
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o644)
-                .open(TIMER_DROP_IN_PATH)
-                .with_context(|| format!("Failed to open timer drop-in: {}", TIMER_DROP_IN_PATH))?;
-
-            file.write_all(drop_in_content.as_bytes())
-                .with_context(|| {
-                    format!("Failed to write timer drop-in to {}", TIMER_DROP_IN_PATH)
-                })?;
+            crate::util::write_bytes_atomic_with_mode(
+                Path::new(TIMER_DROP_IN_PATH),
+                drop_in_content.as_bytes(),
+                0o644,
+            )?;
 
             // Undo the drop-in we just wrote when a systemctl step fails (spawn
             // error, timeout, or non-zero exit).
@@ -443,21 +433,26 @@ pub struct ScheduleConfigResponse {
     pub mode: String,
     pub schedule: String,
     pub max_packages: usize,
-    pub timer_active: bool,
+    pub timer_active: Option<bool>,
+    #[ts(optional)]
+    pub timer_error: Option<String>,
     pub timer_next_run: Option<String>,
-    /// What the timer is actually set to, as systemd normalises it.
     pub timer_calendar: Option<String>,
 }
 
 impl ScheduleConfigResponse {
     pub fn from_config(config: &ScheduleConfig) -> Self {
-        let (timer_active, timer_next_run, timer_calendar) = get_timer_status();
+        let (timer_active, timer_next_run, timer_calendar, timer_error) = match get_timer_status() {
+            Ok(status) => (Some(status.active), status.next_run, status.calendar, None),
+            Err(error) => (None, None, None, Some(format!("{error:#}"))),
+        };
         Self {
             enabled: config.enabled,
             mode: config.mode.to_string(),
             schedule: config.schedule.clone(),
             max_packages: config.max_packages,
             timer_active,
+            timer_error,
             timer_next_run,
             timer_calendar,
         }
@@ -471,42 +466,53 @@ fn parse_timer_calendar(value: &str) -> Option<String> {
     (!spec.is_empty()).then(|| spec.to_string())
 }
 
-fn get_timer_status() -> (bool, Option<String>, Option<String>) {
+struct TimerStatus {
+    active: bool,
+    next_run: Option<String>,
+    calendar: Option<String>,
+}
+
+fn parse_timer_status(text: &str) -> Result<TimerStatus> {
+    let properties: std::collections::HashMap<_, _> = text
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .collect();
+    let active = match properties.get("ActiveState") {
+        Some(&"active") => true,
+        Some(&"inactive" | &"failed" | &"activating" | &"deactivating") => false,
+        _ => bail!("Timer status is unavailable"),
+    };
+    if properties.get("LoadState") == Some(&"not-found") {
+        bail!("The scheduled upgrade timer is not installed");
+    }
+    Ok(TimerStatus {
+        active,
+        next_run: properties
+            .get("NextElapseUSecRealtime")
+            .filter(|value| !value.is_empty() && **value != "n/a")
+            .map(|value| value.to_string()),
+        calendar: properties
+            .get("TimersCalendar")
+            .and_then(|value| parse_timer_calendar(value)),
+    })
+}
+
+fn get_timer_status() -> Result<TimerStatus> {
     let output = run_systemctl(
         &[
             "show",
             "cockpit-pacman-scheduled.timer",
-            "--property=ActiveState,NextElapseUSecRealtime,TimersCalendar",
+            "--property=LoadState,ActiveState,NextElapseUSecRealtime,TimersCalendar",
         ],
         SYSTEMCTL_TIMEOUT,
-    );
-
-    match output {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let mut active = false;
-            let mut next_run = None;
-            let mut calendar = None;
-
-            for line in stdout.lines() {
-                if let Some(state) = line.strip_prefix("ActiveState=") {
-                    active = state == "active";
-                }
-                if let Some(next) = line.strip_prefix("NextElapseUSecRealtime=")
-                    && !next.is_empty()
-                    && next != "n/a"
-                {
-                    next_run = Some(next.to_string());
-                }
-                if let Some(value) = line.strip_prefix("TimersCalendar=") {
-                    calendar = parse_timer_calendar(value);
-                }
-            }
-
-            (active, next_run, calendar)
-        }
-        Err(_) => (false, None, None),
+    )?;
+    if !output.status.success() {
+        bail!(
+            "Could not query scheduled timer: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
     }
+    parse_timer_status(&String::from_utf8_lossy(&output.stdout))
 }
 
 #[derive(Serialize, TS)]
@@ -523,6 +529,17 @@ mod tests {
         timer_absent,
     };
     use std::time::Duration;
+
+    #[test]
+    fn timer_query_distinguishes_inactive_and_unavailable() {
+        assert!(
+            !super::parse_timer_status("ActiveState=inactive\nLoadState=loaded")
+                .unwrap()
+                .active
+        );
+        assert!(super::parse_timer_status("").is_err());
+        assert!(super::parse_timer_status("ActiveState=inactive\nLoadState=not-found").is_err());
+    }
 
     // Must stay under BACKEND_TIMEOUT_MS in src/constants.ts, or the client
     // aborts the spawn mid-apply.

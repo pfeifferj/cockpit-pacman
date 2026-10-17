@@ -1569,6 +1569,7 @@ fn news_response_shape() {
 #[test]
 fn scheduled_runs_response_shape() {
     let resp = ScheduledRunsResponse {
+        current_run: None,
         runs: vec![],
         total: 0,
         warning: None,

@@ -25,15 +25,25 @@ save, which rewrites it `0644`.
 ```
 
 - `ignored_packages`: package names excluded from upgrades (pacman `IgnorePkg`).
-- `schedule.enabled`: whether the scheduled-upgrade systemd timer is active.
+- `schedule.enabled`: whether scheduled upgrades are requested. The UI shows the
+  actual timer status separately.
 - `schedule.mode`: `check` (report available updates only) or `upgrade` (apply them).
 - `schedule.schedule`: a systemd `OnCalendar` spec, or one of the presets
   `hourly`, `daily`, `weekly`, `monthly`, `yearly`, `quarterly`.
-- `schedule.max_packages`: safety cap on how many packages a scheduled run will
-  upgrade; `0` means unlimited.
+- `schedule.max_packages`: skip the entire upgrade when the number of eligible
+  updates exceeds this limit; `0` means unlimited.
 
 Enabling a schedule writes a systemd timer drop-in at
 `/etc/systemd/system/cockpit-pacman-scheduled.timer.d/schedule.conf`.
+
+Editing `config.json` does not apply changes to systemd. Save the schedule in the
+plugin to update the timer. Unknown timer status and differences between saved
+settings and actual activity are shown separately.
+
+A lock held by another process, a required manual intervention, or an exceeded
+package limit records a skipped run, writes a warning to the journal, and exits
+unsuccessfully so the unit's `OnFailure` handler runs. The next timer occurrence
+tries again; the backend does not retry a blocked upgrade in the background.
 
 ## Forward compatibility
 

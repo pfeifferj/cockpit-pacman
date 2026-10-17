@@ -124,19 +124,17 @@ export type SaveMirrorlistResponse = { success: boolean, backup_path: string | n
 
 export type SaveReposResponse = { success: boolean, backup_path: string | null, message: string, revision: string, warnings: Array<string>, };
 
-export type ScheduleConfig = { enabled: boolean, mode: string, schedule: string, max_packages: number, timer_active: boolean, timer_next_run: string | null, 
-/**
- * What the timer is actually set to, as systemd normalises it.
- */
-timer_calendar: string | null, };
+export type ScheduleConfig = { enabled: boolean, mode: string, schedule: string, max_packages: number, timer_active: boolean | null, timer_error?: string, timer_next_run: string | null, timer_calendar: string | null, };
 
 export type ScheduleMode = "check" | "upgrade";
 
 export type ScheduleSetResponse = { success: boolean, message: string, };
 
+export type ScheduledCurrentRun = { state: string, started_at: string | null, invocation_id: string | null, };
+
 export type ScheduledRunEntry = { timestamp: string, mode: string, success: boolean, status: string, packages_checked: number | null, packages_upgraded: number | null, error: string | null, details: Array<string>, duration_secs: number | null, removed_stale_lock: boolean, invocation_id?: string, };
 
-export type ScheduledRunsResponse = { runs: Array<ScheduledRunEntry>, total: number, warning?: string, };
+export type ScheduledRunsResponse = { current_run?: ScheduledCurrentRun, runs: Array<ScheduledRunEntry>, total: number, warning?: string, };
 
 export type SearchResponse = { results: Array<SearchResult>, total: number, total_installed: number, total_not_installed: number, repositories: Array<string>, };
 

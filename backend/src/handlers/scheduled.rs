@@ -11,7 +11,7 @@ use crate::alpm::{
 };
 use crate::config::{AppConfig, ScheduleConfigResponse, ScheduleMode, ScheduleSetResponse};
 use crate::inhibit::ShutdownInhibitor;
-use crate::models::{ScheduledRunEntry, ScheduledRunsResponse};
+use crate::models::{ScheduledCurrentRun, ScheduledRunEntry, ScheduledRunsResponse};
 use crate::util::{
     CheckResult, TimeoutGuard, check_cancel, emit_json, setup_signal_handler, with_file_lock,
     with_file_read_lock, write_bytes_atomic_with_mode,
@@ -116,6 +116,12 @@ fn log_run(entry: &LogEntry) {
     if let Err(e) = write_run(entry) {
         crate::util::journal_note(&format!("scheduled-run: failed to write run record: {e:#}"));
     }
+}
+
+fn deferred_run(entry: &LogEntry) -> Result<()> {
+    let reason = entry.details.join("; ");
+    log_run(entry);
+    anyhow::bail!("Scheduled upgrade deferred: {reason}")
 }
 
 fn write_run(entry: &LogEntry) -> Result<()> {
@@ -347,7 +353,39 @@ fn parse_service_run(output: &str) -> Option<ServiceRun> {
     })
 }
 
-fn latest_service_run() -> Result<Option<ServiceRun>> {
+fn parse_current_run(output: &str) -> Option<ScheduledCurrentRun> {
+    let properties: std::collections::HashMap<_, _> = output
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .collect();
+    let state = *properties.get("ActiveState")?;
+    if !matches!(state, "active" | "activating" | "deactivating") {
+        return None;
+    }
+    let started_at = properties
+        .get("ExecMainStartTimestamp")
+        .and_then(|value| {
+            value
+                .trim_start_matches('@')
+                .split('.')
+                .next()?
+                .parse::<i64>()
+                .ok()
+        })
+        .filter(|time| *time > 0)
+        .and_then(|time| chrono::DateTime::from_timestamp(time, 0))
+        .map(|time| time.to_rfc3339());
+    Some(ScheduledCurrentRun {
+        state: state.to_string(),
+        started_at,
+        invocation_id: properties
+            .get("InvocationID")
+            .filter(|id| !id.is_empty() && id.chars().any(|ch| ch != '0'))
+            .map(|id| id.to_string()),
+    })
+}
+
+fn latest_service_state() -> Result<String> {
     let mut command = std::process::Command::new("systemctl");
     command.args([
         "show", "cockpit-pacman-scheduled.service", "--timestamp=unix",
@@ -356,12 +394,12 @@ fn latest_service_run() -> Result<Option<ServiceRun>> {
     let output = crate::util::output_with_timeout(command, std::time::Duration::from_secs(3))?;
     let text = String::from_utf8_lossy(&output.stdout);
     if text.lines().any(|line| line == "LoadState=not-found") {
-        return Ok(None);
+        return Ok(String::new());
     }
     if !output.status.success() {
         anyhow::bail!("{}", String::from_utf8_lossy(&output.stderr).trim());
     }
-    Ok(parse_service_run(&text))
+    Ok(text.into_owned())
 }
 
 fn reconcile_service_run(runs: &mut Vec<ScheduledRunEntry>, service: ServiceRun) {
@@ -406,6 +444,9 @@ fn reconcile_service_run(runs: &mut Vec<ScheduledRunEntry>, service: ServiceRun)
 }
 
 pub fn get_scheduled_runs(offset: usize, limit: usize) -> Result<()> {
+    // Query systemd first: a run it reports as finished wrote its record before
+    // exiting, so the log read below cannot miss it.
+    let service_state = latest_service_state();
     let content = with_file_read_lock(Path::new(LOG_LOCK_PATH), || match fs::read(LOG_PATH) {
         Ok(content) => Ok(content),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
@@ -421,16 +462,22 @@ pub fn get_scheduled_runs(offset: usize, limit: usize) -> Result<()> {
             Vec::new()
         }
     };
-    match latest_service_run() {
-        Ok(Some(service)) => reconcile_service_run(&mut runs, service),
-        Ok(None) => {}
+    let mut current_run = None;
+    match service_state {
+        Ok(text) => {
+            current_run = parse_current_run(&text);
+            if let Some(service) = parse_service_run(&text) {
+                reconcile_service_run(&mut runs, service);
+            }
+        }
         Err(error) => warnings.push(format!(
-            "The latest scheduled service result could not be checked: {error:#}"
+            "The scheduled service state could not be checked: {error:#}"
         )),
     }
     runs.reverse();
     let total = runs.len();
     emit_json(&ScheduledRunsResponse {
+        current_run,
         runs: runs.into_iter().skip(offset).take(limit).collect(),
         total,
         warning: (!warnings.is_empty()).then(|| warnings.join("; ")),
@@ -541,8 +588,7 @@ pub fn scheduled_run() -> Result<()> {
                 None,
                 vec![format!("Skipped: pacman database locked ({})", reason)],
             );
-            log_run(&entry.took(started));
-            return Ok(());
+            return deferred_run(&entry.took(started));
         }
     };
 
@@ -653,8 +699,7 @@ pub fn scheduled_run() -> Result<()> {
                 packages_checked, max_packages
             )],
         );
-        log_run(&entry.took(started).after_stale_lock(reaped_lock));
-        return Ok(());
+        return deferred_run(&entry.took(started).after_stale_lock(reaped_lock));
     }
 
     let flags = InterventionFlags::default();
@@ -693,7 +738,11 @@ pub fn scheduled_run() -> Result<()> {
             None => details,
         },
     );
-    log_run(&entry.took(started).after_stale_lock(reaped_lock));
+    let entry = entry.took(started).after_stale_lock(reaped_lock);
+    if status == "skipped" {
+        return deferred_run(&entry);
+    }
+    log_run(&entry);
 
     if status == "failed" {
         anyhow::bail!(error.unwrap_or_else(|| "Scheduled upgrade failed".to_string()));
@@ -786,6 +835,16 @@ mod tests {
     };
     use crate::util::CheckResult;
     use std::path::PathBuf;
+
+    #[test]
+    fn current_run_is_separate_from_completed_history() {
+        let status = "ActiveState=activating\nExecMainStartTimestamp=@1700000000\nInvocationID=abc";
+        let current = super::parse_current_run(status).unwrap();
+        assert_eq!(current.state, "activating");
+        assert!(current.started_at.is_some());
+        assert!(super::parse_service_run(status).is_none());
+        assert!(super::parse_current_run("ActiveState=inactive").is_none());
+    }
 
     #[test]
     fn a_failure_before_the_apply_is_reported_as_itself() {

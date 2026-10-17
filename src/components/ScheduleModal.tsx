@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import type { ScheduledCurrentRun } from "../bindings";
 import { useBackdropClose } from "../hooks/useBackdropClose";
 import {
   Modal,
@@ -147,6 +148,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   const [maxPackages, setMaxPackages] = useState(0);
 
   const [runs, setRuns] = useState<ScheduledRunEntry[]>([]);
+  const [currentRun, setCurrentRun] = useState<ScheduledCurrentRun | null>(null);
   const [runsError, setRunsError] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
 
@@ -181,9 +183,11 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
     try {
       const response = await getScheduledRuns({ limit: 10 });
       setRuns(response.runs);
+      setCurrentRun(response.current_run ?? null);
       setRunsError(response.warning ?? null);
     } catch (ex) {
       setRuns([]);
+      setCurrentRun(null);
       setRunsError(sanitizeErrorMessage(ex instanceof Error ? ex.message : String(ex)));
     }
   }, []);
@@ -195,6 +199,8 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
       void loadConfig();
       void loadRuns();
     });
+    const poll = window.setInterval(() => void loadRuns(), 5000);
+    return () => window.clearInterval(poll);
   }, [isOpen, loadConfig, loadRuns]);
 
   const handleSave = async () => {
@@ -222,6 +228,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
     if (!config) return false;
     const currentSchedule = schedulePreset === "custom" ? customSchedule : schedulePreset;
     return (
+      config.timer_active !== config.enabled ||
       enabled !== config.enabled ||
       mode !== config.mode ||
       currentSchedule !== config.schedule ||
@@ -353,12 +360,30 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
               </FormGroup>
             )}
 
+            {config?.timer_error && (
+              <Alert isInline variant="warning" title="Timer status unavailable">
+                {config.timer_error}
+              </Alert>
+            )}
+            {config && config.timer_active !== null && config.timer_active !== config.enabled && (
+              <Alert isInline variant="warning" title="Timer and saved settings differ">
+                Save the schedule to apply these settings to the timer.
+              </Alert>
+            )}
+            {currentRun && (
+              <Alert isInline variant="info" title={currentRun.state === "deactivating" ? "Scheduled upgrade is stopping" : "Scheduled upgrade is running"}>
+                {currentRun.started_at && <>Started <TimeAgo timestamp={currentRun.started_at} />. </>}
+                Package changes and hooks may still be running. Completed history will update after the service exits.
+              </Alert>
+            )}
             {config && (
               <DescriptionList isHorizontal className="pf-v6-u-mt-lg">
                 <DescriptionListGroup>
                   <DescriptionListTerm>Timer Status</DescriptionListTerm>
                   <DescriptionListDescription>
-                    {config.timer_active ? (
+                    {config.timer_active === null ? (
+                      <Label color="orange">Unknown</Label>
+                    ) : config.timer_active ? (
                       <Label color="green" icon={<CheckCircleIcon />}>
                         Active
                       </Label>
