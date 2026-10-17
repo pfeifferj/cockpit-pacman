@@ -119,6 +119,7 @@ async fn build_keyring_status(keyring: &ReadOnlyKeyring, homedir: &str) -> Keyri
 }
 
 pub fn refresh_keyring() -> Result<()> {
+    crate::network::require_keyring_network()?;
     setup_signal_handler()?;
     crate::util::spawn_cancel_listener()?;
 

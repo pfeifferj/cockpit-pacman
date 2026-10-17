@@ -31,6 +31,12 @@ pub fn get_handle() -> Result<Alpm> {
     Ok(handle)
 }
 
+pub fn sync_databases(handle: &mut Alpm, force: bool) -> Result<()> {
+    crate::network::require_network()?;
+    handle.syncdbs_mut().update(force)?;
+    Ok(())
+}
+
 pub fn resolve_file_owners(handle: &Alpm, wanted: &HashSet<String>) -> HashMap<String, String> {
     let mut owners = HashMap::new();
     if wanted.is_empty() {

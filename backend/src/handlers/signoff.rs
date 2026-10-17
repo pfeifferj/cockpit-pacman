@@ -57,6 +57,7 @@ fn get_local_version(handle: &alpm::Alpm, pkgbase: &str, pkgnames: &[String]) ->
 
 pub fn signoff_list(creds_b64: &str) -> Result<()> {
     let (username, password) = resolve_credentials(creds_b64)?;
+    crate::network::require_network()?;
     let session = SignoffSession::login(
         &username,
         &password,
@@ -135,6 +136,7 @@ fn run_signoff_action(
     let pkgbase = &args[0];
 
     let (username, password) = resolve_credentials(creds_b64)?;
+    crate::network::require_network()?;
     let session = SignoffSession::login(
         &username,
         &password,
@@ -223,6 +225,7 @@ fn collect_signoffs(
 
 pub fn signoff_batch(creds_b64: &str, targets: &[SignoffTarget]) -> Result<()> {
     let (username, password) = resolve_credentials(creds_b64)?;
+    crate::network::require_network()?;
     let session = SignoffSession::login(
         &username,
         &password,

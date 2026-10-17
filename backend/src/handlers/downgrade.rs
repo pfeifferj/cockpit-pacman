@@ -102,6 +102,9 @@ pub(crate) fn install_downgrade(
     version: &str,
     timeout_secs: Option<u64>,
 ) -> Result<()> {
+    if matches!(source, DowngradeSource::Url(_)) {
+        crate::network::require_network()?;
+    }
     let (mut handle, timeout) = begin_mutation(
         EventScope::Upgrade,
         MutationOpts {

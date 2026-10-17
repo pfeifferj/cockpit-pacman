@@ -553,6 +553,20 @@ pub fn scheduled_run() -> Result<()> {
         return Ok(());
     }
 
+    if let Err(error) = crate::network::require_network() {
+        let entry = LogEntry::new(
+            timestamp,
+            config.schedule.mode,
+            "failed",
+            0,
+            0,
+            Some(error.to_string()),
+            details,
+        );
+        log_run(&entry.took(started));
+        return Err(error.into());
+    }
+
     // Set up signal handler and timeout guard
     setup_signal_handler()?;
     let _timeout_guard = TimeoutGuard::new(SCHEDULED_TIMEOUT_SECS);
@@ -617,7 +631,7 @@ pub fn scheduled_run() -> Result<()> {
     setup_dl_cb(&mut handle, Verbosity::Journal);
 
     eprintln!("Syncing package databases...");
-    if let Err(e) = handle.syncdbs_mut().update(false) {
+    if let Err(e) = crate::alpm::sync_databases(&mut handle, false) {
         let entry = LogEntry::new(
             timestamp,
             mode,
@@ -628,7 +642,7 @@ pub fn scheduled_run() -> Result<()> {
             details,
         );
         log_run(&entry.took(started).after_stale_lock(reaped_lock));
-        return Err(e.into());
+        return Err(e);
     }
 
     // Check for cancellation after database sync

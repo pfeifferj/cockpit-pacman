@@ -50,9 +50,18 @@ impl<'a> TransactionGuard<'a> {
         })
     }
 
-    pub fn commit(&mut self) -> Result<(), alpm::CommitError> {
+    pub fn commit(&mut self) -> Result<()> {
+        if self
+            .add()
+            .iter()
+            .any(|pkg| pkg.origin() == alpm::PackageFrom::SyncDb)
+        {
+            crate::network::require_network()?;
+        }
         // Interrupting libalpm can skip post hooks after pre hooks changed boot files.
-        self.handle.trans_commit()
+        self.handle
+            .trans_commit()
+            .map_err(|error| anyhow::anyhow!("{error}"))
     }
 
     pub fn add(&self) -> alpm::AlpmList<'_, &alpm::Package> {

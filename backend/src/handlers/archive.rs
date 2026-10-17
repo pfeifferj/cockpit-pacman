@@ -82,6 +82,7 @@ fn system_arch() -> &'static str {
 }
 
 fn fetch_listing(base: &str, name: &str) -> Result<Option<String>> {
+    crate::network::require_network()?;
     let url =
         archive_dir_url_at(base, name).ok_or_else(|| anyhow::anyhow!("Invalid package name"))?;
 
@@ -367,6 +368,7 @@ mod tests {
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
+        crate::network::test_context();
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/n/nosuchpackage/"))
@@ -384,6 +386,7 @@ mod tests {
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
+        crate::network::test_context();
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/b/bash/"))
@@ -403,6 +406,7 @@ mod tests {
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
+        crate::network::test_context();
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/b/bash/"))

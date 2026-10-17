@@ -123,6 +123,7 @@ fn read_news_cache(path: &Path) -> Option<NewsCache> {
 }
 
 fn fetch_news_items_from(url: &str, days: u32) -> Result<Vec<NewsItem>> {
+    crate::network::require_network()?;
     let client = arch_http_client::Client::new(arch_http_client::Options {
         timeout: Duration::from_secs(15),
         max_body: MAX_RSS_BYTES as usize,
@@ -401,6 +402,7 @@ mod fetch_tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     async fn serve(body: &str) -> MockServer {
+        crate::network::test_context();
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/feeds/news/"))

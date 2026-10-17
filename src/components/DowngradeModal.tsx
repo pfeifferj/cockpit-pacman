@@ -62,6 +62,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
   const [versions, setVersions] = useState<CachedVersion[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<CachedVersion | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
   const { log, appendLog, flushLog, resetLog } = useStreamingLog();
   const [isCancelling, setIsCancelling] = useState(false);
@@ -93,6 +94,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
     } catch (ex) {
       if (loadId !== loadIdRef.current) return;
       setState("error");
+      setLoadFailed(true);
       setError(ex instanceof Error ? ex.message : String(ex));
       setErrorCode(ex instanceof BackendError ? ex.code : undefined);
       setErrorDetails(ex instanceof BackendError ? ex.details : undefined);
@@ -135,6 +137,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
 
   const handleConfirmDowngrade = () => {
     if (!selectedVersion) return;
+    setLoadFailed(false);
     setState("downgrading");
     resetLog();
     setIsDetailsExpanded(true);
@@ -244,7 +247,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
         );
 
       case "error":
-        if (isNetworkError(null, errorCode)) {
+        if (loadFailed && isNetworkError(null, errorCode)) {
           return (
             <NetworkErrorState
               resource={source === "archive" ? "archive versions" : "package versions"}

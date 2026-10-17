@@ -23,7 +23,7 @@ pub fn setup_log_cb(handle: &mut Alpm) {
         }
         emit_event(&StreamEvent::Log {
             level: log_level_to_string(level).to_string(),
-            message: msg.trim().to_string(),
+            message: crate::network::native_diagnostic(msg.trim()),
         });
     });
 }

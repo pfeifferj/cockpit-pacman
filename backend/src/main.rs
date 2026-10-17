@@ -351,6 +351,11 @@ fn main() {
         std::process::exit(1);
     }
 
+    // Environment changes must precede signal handlers, runtimes and worker threads.
+    unsafe {
+        cockpit_pacman_backend::network::initialize(&args[1]);
+    }
+
     let result = match args[1].as_str() {
         "list-installed" => {
             let (offset, limit, search, filter, repo_filter, sort_by, sort_dir) =

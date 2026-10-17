@@ -50,6 +50,18 @@ describe("DowngradeModal", () => {
     cleanup();
   });
 
+  it("keeps transaction errors and details visible after a network failure", async () => {
+    render(<DowngradeModal packageName="bash" currentVersion="5.2.015-1" isOpen onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Downgrade" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Downgrade" }));
+    act(() => mockDowngradePackage.mock.lastCall![0].onError(
+      "Package download failed", "network_error", "Proxy authentication rejected (407)"));
+    expect(screen.getByText("Package download failed")).toBeInTheDocument();
+    expect(screen.getByText("Proxy authentication rejected (407)")).toBeInTheDocument();
+    expect(screen.queryByText("Can't reach Arch Linux services")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+  });
+
   it("loads cached versions from the cache source by default", async () => {
     render(
       <DowngradeModal

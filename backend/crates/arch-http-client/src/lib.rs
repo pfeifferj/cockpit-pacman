@@ -53,6 +53,14 @@ impl From<curl::Error> for Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Protocols supported by the system libcurl used by both HTTP clients and libalpm.
+pub fn supported_protocols() -> Vec<String> {
+    curl::Version::get()
+        .protocols()
+        .map(str::to_owned)
+        .collect()
+}
+
 #[derive(Clone, Debug)]
 pub struct Options {
     pub timeout: Duration,

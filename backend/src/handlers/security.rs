@@ -123,7 +123,10 @@ fn load_feed(client: &SecurityClient, force: bool, path: Option<&Path>) -> Resul
             .map(|avgs| Feed { avgs, stale: true })
     };
 
-    match client.fetch_vulnerable_raw() {
+    let fetched = crate::network::require_network()
+        .map_err(anyhow::Error::from)
+        .and_then(|_| client.fetch_vulnerable_raw());
+    match fetched {
         Ok(body) => match arch_security_client::parse_vulnerable(&body) {
             Ok(avgs) => {
                 if let Some(p) = path {
@@ -201,6 +204,7 @@ pub fn security_info(name: &str) -> Result<()> {
     }
 
     let client = SecurityClient::new();
+    crate::network::require_network()?;
     let info = client.fetch_package(name)?;
 
     let advisories: Vec<_> = info
@@ -413,6 +417,7 @@ mod feed_tests {
         "issues":["CVE-2024-1"],"advisories":[]}]"#;
 
     fn cache_file(tag: &str) -> std::path::PathBuf {
+        crate::network::test_context();
         std::env::temp_dir().join(format!("cpac-feed-{tag}-{}", std::process::id()))
     }
 

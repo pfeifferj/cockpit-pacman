@@ -262,13 +262,14 @@ pub(crate) fn commit_and_complete(
 ) -> Result<()> {
     let _inhibitor = ShutdownInhibitor::take("Applying package changes");
     check_cancel_early!(timeout);
-    match tx.commit().err().map(|e| e.to_string()) {
-        Some(err_msg) => handle_commit_error(
-            &err_msg,
+    match tx.commit() {
+        Err(error) if error.is::<crate::network::NetworkError>() => Err(error),
+        Err(error) => handle_commit_error(
+            &error.to_string(),
             is_cancelled(),
             "Cancellation was requested while committing",
         ),
-        None => {
+        Ok(()) => {
             emit_event(&StreamEvent::Complete {
                 success: true,
                 code: None,
@@ -456,6 +457,7 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
 }
 
 pub fn sync_database(force: bool, timeout_secs: Option<u64>) -> Result<()> {
+    crate::network::require_network()?;
     setup_signal_handler()?;
     spawn_cancel_listener()?;
     let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
@@ -466,7 +468,7 @@ pub fn sync_database(force: bool, timeout_secs: Option<u64>) -> Result<()> {
     setup_log_cb(&mut handle);
     setup_dl_cb(&mut handle, Verbosity::Streaming);
 
-    match handle.syncdbs_mut().update(force) {
+    match crate::alpm::sync_databases(&mut handle, force) {
         Ok(_) => {
             invalidate_repo_map_cache();
             let check_result = check_cancel(&timeout);
@@ -489,7 +491,7 @@ pub fn sync_database(force: bool, timeout_secs: Option<u64>) -> Result<()> {
                 Ok(())
             } else {
                 emit_failure(&e.to_string(), "transaction_failed");
-                Err(e.into())
+                Err(e)
             }
         }
     }
@@ -500,6 +502,7 @@ pub fn run_upgrade(
     timeout_secs: Option<u64>,
     approved_removals: &[String],
 ) -> Result<()> {
+    crate::network::require_network()?;
     for name in approved_removals {
         crate::validation::validate_package_name(name)?;
     }
@@ -520,12 +523,12 @@ pub fn run_upgrade(
         })?;
     }
 
-    if let Err(e) = handle.syncdbs_mut().update(false) {
+    if let Err(e) = crate::alpm::sync_databases(&mut handle, false) {
         emit_failure(
             &format!("Failed to refresh package databases: {}", e),
             "transaction_failed",
         );
-        return Err(e.into());
+        return Err(e);
     }
     invalidate_repo_map_cache();
 
@@ -656,6 +659,7 @@ pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
 }
 
 pub fn install_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
+    crate::network::require_network()?;
     let (mut handle, timeout) = begin_mutation(
         EventScope::Install,
         MutationOpts {

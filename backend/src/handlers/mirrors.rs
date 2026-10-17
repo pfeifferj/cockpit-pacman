@@ -110,6 +110,7 @@ fn status_client() -> arch_http_client::Client {
 }
 
 pub fn fetch_mirror_status() -> Result<()> {
+    crate::network::require_network()?;
     let status = arch_mirror_client::fetch(&status_client())?;
 
     let mirrors: Vec<MirrorStatus> = status
@@ -142,6 +143,7 @@ pub fn refresh_mirrors(
     protocol: &str,
     sort_by: &str,
 ) -> Result<()> {
+    crate::network::require_network()?;
     let status = arch_mirror_client::fetch(&status_client())?;
 
     let candidates = arch_mirror_client::rank(
@@ -176,6 +178,7 @@ pub fn refresh_mirrors(
 const MIRROR_TEST_CONCURRENCY: usize = 8;
 
 pub fn test_mirrors(urls: &[String], timeout_secs: u64) -> Result<()> {
+    crate::network::require_network()?;
     setup_signal_handler()?;
     let timeout = TimeoutGuard::new(timeout_secs);
 
