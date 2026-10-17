@@ -57,7 +57,7 @@ describe("PackageDetailsDrawer focus return", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetSyncPackageInfo.mockRejectedValue(new api.BackendError("not found", "not_found"));
-    mockGetSecurityInfo.mockResolvedValue({ advisories: [] } as unknown as Awaited<ReturnType<typeof api.getSecurityInfo>>);
+    mockGetSecurityInfo.mockResolvedValue({ name: "nano", advisories: [], groups: [], issues: [] });
   });
 
   afterEach(() => cleanup());

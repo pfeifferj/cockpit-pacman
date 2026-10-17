@@ -282,6 +282,7 @@ describe("PackageDetailsModal", () => {
       <PackageDetailsModal packageDetails={mockPackageDetails} isLoading={false} onClose={vi.fn()} />,
     );
     expect(screen.getByRole("dialog")).toHaveAttribute("data-details-for", "linux");
+    await waitFor(() => expect(screen.queryByLabelText("Loading advisories")).not.toBeInTheDocument());
 
     rerender(<PackageDetailsModal packageDetails={mockPackageDetails} isLoading onClose={vi.fn()} />);
     expect(screen.getByRole("dialog")).toHaveAttribute("data-details-for", "linux");
@@ -558,7 +559,7 @@ describe("PackageDetailsModal", () => {
     expect(screen.queryByRole("button", { name: "Install wireless-regdb" })).not.toBeInTheDocument();
   });
 
-  it("lazily fetches per-package advisories when the section is expanded", async () => {
+  it("shows package advisories directly without an accordion", async () => {
     render(
       <PackageDetailsModal
         packageDetails={mockPackageDetails}
@@ -567,19 +568,17 @@ describe("PackageDetailsModal", () => {
       />
     );
 
-    expect(mockGetSecurityInfo).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByText("Security advisories"));
-
     await waitFor(() => {
       expect(mockGetSecurityInfo).toHaveBeenCalledWith("linux");
     });
     await waitFor(() => {
       expect(screen.getByText(/AVG-2024-1/)).toBeInTheDocument();
     });
+    expect(screen.getByRole("heading", { name: "Security advisories" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Security advisories" })).not.toBeInTheDocument();
   });
 
-  it("shows an empty state when a package has no advisories", async () => {
+  it("omits the section when a package has no advisories", async () => {
     mockGetSecurityInfo.mockResolvedValue({ name: "linux", advisories: [], groups: [], issues: [] });
     render(
       <PackageDetailsModal
@@ -589,14 +588,15 @@ describe("PackageDetailsModal", () => {
       />
     );
 
-    fireEvent.click(screen.getByText("Security advisories"));
-
     await waitFor(() => {
-      expect(screen.getByText(/No advisories for this package/i)).toBeInTheDocument();
+      expect(screen.queryByLabelText("Loading advisories")).not.toBeInTheDocument();
     });
+    expect(mockGetSecurityInfo).toHaveBeenCalledWith("linux");
+    expect(screen.queryByText("Security advisories")).not.toBeInTheDocument();
+    expect(screen.queryByText(/No advisories for this package/i)).not.toBeInTheDocument();
   });
 
-  it("says so when advisories are turned off, rather than showing none", async () => {
+  it("omits the section when advisories are turned off", async () => {
     mockGetSecurityInfo.mockResolvedValue({
       name: "linux",
       advisories: [],
@@ -612,11 +612,10 @@ describe("PackageDetailsModal", () => {
       />
     );
 
-    fireEvent.click(screen.getByText("Security advisories"));
-
     await waitFor(() => {
-      expect(screen.getByText(/turned off for this system/i)).toBeInTheDocument();
+      expect(screen.queryByLabelText("Loading advisories")).not.toBeInTheDocument();
     });
+    expect(screen.queryByText("Security advisories")).not.toBeInTheDocument();
     expect(screen.queryByText(/No advisories for this package/i)).not.toBeInTheDocument();
   });
 

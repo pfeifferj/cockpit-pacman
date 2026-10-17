@@ -10,7 +10,7 @@ import {
 	DescriptionListGroup,
 	DescriptionListTerm,
 	DescriptionListDescription,
-	ExpandableSection,
+	Title,
 	Label,
 	LabelGroup,
 	Button,
@@ -97,7 +97,7 @@ async function readPackage(name: string, repo?: string | null): Promise<PackageI
   }
 }
 
-const PackageSecuritySection: React.FC<{ name: string }> = ({ name }) => {
+const PackageSecuritySection: React.FC<{ name: string; headingLevel: "h2" | "h3" }> = ({ name, headingLevel }) => {
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [info, setInfo] = useState<SecurityInfoResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -113,20 +113,17 @@ const PackageSecuritySection: React.FC<{ name: string }> = ({ name }) => {
   }, [name]);
 
   if (state === "loading") {
-    return <Spinner size="md" aria-label="Loading advisories" />;
+    return <Spinner size="md" aria-label="Loading advisories" className="pf-v6-u-mt-md" />;
   }
   if (state === "error") {
-    return <span className="pf-v6-u-color-200">{sanitizeErrorMessage(err)}</span>;
-  }
-  if (info?.disabled) {
     return (
-      <span className="pf-v6-u-color-200">
-        Security advisories are turned off for this system.
-      </span>
+      <p className="pf-v6-u-mt-md pf-v6-u-color-200">
+        Could not load security advisories: {sanitizeErrorMessage(err)}
+      </p>
     );
   }
-  if (!info || (!info.advisories.length && !info.groups.length && !info.issues.length)) {
-    return <span className="pf-v6-u-color-200">No advisories for this package.</span>;
+  if (!info || info.disabled || (!info.advisories.length && !info.groups.length && !info.issues.length)) {
+    return null;
   }
 
   const section = <T extends { name: string; severity: string }>(
@@ -150,11 +147,14 @@ const PackageSecuritySection: React.FC<{ name: string }> = ({ name }) => {
     );
 
   return (
-    <DescriptionList isCompact>
-      {section("Advisories", info.advisories, (a) => `${a.name} (${a.severity}, ${a.date})`)}
-      {section("Groups", info.groups, (g) => `${g.name} (${g.status})`)}
-      {section("Issues", info.issues, (i) => `${i.name} (${i.issue_type}, ${i.status})`)}
-    </DescriptionList>
+    <section aria-label="Security advisories" className="pf-v6-u-mt-md">
+      <Title headingLevel={headingLevel} size="md" className="pf-v6-u-mb-sm">Security advisories</Title>
+      <DescriptionList isCompact>
+        {section("Advisories", info.advisories, (a) => `${a.name} (${a.severity}, ${a.date})`)}
+        {section("Groups", info.groups, (g) => `${g.name} (${g.status})`)}
+        {section("Issues", info.issues, (i) => `${i.name} (${i.issue_type}, ${i.status})`)}
+      </DescriptionList>
+    </section>
   );
 };
 
@@ -228,7 +228,6 @@ export function usePackageDetailsPanel({
   const [reinstallTarget, setReinstallTarget] = useState<Target | null>(null);
   const [downgradeFrom, setDowngradeFrom] = useState<(Target & { panel: string | null }) | null>(null);
   const [readBack, setReadBack] = useState<(Target & { panel: string | null }) | null>(null);
-  const [securityExpanded, setSecurityExpanded] = useState(false);
   const [actionError, setActionError] = useState<(LoadFailure & { name: string; title: string }) | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [highlight, setHighlight] = useState<{ name: string; field: "reason" | "ignore" } | null>(null);
@@ -975,14 +974,7 @@ export function usePackageDetailsPanel({
           )}
 
           </DescriptionList>
-          <ExpandableSection
-            toggleText="Security advisories"
-            isExpanded={securityExpanded}
-            onToggle={(_e, expanded) => setSecurityExpanded(expanded)}
-            className="pf-v6-u-mt-md"
-          >
-            {securityExpanded && <PackageSecuritySection name={details.name} />}
-          </ExpandableSection>
+          <PackageSecuritySection key={details.name} name={details.name} headingLevel={headingLevel} />
           </>
         ) : null}
       </>
