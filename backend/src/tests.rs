@@ -790,11 +790,9 @@ fn test_config_preserves_unknown_fields_on_rewrite() {
 
 #[test]
 fn test_handle_commit_error_cancelled() {
-    use crate::util::handle_commit_error;
-
-    // The cancel flag, not the error text, drives the interrupted outcome.
-    let result = handle_commit_error("transaction aborted", true, "Operation cancelled");
-    assert!(result.is_ok());
+    let error =
+        crate::util::handle_commit_error("disk full", true, "Cancellation requested").unwrap_err();
+    assert!(error.to_string().contains("disk full"));
 }
 
 #[test]
@@ -1563,7 +1561,7 @@ fn test_classify_error_top_level_io() {
     assert_eq!(classify_error(&timed_out), Some("timeout"));
 
     let refused = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::ConnectionReset));
-    assert_eq!(classify_error(&refused), Some("network_error"));
+    assert_eq!(classify_error(&refused), Some("internal_error"));
 
     let denied = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
         .context("Failed to open config")

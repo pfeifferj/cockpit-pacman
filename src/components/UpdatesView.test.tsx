@@ -87,6 +87,12 @@ describe("UpdatesView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    mockPermission.mockReturnValue({
+      allowed: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      close: vi.fn(),
+    });
     mockCheckUpdates.mockResolvedValue(mockUpdatesResponse);
     mockPreflightUpgrade.mockResolvedValue(mockPreflightResponse);
     mockGetSyncPackageInfo.mockResolvedValue(mockSyncPackageDetails);
@@ -454,6 +460,7 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(mockRunUpgrade).toHaveBeenCalled();
       });
+      expect(mockRunUpgrade.mock.calls[0][2]).toEqual([]);
     });
 
     it("shows confirmation modal when conflicts exist", async () => {
@@ -580,6 +587,20 @@ describe("UpdatesView", () => {
       });
 
       expect(mockRunUpgrade).toHaveBeenCalled();
+    });
+
+    it("passes the confirmed preflight removals to the upgrade", async () => {
+      mockPreflightUpgrade.mockResolvedValue({
+        ...mockPreflightResponse,
+        removals: ["old-driver"],
+      });
+      render(<UpdatesView />);
+      fireEvent.click(await screen.findByRole("button", { name: /Apply 1 Update/i }));
+      await screen.findByText("Confirm Upgrade");
+      expect(mockRunUpgrade).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("checkbox", { name: /I understand.*removed/i }));
+      fireEvent.click(screen.getByRole("button", { name: /Proceed with Upgrade/i }));
+      expect(mockRunUpgrade.mock.calls[0][2]).toEqual(["old-driver"]);
     });
   });
 
@@ -741,7 +762,7 @@ describe("UpdatesView", () => {
         fireEvent.click(cancelButton);
       });
 
-      const confirmCancelButton = screen.getByRole("button", { name: /Cancel Upgrade/i });
+      const confirmCancelButton = screen.getByRole("button", { name: /Request cancellation/i });
       await act(async () => {
         fireEvent.click(confirmCancelButton);
       });
@@ -769,13 +790,13 @@ describe("UpdatesView", () => {
         fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
       });
       await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: /Cancel Upgrade/i }));
+        fireEvent.click(screen.getByRole("button", { name: /Request cancellation/i }));
       });
 
       expect(cancelFn).toHaveBeenCalled();
       expect(screen.getByText("Applying Updates")).toBeInTheDocument();
-      expect(screen.getByText(/Cancelling:/)).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Force stop" })).toBeInTheDocument();
+      expect(screen.getByText("Cancellation requested")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Force stop" })).not.toBeInTheDocument();
     });
 
     it("shows the stopped outcome and refetches when the cancelled upgrade aborts", async () => {
@@ -802,11 +823,11 @@ describe("UpdatesView", () => {
         fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
       });
       await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: /Cancel Upgrade/i }));
+        fireEvent.click(screen.getByRole("button", { name: /Request cancellation/i }));
       });
 
       await act(async () => {
-        upgradeCallbacks?.onError("BACKEND_TERMINAL_DETAIL", "internal_error");
+        upgradeCallbacks?.onError("BACKEND_TERMINAL_DETAIL", "cancelled");
       });
 
       await waitFor(() => {
@@ -844,10 +865,10 @@ describe("UpdatesView", () => {
         fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
       });
       await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: /Cancel Anyway/i }));
+        fireEvent.click(screen.getByRole("button", { name: /Request cancellation/i }));
       });
       await act(async () => {
-        upgradeCallbacks?.onError("Operation interrupted", "internal_error");
+        upgradeCallbacks?.onError("Operation cancelled", "cancelled");
       });
 
       await waitFor(() => {
@@ -879,7 +900,7 @@ describe("UpdatesView", () => {
         fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
       });
       await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: /Cancel Upgrade/i }));
+        fireEvent.click(screen.getByRole("button", { name: /Request cancellation/i }));
       });
 
       await act(async () => {
@@ -1311,6 +1332,13 @@ describe("UpdatesView", () => {
         expect(screen.getByText(/corrupted database/)).toBeInTheDocument();
       });
       expect(screen.queryByText("Arch Linux status page")).not.toBeInTheDocument();
+    });
+
+    it("keeps an explicitly local connection failure out of the network error page", async () => {
+      mockCheckUpdates.mockRejectedValue(new api.BackendError("Local socket connection refused", "internal_error", "system service socket"));
+      render(<UpdatesView />);
+      expect(await screen.findByText("system service socket")).toBeInTheDocument();
+      expect(screen.queryByText("Can't reach Arch Linux services")).not.toBeInTheDocument();
     });
 
     it("displays preflight error", async () => {
@@ -2064,7 +2092,7 @@ describe("UpdatesView", () => {
     });
 
     it.each(["sync", "check"])("loads the saved advisory setting when a limited session cannot %s updates", async (operation) => {
-      mockPermission.mockReturnValueOnce({
+      mockPermission.mockReturnValue({
         allowed: false,
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),

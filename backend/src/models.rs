@@ -243,7 +243,6 @@ pub struct ProviderChoice {
 pub struct PreflightState {
     pub conflicts: Vec<ConflictInfo>,
     pub replacements: Vec<ReplacementInfo>,
-    pub removals: Vec<String>,
     pub providers: Vec<ProviderChoice>,
     pub import_keys: Vec<KeyInfo>,
 }
@@ -296,6 +295,12 @@ pub enum StreamEvent {
         success: bool,
         #[ts(optional)]
         message: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        code: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        details: Option<String>,
     },
     #[serde(rename = "mirror_test")]
     MirrorTest {

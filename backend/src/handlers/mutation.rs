@@ -4,8 +4,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::alpm::{
-    SysupgradeOutcome, TransactionGuard, Verbosity, get_handle, interrupt_if_cancelled,
-    progress_to_string, run_sysupgrade, setup_dl_cb, setup_log_cb,
+    SysupgradeOutcome, TransactionGuard, Verbosity, get_handle, progress_to_string, run_sysupgrade,
+    setup_dl_cb, setup_log_cb,
 };
 use crate::check_cancel_early;
 use crate::db::invalidate_repo_map_cache;
@@ -16,8 +16,8 @@ use crate::models::{
 };
 use crate::util::{
     CheckResult, DEFAULT_MUTATION_TIMEOUT_SECS, TimeoutGuard, check_cancel,
-    emit_cancellation_complete, emit_event, emit_json, handle_commit_error, is_cancelled,
-    setup_signal_handler, spawn_cancel_listener,
+    emit_cancellation_complete, emit_event, emit_failure, emit_json, handle_commit_error,
+    is_cancelled, setup_signal_handler, spawn_cancel_listener,
 };
 
 pub(crate) const KERNEL_PACKAGES: &[&str] = &[
@@ -65,11 +65,6 @@ pub(crate) fn setup_progress_cb(handle: &mut Alpm) {
               howmany: usize,
               current: usize,
               _: &mut ()| {
-            interrupt_if_cancelled();
-            if is_cancelled() {
-                return;
-            }
-
             let operation = progress_to_string(progress);
             if last.as_ref().is_some_and(|(op, pkg, pct, cur, total)| {
                 *op == operation
@@ -95,7 +90,6 @@ pub(crate) fn setup_progress_cb(handle: &mut Alpm) {
 
 pub(crate) fn setup_event_cb(handle: &mut Alpm, scope: EventScope) {
     handle.set_event_cb((), move |event: AnyEvent, _: &mut ()| {
-        interrupt_if_cancelled();
         let (event_str, pkg_name) = match event.event() {
             Event::PackageOperationStart(op) | Event::PackageOperationDone(op) => {
                 let (op_name, pkg_name) = match op.operation() {
@@ -143,9 +137,7 @@ pub(crate) fn setup_event_cb(handle: &mut Alpm, scope: EventScope) {
     });
 }
 
-/// Auto-answers alpm questions during a streaming mutation, logging each
-/// decision. `answer_remove_pkgs` confirms dependent-removal prompts; when
-/// false the prompt keeps alpm's default answer.
+/// Upgrade removals are checked against the confirmed plan after preparation.
 pub(crate) fn setup_question_cb(handle: &mut Alpm, answer_remove_pkgs: bool) {
     handle.set_question_cb(
         (),
@@ -155,9 +147,13 @@ pub(crate) fn setup_question_cb(handle: &mut Alpm, answer_remove_pkgs: bool) {
                 let pkg2 = q.conflict().package2().name().to_string();
                 emit_event(&StreamEvent::Log {
                     level: "info".to_string(),
-                    message: format!("Resolving conflict between {} and {}", pkg1, pkg2),
+                    message: if answer_remove_pkgs {
+                        format!("Resolving conflict between {pkg1} and {pkg2}")
+                    } else {
+                        format!("{pkg1} conflicts with {pkg2}. Review the removal with pacman before retrying.")
+                    },
                 });
-                question.set_answer(true);
+                question.set_answer(answer_remove_pkgs);
             }
             Question::Corrupted(q) => {
                 let pkg_name = q.filepath().to_string();
@@ -168,24 +164,25 @@ pub(crate) fn setup_question_cb(handle: &mut Alpm, answer_remove_pkgs: bool) {
                 question.set_answer(false);
             }
             Question::RemovePkgs(q) => {
-                if answer_remove_pkgs {
-                    let pkgs: Vec<String> =
-                        q.packages().iter().map(|p| p.name().to_string()).collect();
-                    emit_event(&StreamEvent::Log {
-                        level: "info".to_string(),
-                        message: format!("Removing packages as confirmed: {}", pkgs.join(", ")),
-                    });
-                    question.set_answer(true);
-                }
+                let pkgs: Vec<String> = q.packages().iter().map(|p| p.name().to_string()).collect();
+                emit_event(&StreamEvent::Log {
+                    level: "error".to_string(),
+                    message: format!("Packages have unresolved dependencies: {}. Resolve them before upgrading.", pkgs.join(", ")),
+                });
+                question.set_answer(false);
             }
             Question::Replace(q) => {
                 let old_pkg = q.oldpkg().name().to_string();
                 let new_pkg = q.newpkg().name().to_string();
                 emit_event(&StreamEvent::Log {
                     level: "info".to_string(),
-                    message: format!("Replacing {} with {}", old_pkg, new_pkg),
+                    message: if answer_remove_pkgs {
+                        format!("Replacing {old_pkg} with {new_pkg}")
+                    } else {
+                        format!("{new_pkg} would replace {old_pkg}. Review the removal with pacman before retrying.")
+                    },
                 });
-                question.set_answer(true);
+                question.set_answer(answer_remove_pkgs);
             }
             Question::InstallIgnorepkg(_) => {
                 question.set_answer(false);
@@ -208,10 +205,10 @@ pub(crate) fn setup_question_cb(handle: &mut Alpm, answer_remove_pkgs: bool) {
                 let fingerprint = q.fingerprint().to_string();
                 let uid = q.uid().to_string();
                 emit_event(&StreamEvent::Log {
-                    level: "info".to_string(),
-                    message: format!("Importing PGP key {} ({})", fingerprint, uid),
+                    level: "error".to_string(),
+                    message: format!("Signing key {fingerprint} ({uid}) needs verification. Import it with pacman-key after verifying its fingerprint, then retry."),
                 });
-                question.set_answer(true);
+                question.set_answer(false);
             }
         },
     );
@@ -227,8 +224,8 @@ pub(crate) fn begin_mutation(
     opts: MutationOpts,
     timeout_secs: Option<u64>,
 ) -> Result<(Alpm, TimeoutGuard)> {
-    setup_signal_handler();
-    spawn_cancel_listener();
+    setup_signal_handler()?;
+    spawn_cancel_listener()?;
     let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
 
     let mut handle = get_handle()?;
@@ -246,10 +243,7 @@ pub(crate) fn begin_mutation(
 }
 
 pub(crate) fn fail_complete(message: String) -> anyhow::Error {
-    emit_event(&StreamEvent::Complete {
-        success: false,
-        message: Some(message.clone()),
-    });
+    emit_failure(&message, "transaction_failed");
     anyhow::anyhow!(message)
 }
 
@@ -263,20 +257,22 @@ pub(crate) fn add_pkg_failure(name: &str, e: impl std::fmt::Display) -> anyhow::
 
 pub(crate) fn commit_and_complete(
     tx: &mut TransactionGuard,
-    interrupt_msg: &str,
+    timeout: &TimeoutGuard,
     success_msg: Option<String>,
 ) -> Result<()> {
     let _inhibitor = ShutdownInhibitor::take("Applying package changes");
+    check_cancel_early!(timeout);
     match tx.commit().err().map(|e| e.to_string()) {
-        Some(err_msg) => handle_commit_error(&err_msg, is_cancelled(), interrupt_msg),
+        Some(err_msg) => handle_commit_error(
+            &err_msg,
+            is_cancelled(),
+            "Cancellation was requested while committing",
+        ),
         None => {
-            // Invariant: enqueue the success signal immediately after commit()
-            // returns Ok, before anything else. emit_event hands it to the async
-            // stdout writer; main drains the writer (shutdown_event_writer) before
-            // the process exits, so a succeeded upgrade always reports success and
-            // is never lost. Do not insert work between commit() and here.
             emit_event(&StreamEvent::Complete {
                 success: true,
+                code: None,
+                details: None,
                 message: success_msg,
             });
             Ok(())
@@ -284,14 +280,22 @@ pub(crate) fn commit_and_complete(
     }
 }
 
+fn effective_ignored_packages(selected: &[String]) -> Result<Vec<String>> {
+    let mut ignored = crate::config::AppConfig::load()?.ignored_packages;
+    ignored.extend_from_slice(selected);
+    ignored.sort();
+    ignored.dedup();
+    Ok(ignored)
+}
+
 pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
     // Before the lock: a timeout SIGTERM must set the flag, not kill the
     // process with db.lck held.
-    setup_signal_handler();
+    setup_signal_handler()?;
 
     let mut handle = get_handle()?;
 
-    for pkg_name in ignore_pkgs {
+    for pkg_name in effective_ignored_packages(ignore_pkgs)? {
         handle.add_ignorepkg(pkg_name.as_str())?;
     }
 
@@ -311,10 +315,8 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
             Question::Corrupted(_) => {
                 question.set_answer(false);
             }
-            Question::RemovePkgs(q) => {
-                let pkgs: Vec<String> = q.packages().iter().map(|p| p.name().to_string()).collect();
-                state_cb.borrow_mut().removals.extend(pkgs);
-                question.set_answer(true);
+            Question::RemovePkgs(_) => {
+                question.set_answer(false);
             }
             Question::Replace(q) => {
                 state_cb.borrow_mut().replacements.push(ReplacementInfo {
@@ -373,6 +375,13 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
     }
 
     let prepare_err = tx.prepare().err();
+    let mut removals: Vec<String> = tx
+        .remove()
+        .iter()
+        .map(|pkg| pkg.name().to_string())
+        .collect();
+    removals.sort_unstable();
+    removals.dedup();
 
     let packages_to_upgrade = tx.add().len();
     let total_download_size: i64 = tx.add().iter().map(|p| p.download_size()).sum();
@@ -383,7 +392,7 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
             error: Some(format!("Failed to prepare transaction: {}", err)),
             conflicts: s.conflicts.clone(),
             replacements: s.replacements.clone(),
-            removals: s.removals.clone(),
+            removals,
             providers: s.providers.clone(),
             import_keys: s.import_keys.clone(),
             ..Default::default()
@@ -391,7 +400,7 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
         return emit_json(&response);
     }
 
-    if packages_to_upgrade == 0 {
+    if packages_to_upgrade == 0 && removals.is_empty() {
         let response = PreflightResponse {
             success: true,
             ..Default::default()
@@ -436,7 +445,7 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
         error: None,
         conflicts: s.conflicts.clone(),
         replacements: s.replacements.clone(),
-        removals: s.removals.clone(),
+        removals,
         providers: s.providers.clone(),
         import_keys: s.import_keys.clone(),
         warnings,
@@ -447,7 +456,8 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
 }
 
 pub fn sync_database(force: bool, timeout_secs: Option<u64>) -> Result<()> {
-    setup_signal_handler();
+    setup_signal_handler()?;
+    spawn_cancel_listener()?;
     let timeout = TimeoutGuard::new(timeout_secs.unwrap_or(DEFAULT_MUTATION_TIMEOUT_SECS));
 
     check_cancel_early!(&timeout);
@@ -465,6 +475,8 @@ pub fn sync_database(force: bool, timeout_secs: Option<u64>) -> Result<()> {
             } else {
                 emit_event(&StreamEvent::Complete {
                     success: true,
+                    code: None,
+                    details: None,
                     message: None,
                 });
             }
@@ -476,17 +488,21 @@ pub fn sync_database(force: bool, timeout_secs: Option<u64>) -> Result<()> {
                 emit_cancellation_complete(&check_result);
                 Ok(())
             } else {
-                emit_event(&StreamEvent::Complete {
-                    success: false,
-                    message: Some(e.to_string()),
-                });
+                emit_failure(&e.to_string(), "transaction_failed");
                 Err(e.into())
             }
         }
     }
 }
 
-pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<()> {
+pub fn run_upgrade(
+    ignore_pkgs: &[String],
+    timeout_secs: Option<u64>,
+    approved_removals: &[String],
+) -> Result<()> {
+    for name in approved_removals {
+        crate::validation::validate_package_name(name)?;
+    }
     let (mut handle, timeout) = begin_mutation(
         EventScope::Upgrade,
         MutationOpts {
@@ -495,20 +511,20 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
         timeout_secs,
     )?;
 
-    for pkg_name in ignore_pkgs {
+    for pkg_name in effective_ignored_packages(ignore_pkgs)? {
         handle.add_ignorepkg(pkg_name.as_str()).inspect_err(|e| {
-            emit_event(&StreamEvent::Complete {
-                success: false,
-                message: Some(format!("Failed to ignore package {}: {}", pkg_name, e)),
-            });
+            emit_failure(
+                &format!("Failed to ignore package {}: {}", pkg_name, e),
+                "transaction_failed",
+            );
         })?;
     }
 
     if let Err(e) = handle.syncdbs_mut().update(false) {
-        emit_event(&StreamEvent::Complete {
-            success: false,
-            message: Some(format!("Failed to refresh package databases: {}", e)),
-        });
+        emit_failure(
+            &format!("Failed to refresh package databases: {}", e),
+            "transaction_failed",
+        );
         return Err(e.into());
     }
     invalidate_repo_map_cache();
@@ -517,22 +533,24 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
 
     let _inhibitor = ShutdownInhibitor::take("Applying package changes");
 
-    match run_sysupgrade(&mut handle, &timeout, None)? {
+    match run_sysupgrade(&mut handle, &timeout, None, Some(approved_removals))? {
         SysupgradeOutcome::CancelledEarly(r) => {
             emit_cancellation_complete(&r);
             Ok(())
         }
         SysupgradeOutcome::SyncFailed(e) => {
-            emit_event(&StreamEvent::Complete {
-                success: false,
-                message: Some(format!("Failed to prepare system upgrade: {}", e)),
-            });
+            emit_failure(
+                &format!("Failed to prepare system upgrade: {}", e),
+                "transaction_failed",
+            );
             Err(anyhow::anyhow!(e))
         }
         SysupgradeOutcome::PrepareFailed(e) => Err(prepare_failure(&e)),
         SysupgradeOutcome::NothingToDo => {
             emit_event(&StreamEvent::Complete {
                 success: true,
+                code: None,
+                details: None,
                 message: Some("System is up to date".to_string()),
             });
             Ok(())
@@ -540,22 +558,17 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
         SysupgradeOutcome::Upgraded { .. } => {
             emit_event(&StreamEvent::Complete {
                 success: true,
+                code: None,
+                details: None,
                 message: None,
-            });
-            Ok(())
-        }
-        SysupgradeOutcome::Interrupted => {
-            emit_event(&StreamEvent::Complete {
-                success: false,
-                message: Some(
-                    "Operation interrupted - system may be in inconsistent state".to_string(),
-                ),
             });
             Ok(())
         }
         SysupgradeOutcome::CompletedDespiteCancel { .. } => {
             emit_event(&StreamEvent::Complete {
                 success: true,
+                code: None,
+                details: None,
                 message: None,
             });
             Ok(())
@@ -563,14 +576,10 @@ pub fn run_upgrade(ignore_pkgs: &[String], timeout_secs: Option<u64>) -> Result<
         // Intervention needs flags; with None it cannot occur, but map it to
         // the failure wire message rather than panic.
         SysupgradeOutcome::CommitFailed(e)
-        | SysupgradeOutcome::Intervention { error: Some(e), .. } => {
-            let message = format!("Failed to commit transaction: {}", e);
-            emit_event(&StreamEvent::Complete {
-                success: false,
-                message: Some(message.clone()),
-            });
-            Err(anyhow::anyhow!(message))
-        }
+        | SysupgradeOutcome::Intervention { error: Some(e), .. } => Err(fail_complete(format!(
+            "Failed to commit transaction: {}",
+            e
+        ))),
         SysupgradeOutcome::Intervention { error: None, .. } => {
             Err(prepare_failure("manual intervention required"))
         }
@@ -601,6 +610,8 @@ pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
     if orphan_names.is_empty() {
         emit_event(&StreamEvent::Complete {
             success: true,
+            code: None,
+            details: None,
             message: Some("No orphan packages to remove".to_string()),
         });
         return Ok(());
@@ -630,6 +641,8 @@ pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
     if tx.remove().is_empty() {
         emit_event(&StreamEvent::Complete {
             success: true,
+            code: None,
+            details: None,
             message: Some("No packages to remove".to_string()),
         });
         return Ok(());
@@ -637,7 +650,7 @@ pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
 
     commit_and_complete(
         &mut tx,
-        "Operation interrupted",
+        &timeout,
         Some(format!("Removed {} orphan package(s)", orphan_names.len())),
     )
 }
@@ -653,13 +666,7 @@ pub fn install_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
 
     check_cancel_early!(&timeout);
 
-    let not_found = || {
-        emit_event(&StreamEvent::Complete {
-            success: false,
-            message: Some(format!("Package '{}' not found in any repository", name)),
-        });
-        anyhow::anyhow!("Package '{}' not found in any repository", name)
-    };
+    let not_found = || fail_complete(format!("Package '{}' not found in any repository", name));
 
     // Resolved before taking the transaction (and the db lock), so a missing
     // package is reported as such even when another operation holds the lock.
@@ -670,10 +677,7 @@ pub fn install_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
     let mut tx = match TransactionGuard::new(&mut handle, TransFlag::NONE) {
         Ok(tx) => tx,
         Err(e) => {
-            emit_event(&StreamEvent::Complete {
-                success: false,
-                message: Some(e.to_string()),
-            });
+            emit_failure(&e.to_string(), "transaction_failed");
             return Err(e);
         }
     };
@@ -693,7 +697,7 @@ pub fn install_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
 
     commit_and_complete(
         &mut tx,
-        "Operation interrupted - package may be in inconsistent state",
+        &timeout,
         Some(format!("Successfully installed {}", name)),
     )
 }
@@ -716,18 +720,10 @@ pub fn remove_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
         .and_then(|pkg| tx.remove_pkg(pkg).map_err(|e| format!("{}", e)));
 
     if let Err(err_msg) = mark_result {
-        emit_event(&StreamEvent::Complete {
-            success: false,
-            message: Some(format!(
-                "Failed to mark '{}' for removal: {}",
-                name, err_msg
-            )),
-        });
-        return Err(anyhow::anyhow!(
+        return Err(fail_complete(format!(
             "Failed to mark '{}' for removal: {}",
-            name,
-            err_msg
-        ));
+            name, err_msg
+        )));
     }
 
     check_cancel_early!(&timeout);
@@ -738,7 +734,7 @@ pub fn remove_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
 
     commit_and_complete(
         &mut tx,
-        "Operation interrupted - package may be in inconsistent state",
+        &timeout,
         Some(format!("Successfully removed {}", name)),
     )
 }

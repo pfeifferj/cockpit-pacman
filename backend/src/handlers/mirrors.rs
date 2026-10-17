@@ -180,7 +180,7 @@ pub fn refresh_mirrors(
 const MIRROR_TEST_CONCURRENCY: usize = 8;
 
 pub fn test_mirrors(urls: &[String], timeout_secs: u64) -> Result<()> {
-    setup_signal_handler();
+    setup_signal_handler()?;
     let timeout = TimeoutGuard::new(timeout_secs);
 
     let total = urls.len();
@@ -228,11 +228,15 @@ pub fn test_mirrors(urls: &[String], timeout_secs: u64) -> Result<()> {
     let complete = if is_cancelled() {
         StreamEvent::Complete {
             success: false,
+            code: Some("cancelled".to_string()),
+            details: None,
             message: Some("Operation cancelled by user".to_string()),
         }
     } else if timeout.is_timed_out() {
         StreamEvent::Complete {
             success: false,
+            code: Some("timeout".to_string()),
+            details: None,
             message: Some(format!(
                 "Operation timed out after {} seconds",
                 timeout_secs
@@ -241,6 +245,8 @@ pub fn test_mirrors(urls: &[String], timeout_secs: u64) -> Result<()> {
     } else {
         StreamEvent::Complete {
             success: true,
+            code: None,
+            details: None,
             message: Some(format!("Tested {} mirrors", total)),
         }
     };

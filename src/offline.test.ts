@@ -3,9 +3,9 @@ import { isNetworkError } from "./offline";
 import { BackendError } from "./api";
 
 describe("isNetworkError", () => {
-  it("treats network_error and timeout codes as connectivity failures", () => {
+  it("does not classify a local timeout as an external connectivity failure", () => {
     expect(isNetworkError(null, "network_error")).toBe(true);
-    expect(isNetworkError(null, "timeout")).toBe(true);
+    expect(isNetworkError(null, "timeout")).toBe(false);
   });
 
   it("treats other codes as non-connectivity", () => {

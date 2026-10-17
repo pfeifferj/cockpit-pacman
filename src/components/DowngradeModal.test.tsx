@@ -436,3 +436,31 @@ describe("DowngradeModal", () => {
     expect(screen.getByRole("button", { name: /Install/i })).toBeInTheDocument();
   });
 });
+
+
+describe("DowngradeModal cancellation", () => {
+  afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+  it.each(["Cancel", "Escape", "backdrop"])("waits after %s and preserves a commit failure", async (dismissal) => {
+    mockListDowngrades.mockResolvedValue({ packages: [cacheVersion], total: 1 });
+    const cancel = vi.fn();
+    mockDowngradePackage.mockReturnValue({ cancel, forceStop: vi.fn() });
+    const onClose = vi.fn();
+    const props = { packageName: "bash", currentVersion: "5.2.015-1", onClose };
+    const { rerender } = render(<DowngradeModal {...props} isOpen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Downgrade" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Downgrade" }));
+    if (dismissal === "Escape") fireEvent.keyDown(document.body, { key: "Escape" });
+    else if (dismissal === "backdrop") fireEvent.mouseDown(document.querySelector(".pf-v6-c-backdrop")!);
+    else fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(onClose).not.toHaveBeenCalled();
+    rerender(<DowngradeModal {...props} isOpen={false} />);
+    rerender(<DowngradeModal {...props} isOpen />);
+    expect(screen.getByRole("button", { name: "Cancellation requested" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Confirm Downgrade" })).not.toBeInTheDocument();
+    act(() => mockDowngradePackage.mock.lastCall![0].onError("Commit failed", "transaction_failed", "No space left on device"));
+    expect(screen.getByText("No space left on device")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+  });
+});

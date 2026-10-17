@@ -34,7 +34,8 @@ requests at a loopback HTTP service.
 Builds without `e2e-fixtures` ignore these endpoint variables.
 
 The fixture provides a real session bus and Secret Service with disposable
-ArchWeb credentials. Signoffs exercise D-Bus retrieval, stdin delivery, Rust
+ArchWeb credentials in the unlocked session collection. The login collection
+can remain locked. Signoffs exercise D-Bus retrieval, stdin delivery, Rust
 HTTP authentication, signoff and revocation against the local service. No real
 Arch account or live signoffs are modified. Archive tests exercise a failing
 HTTP download and a stalled transfer of a signed package through the same
@@ -51,3 +52,29 @@ termination and a full temporary log filesystem, only within this guest.
 Cache pagination tests may install a root-owned, non-writable-by-others marker
 at `/run/cockpit-pacman-e2e/cache-dir`. The test wrapper uses that directory only
 for cache commands. This marker is never read by a production backend.
+
+Commit cancellation tests select an isolated local repository with a fixture
+package. They pause real PreTransaction hooks and package scriptlets, send
+cancellation or SIGTERM, then check the installed payload, PostTransaction
+hook marker, database lock, and process exit. They also close a Cockpit process
+channel, stop the scheduled unit, and combine cancellation with a failing hook.
+The fixture restores the saved configuration and package state after each test.
+`kernel-commit-safety.spec.ts` checks a real signed Linux kernel upgrade. It
+retains the current repository archive, installs an older signed kernel from
+the cache or the 2026-06-01 Arch archive, then pauses the backend upgrade after
+the real mkinitcpio removal hook. After confirming that the preset boot files
+are absent, it sends SIGTERM and releases the barrier. It checks that the boot
+kernel matches the installed module tree and that `lsinitcpio` can read the
+regenerated images and find the new kernel modules. Cleanup restores the
+original kernel; the running guest is discarded without rebooting.
+
+This test may download a kernel archive and run mkinitcpio several times.
+`COCKPIT_KERNEL_REINSTALL=1` selects a same-version reinstall if only the current
+archive is available. That mode checks post-hook regeneration but does not
+cover the removal of old-version boot artifacts and is not a substitute for
+the default upgrade test.
+
+Keyring cancellation uses a root-owned fixture directory to select fake
+`gpg` and `pacman-key` commands in the E2E wrapper. Its grandchild holds a
+temporary file lock. The browser test checks that cancelling refresh ends both
+processes and releases that lock; the real pacman keyring is not modified.

@@ -23,21 +23,20 @@ If `fuser` prints a process, it is mid-transaction; leave the lock alone.
 
 ## An upgrade was interrupted
 
-> Operation interrupted - system may be in inconsistent state
+Cancel stops an operation only before libalpm starts committing. Once package
+changes begin, they and the post-transaction hooks run to completion, and a
+cancel requested meanwhile is reported alongside the result. Closing the tab,
+logging out, or a dropped websocket counts as a cancel and is noted in the
+journal.
 
-libalpm stops between packages: some are upgraded, the rest are not, and the
-post-transaction hooks (initramfs, systemd reload) did not run.
+A commit still stops partway when the backend is killed (SIGKILL, OOM, power
+loss) or libalpm fails mid-transaction: some packages are upgraded, the rest
+are not, and the post-transaction hooks (initramfs, systemd reload) may not
+have run.
 
 Re-run the upgrade. Nothing resumes; the transaction is recomputed from the
 database, so whatever is still out of date is upgraded and the hooks run at
 the end.
-
-Two lookalikes:
-
-- Cancel interrupts on purpose, and reports this.
-- Closing the tab, logging out, or a dropped websocket does not interrupt a
-  transaction that is already applying. The backend finishes it, records it,
-  and notes the disconnection in the journal. Work that has not started stops.
 
 ## Only some repositories updated
 

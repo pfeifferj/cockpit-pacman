@@ -1,5 +1,5 @@
 {
-  "_comment": "Failure messages the backend puts on a streaming Complete, and the ErrorCode the frontend must derive from each. A streaming Complete carries no code, so the frontend classifies by keyword; rewording a message silently changes what the UI shows. Both suites assert against this file.",
+  "_comment": "Failure messages the backend puts on a streaming Complete, and the ErrorCode the frontend must derive from each. The backend derives a failed Complete's code from its message and the frontend classifies by keyword when no code is present, so rewording a message changes what the UI shows. Both suites assert against this file.",
   "messages": [
     { "message": "Operation cancelled by user", "code": "cancelled" },
     { "message": "Operation timed out after 300 seconds", "code": "timeout" },

@@ -329,8 +329,9 @@ describe("CacheView", () => {
     });
 
     await act(async () => {
-      capturedCallbacks?.onError("Failed to clean cache");
+      capturedCallbacks?.onError("Failed to clean cache", "internal_error", "Cannot remove a read-only archive");
     });
+    expect(screen.getByText("Cannot remove a read-only archive")).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByText(/Error loading cache information/i)).toBeInTheDocument();
@@ -369,7 +370,8 @@ describe("CacheView", () => {
       fireEvent.click(cancelButton);
     });
 
-    expect(mockCancel).toHaveBeenCalled();
+    expect(mockCancel).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Cancellation requested" })).toBeDisabled();
   });
 
   it("opens package details modal when clicking a package row", async () => {

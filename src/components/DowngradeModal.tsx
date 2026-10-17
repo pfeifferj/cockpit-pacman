@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useStreamingLog } from "../hooks/useStreamingLog";
 import { useBackdropClose } from "../hooks/useBackdropClose";
 import { useDebouncedValue } from "../hooks/useDebounce";
 import { SEARCH_DEBOUNCE_MS } from "../constants";
@@ -36,8 +37,9 @@ import {
 } from "../api";
 import type { ErrorCode } from "../api";
 import { isNetworkError } from "../offline";
+import { ErrorAlert } from "./ErrorAlert";
 import { NetworkErrorState } from "./NetworkErrorState";
-import { appendCapped, sanitizeErrorMessage } from "../utils";
+import { sanitizeErrorMessage } from "../utils";
 
 type ModalState = "loading" | "select" | "confirm" | "downgrading" | "success" | "error";
 type DowngradeSource = "cache" | "archive";
@@ -55,14 +57,16 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
   isOpen,
   onClose,
 }) => {
-  useBackdropClose(isOpen, onClose);
   const [state, setState] = useState<ModalState>("loading");
   const [source, setSource] = useState<DowngradeSource>("cache");
   const [versions, setVersions] = useState<CachedVersion[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<CachedVersion | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
-  const [log, setLog] = useState("");
+  const { log, appendLog, flushLog, resetLog } = useStreamingLog();
+  const [isCancelling, setIsCancelling] = useState(false);
+  const cancellingRef = useRef(false);
+  const [errorDetails, setErrorDetails] = useState<string | undefined>();
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const { activeSortIndex, activeSortDirection, setActiveSortIndex, getSortParams } = useSortableTable({
     sortableColumns: [0, 2], // version, size
@@ -91,20 +95,21 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
       setState("error");
       setError(ex instanceof Error ? ex.message : String(ex));
       setErrorCode(ex instanceof BackendError ? ex.code : undefined);
+      setErrorDetails(ex instanceof BackendError ? ex.details : undefined);
     }
   }, [packageName]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || cancelRef.current) return;
     Promise.resolve().then(() => {
       setSource("cache");
       setSelectedVersion(null);
-      setLog("");
+      resetLog();
       setVersionFilter("");
       setServerResults(null);
       void loadVersions("cache");
     });
-  }, [isOpen, loadVersions]);
+  }, [isOpen, loadVersions, resetLog]);
 
   const handleSourceChange = (src: DowngradeSource) => {
     if (src === source) return;
@@ -131,18 +136,25 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
   const handleConfirmDowngrade = () => {
     if (!selectedVersion) return;
     setState("downgrading");
-    setLog("");
+    resetLog();
     setIsDetailsExpanded(true);
 
     const callbacks = {
-      onData: (data: string) => setLog((prev) => appendCapped(prev, data)),
+      onData: appendLog,
       onComplete: () => {
+        flushLog();
+        setIsCancelling(false);
+        cancellingRef.current = false;
         setState("success");
         cancelRef.current = null;
       },
-      onError: (err: string, code?: ErrorCode) => {
+      onError: (err: string, code?: ErrorCode, details?: string) => {
+        flushLog();
+        setIsCancelling(false);
+        cancellingRef.current = false;
         setState("error");
         setError(err);
+        setErrorDetails(details);
         setErrorCode(code);
         cancelRef.current = null;
       },
@@ -154,21 +166,20 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
   };
 
   const handleCancel = () => {
-    if (cancelRef.current) {
-      cancelRef.current();
-      cancelRef.current = null;
-    }
-    setState("select");
-    setLog("");
+    if (!cancelRef.current || cancellingRef.current) return;
+    cancellingRef.current = true;
+    setIsCancelling(true);
+    cancelRef.current();
   };
 
   const handleClose = () => {
     if (cancelRef.current) {
-      cancelRef.current();
-      cancelRef.current = null;
+      handleCancel();
+      return;
     }
     onClose();
   };
+  useBackdropClose(isOpen, handleClose);
 
   const sortedVersions = React.useMemo(() => {
     return [...versions].sort((a, b) => {
@@ -243,9 +254,10 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
           );
         }
         return (
-          <Alert variant="danger" title="Error">
-            {sanitizeErrorMessage(error)}
-          </Alert>
+          <>
+            <ErrorAlert error={sanitizeErrorMessage(error)} code={errorCode} details={errorDetails} title="Error" />
+            {log && <ExpandableLogViewer log={log} isExpanded={isDetailsExpanded} onToggle={setIsDetailsExpanded} />}
+          </>
         );
 
       case "select": {
@@ -415,6 +427,7 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
             <div className="pf-v6-u-mb-md">
               <Spinner size="md" /> {selectedVersion?.is_older ? "Downgrading" : "Upgrading"} {packageName} to {selectedVersion?.version}...
             </div>
+            {isCancelling && <p>Cancellation requested. Waiting for the operation to finish safely.</p>}
             <ExpandableLogViewer
               log={log}
               placeholder="Starting..."
@@ -463,8 +476,8 @@ export const DowngradeModal: React.FC<DowngradeModalProps> = ({
 
       case "downgrading":
         return (
-          <Button variant="danger" onClick={handleCancel}>
-            Cancel
+          <Button variant="danger" onClick={handleCancel} isDisabled={isCancelling}>
+            {isCancelling ? "Cancellation requested" : "Cancel"}
           </Button>
         );
 

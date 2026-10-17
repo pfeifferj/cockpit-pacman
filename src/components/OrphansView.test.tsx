@@ -194,3 +194,26 @@ describe("OrphansView", () => {
     expect(defaultProps.onRowClick).toHaveBeenCalledWith("libunused");
   });
 });
+
+
+describe("OrphansView cancellation", () => {
+  afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+  it("keeps removal busy until the process settles, including a parent refresh", async () => {
+    mockListOrphans.mockResolvedValue(mockOrphanResponse);
+    const cancel = vi.fn();
+    mockRemoveOrphans.mockReturnValue({ cancel, forceStop: vi.fn() });
+    const onRowClick = vi.fn();
+    const { rerender } = render(<OrphansView onRowClick={onRowClick} refreshTrigger={0} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Remove All Orphans" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove All" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Cancellation requested" })).toBeDisabled();
+    rerender(<OrphansView onRowClick={onRowClick} refreshTrigger={1} />);
+    await act(async () => {});
+    expect(screen.queryByRole("button", { name: "Remove All Orphans" })).not.toBeInTheDocument();
+    act(() => mockRemoveOrphans.mock.lastCall![0].onError("Commit failed", "transaction_failed", "Filesystem read-only"));
+    expect(screen.getByText("Filesystem read-only")).toBeInTheDocument();
+  });
+});

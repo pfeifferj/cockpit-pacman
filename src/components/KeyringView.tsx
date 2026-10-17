@@ -1,3 +1,5 @@
+import { useStreamingLog } from "../hooks/useStreamingLog";
+import { ErrorDetails } from "./ErrorDetails";
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { usePagination } from "../hooks/usePagination";
 import { useSortableTable } from "../hooks/useSortableTable";
@@ -43,7 +45,7 @@ import type { ErrorCode } from "../api";
 import { isNetworkError } from "../offline";
 import { NetworkErrorState } from "./NetworkErrorState";
 import { TimeAgo } from "./TimeAgo";
-import { appendCapped, sanitizeErrorMessage } from "../utils";
+import { sanitizeErrorMessage } from "../utils";
 
 type ViewState = "loading" | "ready" | "refreshing" | "initializing" | "error";
 
@@ -62,12 +64,15 @@ export const KeyringView: React.FC = () => {
   const [keyringData, setKeyringData] = useState<KeyringStatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
-  const [log, setLog] = useState("");
+  const { log, appendLog, flushLog, resetLog } = useStreamingLog();
+  const [errorDetails, setErrorDetails] = useState<string | undefined>();
   const [searchFilter, setSearchFilter] = useState("");
   const [trustFilter, setTrustFilter] = useState("all");
   const [trustSelectOpen, setTrustSelectOpen] = useState(false);
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const cancelRef = useRef<(() => void) | null>(null);
+  const cancellingRef = useRef(false);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   const { page, perPage, onSetPage, onPerPageSelect } = usePagination();
   const { activeSortIndex, activeSortDirection, getSortParams } = useSortableTable({
@@ -79,6 +84,7 @@ export const KeyringView: React.FC = () => {
     setState("loading");
     setError(null);
     setErrorCode(undefined);
+    setErrorDetails(undefined);
     try {
       const response = await getKeyringStatus();
       setKeyringData(response);
@@ -87,6 +93,7 @@ export const KeyringView: React.FC = () => {
       setState("error");
       setError(ex instanceof Error ? ex.message : String(ex));
       setErrorCode(ex instanceof BackendError ? ex.code : undefined);
+      setErrorDetails(ex instanceof BackendError ? ex.details : undefined);
     }
   }, []);
 
@@ -103,6 +110,7 @@ export const KeyringView: React.FC = () => {
         setState("error");
         setError(ex instanceof Error ? ex.message : String(ex));
         setErrorCode(ex instanceof BackendError ? ex.code : undefined);
+        setErrorDetails(ex instanceof BackendError ? ex.details : undefined);
       });
     return () => { cancelled = true; };
   }, []);
@@ -118,15 +126,22 @@ export const KeyringView: React.FC = () => {
 
   const handleRefreshKeys = () => {
     setState("refreshing");
-    setLog("");
+    resetLog();
     setIsDetailsExpanded(true);
     const { cancel } = refreshKeyring({
-      onData: (data) => setLog((prev) => appendCapped(prev, data)),
+      onData: appendLog,
       onComplete: () => {
+        flushLog();
+        cancellingRef.current = false;
+        setIsCancelling(false);
         cancelRef.current = null;
         loadKeyringStatus();
       },
-      onError: (err, code) => {
+      onError: (err, code, details) => {
+        flushLog();
+        cancellingRef.current = false;
+        setIsCancelling(false);
+        setErrorDetails(details);
         setState("error");
         setError(err);
         setErrorCode(code);
@@ -140,15 +155,22 @@ export const KeyringView: React.FC = () => {
 
   const handleInitKeyring = () => {
     setState("initializing");
-    setLog("");
+    resetLog();
     setIsDetailsExpanded(true);
     const { cancel } = initKeyring({
-      onData: (data) => setLog((prev) => appendCapped(prev, data)),
+      onData: appendLog,
       onComplete: () => {
+        flushLog();
+        cancellingRef.current = false;
+        setIsCancelling(false);
         cancelRef.current = null;
         loadKeyringStatus();
       },
-      onError: (err, code) => {
+      onError: (err, code, details) => {
+        flushLog();
+        cancellingRef.current = false;
+        setIsCancelling(false);
+        setErrorDetails(details);
         setState("error");
         setError(err);
         setErrorCode(code);
@@ -159,12 +181,10 @@ export const KeyringView: React.FC = () => {
   };
 
   const handleCancel = () => {
-    if (cancelRef.current) {
-      cancelRef.current();
-      cancelRef.current = null;
-      setState("ready");
-      setLog("");
-    }
+    if (!cancelRef.current || cancellingRef.current) return;
+    cancellingRef.current = true;
+    setIsCancelling(true);
+    cancelRef.current();
   };
 
   const trustLevels = useMemo(() => {
@@ -283,6 +303,7 @@ export const KeyringView: React.FC = () => {
             <>
               <Alert variant="danger" title="Error loading keyring status">
                 {sanitizeErrorMessage(error)}
+                <ErrorDetails details={errorDetails} />
               </Alert>
               <div className="pf-v6-u-mt-md">
                 <Button variant="primary" onClick={loadKeyringStatus}>
@@ -310,8 +331,8 @@ export const KeyringView: React.FC = () => {
               <CardTitle className="pf-v6-u-m-0">{title}</CardTitle>
             </FlexItem>
             <FlexItem>
-              <Button variant="danger" onClick={handleCancel}>
-                Cancel
+              <Button variant="danger" onClick={handleCancel} isDisabled={isCancelling}>
+                {isCancelling ? "Cancellation requested" : "Cancel"}
               </Button>
             </FlexItem>
           </Flex>
@@ -320,6 +341,7 @@ export const KeyringView: React.FC = () => {
             <Spinner size="md" /> {subtitle}
           </div>
 
+          {isCancelling && <p>Waiting for the operation to finish cancelling.</p>}
           <ExpandableLogViewer
             log={log}
             placeholder="Starting..."

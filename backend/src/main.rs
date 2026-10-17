@@ -115,10 +115,11 @@ Commands:
                          Sync package databases (requires root)
                          force: true|false (default: true)
                          timeout: seconds (default: 300)
-  upgrade [ignore] [timeout]
+  upgrade [ignore] [timeout] [approved-removals]
                          Perform system upgrade (requires root)
                          ignore: comma-separated list of packages to skip
                          timeout: seconds (default: 300)
+                         approved-removals: comma-separated names from the confirmed preflight
   local-package-info NAME
                          Get detailed info for an installed package
   sync-package-info NAME [REPO]
@@ -395,7 +396,12 @@ fn main() {
                 })
                 .unwrap_or_default();
             let timeout = args.get(3).and_then(|s| s.parse().ok());
-            run_upgrade(&ignore_pkgs, timeout)
+            let approved_removals: Vec<String> = args
+                .get(4)
+                .filter(|value| !value.is_empty())
+                .map(|value| value.split(',').map(str::to_string).collect())
+                .unwrap_or_default();
+            run_upgrade(&ignore_pkgs, timeout, &approved_removals)
         }
         "local-package-info" => {
             if args.len() < 3 {

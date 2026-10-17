@@ -2,15 +2,9 @@ use alpm::{Alpm, AnyDownloadEvent, DownloadEvent, LogLevel};
 use std::collections::HashMap;
 
 use crate::models::StreamEvent;
-use crate::util::{emit_event, may_interrupt_transaction};
+use crate::util::emit_event;
 
 use super::log_level_to_string;
-
-pub fn interrupt_if_cancelled() {
-    if may_interrupt_transaction() {
-        super::try_interrupt();
-    }
-}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Verbosity {
@@ -24,9 +18,6 @@ fn worth_emitting(level: LogLevel) -> bool {
 
 pub fn setup_log_cb(handle: &mut Alpm) {
     handle.set_log_cb((), move |level: LogLevel, msg: &str, _: &mut ()| {
-        // The re-arm has to happen for every callback, including the ones whose
-        // message is dropped: it is the only cancel path during downloads.
-        interrupt_if_cancelled();
         if !worth_emitting(level) {
             return;
         }
@@ -47,7 +38,6 @@ pub fn setup_dl_cb(handle: &mut Alpm, verbosity: Verbosity) {
     handle.set_dl_cb(
         (),
         move |filename: &str, event: AnyDownloadEvent, _: &mut ()| {
-            interrupt_if_cancelled();
             let (event_str, downloaded, total) = match event.event() {
                 DownloadEvent::Init(_) => ("init", None, None),
                 DownloadEvent::Progress(p) => ("progress", Some(p.downloaded), Some(p.total)),

@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{self, BufRead, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
-use std::os::fd::FromRawFd;
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::sync::{Arc, Condvar, LazyLock, Mutex, OnceLock};
@@ -36,80 +36,63 @@ pub fn detected_ip_family() -> IpFamily {
 }
 
 static CANCELLED: AtomicBool = AtomicBool::new(false);
-static CHANNEL_LOST: AtomicBool = AtomicBool::new(false);
 
 pub fn is_cancelled() -> bool {
     CANCELLED.load(AtomicOrdering::SeqCst)
 }
 
-pub fn channel_lost() -> bool {
-    CHANNEL_LOST.load(AtomicOrdering::SeqCst)
-}
-
-pub fn may_interrupt_transaction() -> bool {
-    is_cancelled() && !channel_lost()
-}
-
-fn note_channel_lost() {
-    if !is_cancelled() {
-        CHANNEL_LOST.store(true, AtomicOrdering::SeqCst);
-    }
-    request_cancel();
-}
-
+#[cfg(test)]
 pub fn reset_cancelled() {
     CANCELLED.store(false, AtomicOrdering::SeqCst);
-    CHANNEL_LOST.store(false, AtomicOrdering::SeqCst);
 }
 
-/// Only sets the flag; the alpm callbacks re-issue the interrupt on the commit
-/// thread, so a cancel never reaches libalpm from another thread.
+/// Requests cancellation at the next safe checkpoint.
 pub fn request_cancel() {
     CANCELLED.store(true, AtomicOrdering::SeqCst);
 }
 
-pub fn spawn_cancel_listener() {
-    // Off fd 0 so a libalpm scriptlet inheriting stdin can't steal the cancel
-    // line; scriptlets get /dev/null, we keep a private close-on-exec dup.
-    let control_fd = unsafe {
-        let dup = libc::dup(0);
-        if dup < 0 {
-            return;
-        }
-        libc::fcntl(dup, libc::F_SETFD, libc::FD_CLOEXEC);
-        let devnull = libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY);
-        if devnull >= 0 {
-            libc::dup2(devnull, 0);
-            libc::close(devnull);
-        }
-        dup
-    };
-
-    std::thread::spawn(move || {
-        // SAFETY: control_fd is a fresh dup owned solely by this thread.
-        let file = unsafe { std::fs::File::from_raw_fd(control_fd) };
-        let mut reader = io::BufReader::new(file);
-        let mut line = String::new();
-        loop {
-            line.clear();
-            match reader.read_line(&mut line) {
-                Ok(0) | Err(_) => {
-                    note_channel_lost();
-                    journal_note(
-                        "control channel closed with no cancel request; \
+pub fn spawn_cancel_listener() -> Result<()> {
+    // Keep scriptlets on /dev/null and the control pipe private to this process.
+    let descriptor = unsafe { libc::dup(libc::STDIN_FILENO) };
+    if descriptor < 0 {
+        return Err(io::Error::last_os_error()).context("Cannot duplicate cancellation channel");
+    }
+    // SAFETY: dup returned a new descriptor owned by this File.
+    let file = unsafe { File::from_raw_fd(descriptor) };
+    if unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+        return Err(io::Error::last_os_error()).context("Cannot protect cancellation channel");
+    }
+    let devnull = File::open("/dev/null")?;
+    if unsafe { libc::dup2(devnull.as_raw_fd(), libc::STDIN_FILENO) } < 0 {
+        return Err(io::Error::last_os_error()).context("Cannot isolate scriptlet input");
+    }
+    std::thread::Builder::new()
+        .name("cancellation".into())
+        .spawn(move || {
+            let mut reader = io::BufReader::new(file);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line) {
+                    Ok(0) | Err(_) => {
+                        request_cancel();
+                        journal_note(
+                            "control channel closed; \
                          work not yet applied will stop, an upgrade already \
                          applying will run to completion",
-                    );
-                    return;
-                }
-                Ok(_) => {
-                    if line.trim() == "cancel" {
-                        request_cancel();
+                        );
+                        return;
+                    }
+                    Ok(_) => {
+                        if line.trim() == "cancel" {
+                            request_cancel();
+                        }
                     }
                 }
             }
-        }
-    });
+        })
+        .context("Cannot start cancellation listener")?;
+    Ok(())
 }
 
 pub fn journal_note(message: &str) {
@@ -179,24 +162,13 @@ impl TimeoutGuard {
     }
 }
 
-/// ctrlc's `termination` feature catches SIGTERM/SIGHUP too, so cockpit's
-/// `proc.close()` requests a cancel instead of killing the process mid-commit.
-pub fn setup_signal_handler() {
-    static HANDLER_SET: AtomicBool = AtomicBool::new(false);
-
-    reset_cancelled();
-
-    if HANDLER_SET
-        .compare_exchange(false, true, AtomicOrdering::SeqCst, AtomicOrdering::SeqCst)
-        .is_err()
-    {
-        return;
-    }
-
-    if let Err(e) = ctrlc::set_handler(request_cancel) {
-        eprintln!("Warning: Failed to set signal handler: {}", e);
-        HANDLER_SET.store(false, AtomicOrdering::SeqCst);
-    }
+pub fn setup_signal_handler() -> Result<()> {
+    static HANDLER: OnceLock<std::result::Result<(), String>> = OnceLock::new();
+    HANDLER
+        .get_or_init(|| ctrlc::set_handler(request_cancel).map_err(|e| e.to_string()))
+        .as_ref()
+        .map_err(|e| anyhow::anyhow!("Cannot install cancellation signal handler: {e}"))?;
+    Ok(())
 }
 
 const EVENT_QUEUE_CAP: usize = 4096;
@@ -767,11 +739,32 @@ pub fn classify_message(message: &str) -> Option<&'static str> {
     None
 }
 
+/// The frontend gives this streaming failure code precedence over the envelope's code.
+pub fn failure_code(message: &str, fallback: &'static str) -> &'static str {
+    classify_message(message).unwrap_or(fallback)
+}
+
+/// Emit a failed Complete for `message`, coded by [`failure_code`].
+pub fn emit_failure(message: &str, fallback: &'static str) {
+    emit_event(&StreamEvent::Complete {
+        success: false,
+        code: Some(failure_code(message, fallback).to_string()),
+        details: None,
+        message: Some(message.to_string()),
+    });
+}
+
 /// Classify an anyhow error chain into a frontend ErrorCode. Inspects ureq and
 /// io errors in the chain first (authoritative), then falls back to keyword
 /// matching on the rendered message.
 pub fn classify_error(err: &anyhow::Error) -> Option<&'static str> {
     for cause in err.chain() {
+        if matches!(
+            cause.downcast_ref::<pacman_key::Error>(),
+            Some(pacman_key::Error::Cancelled)
+        ) {
+            return Some("cancelled");
+        }
         if let Some(ureq_err) = cause.downcast_ref::<ureq::Error>() {
             return Some(classify_ureq(ureq_err));
         }
@@ -789,7 +782,11 @@ fn classify_ureq(err: &ureq::Error) -> &'static str {
     match err {
         Error::Timeout(_) => "timeout",
         Error::HostNotFound | Error::ConnectionFailed => "network_error",
-        Error::Io(io_err) => classify_io(io_err.kind()).unwrap_or("network_error"),
+        Error::Io(io_err) => match io_err.kind() {
+            io::ErrorKind::TimedOut => "timeout",
+            io::ErrorKind::PermissionDenied => "permission_denied",
+            _ => "network_error",
+        },
         Error::StatusCode(404) => "not_found",
         Error::Tls(_) => "network_error",
         _ => "network_error",
@@ -802,7 +799,8 @@ fn classify_io(kind: io::ErrorKind) -> Option<&'static str> {
         PermissionDenied => Some("permission_denied"),
         TimedOut => Some("timeout"),
         ConnectionRefused | ConnectionReset | ConnectionAborted | NotConnected
-        | HostUnreachable | NetworkUnreachable | AddrNotAvailable => Some("network_error"),
+        | AddrNotAvailable => Some("internal_error"),
+        HostUnreachable | NetworkUnreachable => Some("network_error"),
         _ => None,
     }
 }
@@ -846,13 +844,22 @@ pub fn emit_cancellation_complete(reason: &CheckResult) {
     if let Some(message) = cancellation_message(reason) {
         emit_event(&StreamEvent::Complete {
             success: false,
+            code: Some(
+                match reason {
+                    CheckResult::TimedOut(_) => "timeout",
+                    _ => "cancelled",
+                }
+                .to_string(),
+            ),
+            details: None,
             message: Some(message),
         });
     }
 }
 
-/// Get the pacman cache directory from environment, pacman.conf, or default.
+/// Get the configured pacman cache directory.
 pub fn get_cache_dir() -> String {
+    #[cfg(feature = "e2e-fixtures")]
     if let Ok(dir) = std::env::var("PACMAN_CACHE_DIR") {
         return dir;
     }
@@ -914,19 +921,13 @@ pub fn handle_commit_error(
     cancelled: bool,
     interrupted_message: &str,
 ) -> Result<()> {
-    if cancelled {
-        emit_event(&StreamEvent::Complete {
-            success: false,
-            message: Some(interrupted_message.to_string()),
-        });
-        return Ok(());
-    }
-
-    emit_event(&StreamEvent::Complete {
-        success: false,
-        message: Some(format!("Failed to commit transaction: {}", err_msg)),
-    });
-    Err(anyhow::anyhow!("Failed to commit transaction: {}", err_msg))
+    let message = if cancelled {
+        format!("Failed to commit transaction: {err_msg}. {interrupted_message}")
+    } else {
+        format!("Failed to commit transaction: {err_msg}")
+    };
+    emit_failure(&message, "transaction_failed");
+    Err(anyhow::anyhow!(message))
 }
 
 #[macro_export]
@@ -1068,6 +1069,8 @@ mod tests {
             &mut t,
             &StreamEvent::Complete {
                 success: true,
+                code: None,
+                details: None,
                 message: None,
             },
         )
@@ -1222,59 +1225,12 @@ mod tests {
         super::reset_cancelled();
     }
 
-    #[test]
-    fn a_user_cancel_may_interrupt_a_running_transaction() {
-        super::reset_cancelled();
-        super::request_cancel();
-        assert!(super::may_interrupt_transaction());
-        super::reset_cancelled();
-    }
-
-    #[test]
-    fn a_lost_channel_may_not_interrupt_a_running_transaction() {
-        super::reset_cancelled();
-        super::CHANNEL_LOST.store(true, super::AtomicOrdering::SeqCst);
-        super::request_cancel();
-
-        assert!(super::is_cancelled(), "still cancels work not yet applied");
-        assert!(!super::may_interrupt_transaction());
-
-        super::reset_cancelled();
-        assert!(!super::channel_lost(), "reset clears the reason too");
-    }
-
-    #[test]
-    fn a_channel_lost_after_a_user_cancel_still_may_interrupt() {
-        super::reset_cancelled();
-        super::request_cancel();
-        super::note_channel_lost();
-
-        assert!(super::may_interrupt_transaction());
-        assert!(!super::channel_lost());
-        super::reset_cancelled();
-    }
-
-    #[test]
-    fn a_channel_lost_on_its_own_may_not_interrupt() {
-        super::reset_cancelled();
-        super::note_channel_lost();
-
-        assert!(super::is_cancelled());
-        assert!(!super::may_interrupt_transaction());
-        super::reset_cancelled();
-    }
-
-    #[test]
-    fn try_interrupt_without_transaction_is_noop() {
-        crate::alpm::try_interrupt();
-    }
-
     /// Losing ctrlc's "termination" feature would silently break SIGTERM
     /// survival for every transaction handler.
     #[test]
     #[allow(clippy::unwrap_used)]
     fn signal_handler_traps_sigterm() {
-        super::setup_signal_handler();
+        super::setup_signal_handler().unwrap();
         let status = std::fs::read_to_string("/proc/self/status").unwrap();
         let caught = status
             .lines()

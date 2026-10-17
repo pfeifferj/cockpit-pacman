@@ -1,3 +1,6 @@
+import { useStreamingLog } from "../hooks/useStreamingLog";
+import { ErrorDetails } from "./ErrorDetails";
+import { BackendError } from "../api";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useBackdropClose } from "../hooks/useBackdropClose";
 import { usePackageDetails } from "../hooks/usePackageDetails";
@@ -48,7 +51,7 @@ import {
   cleanCache,
   formatSize,
 } from "../api";
-import { appendCapped, sanitizeErrorMessage } from "../utils";
+import { sanitizeErrorMessage } from "../utils";
 
 type ViewState = "ready" | "cleaning" | "success" | "error";
 
@@ -56,7 +59,8 @@ export const CacheView: React.FC = () => {
   const [state, setState] = useState<ViewState>("ready");
   const [cacheData, setCacheData] = useState<CacheInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [log, setLog] = useState("");
+  const { log, appendLog, flushLog, resetLog } = useStreamingLog();
+  const [errorDetails, setErrorDetails] = useState<string | undefined>();
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   useBackdropClose(confirmModalOpen, () => setConfirmModalOpen(false));
@@ -70,6 +74,8 @@ export const CacheView: React.FC = () => {
   const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
   const { page, perPage, setPage, onSetPage, onPerPageSelect, resetPage } = usePagination();
   const cancelRef = useRef<(() => void) | null>(null);
+  const cancellingRef = useRef(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const isMountedRef = useRef(true);
 
   const { activeSortKey, activeSortDirection, getSortParams } = useSortableTable({
@@ -89,6 +95,7 @@ export const CacheView: React.FC = () => {
       if (cancelled) return;
       setLoading(true);
       setError(null);
+      setErrorDetails(undefined);
       try {
         const response = await getCacheInfo({
           offset: (page - 1) * perPage,
@@ -109,6 +116,7 @@ export const CacheView: React.FC = () => {
         if (cancelled) return;
         setState("error");
         setError(ex instanceof Error ? ex.message : String(ex));
+        setErrorDetails(ex instanceof BackendError ? ex.details : undefined);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -140,7 +148,7 @@ export const CacheView: React.FC = () => {
     if (!hasSelection || loading || searchFilter !== debouncedSearch) return;
     setConfirmModalOpen(false);
     setState("cleaning");
-    setLog("");
+    resetLog();
     setIsDetailsExpanded(true);
 
     const packages: CacheSelection = selection.all
@@ -148,15 +156,22 @@ export const CacheView: React.FC = () => {
       : { mode: "only", names: [...selection.names] };
     const { cancel } = cleanCache(
       {
-        onData: (data) => { if (isMountedRef.current) setLog((prev) => appendCapped(prev, data)); },
+        onData: appendLog,
         onComplete: () => {
           if (!isMountedRef.current) return;
+          flushLog();
+          cancellingRef.current = false;
+          setIsCancelling(false);
           setState("success");
           setSelection({ all: true, names: new Set() });
           cancelRef.current = null;
         },
-        onError: (err) => {
+        onError: (err, _code, details) => {
           if (!isMountedRef.current) return;
+          flushLog();
+          cancellingRef.current = false;
+          setIsCancelling(false);
+          setErrorDetails(details);
           setState("error");
           setError(err);
           cancelRef.current = null;
@@ -169,12 +184,10 @@ export const CacheView: React.FC = () => {
   };
 
   const handleCancel = () => {
-    if (cancelRef.current) {
-      cancelRef.current();
-      cancelRef.current = null;
-      setState("ready");
-      setLog("");
-    }
+    if (!cancelRef.current || cancellingRef.current) return;
+    cancellingRef.current = true;
+    setIsCancelling(true);
+    cancelRef.current();
   };
 
   const togglePackageSelection = (name: string) => {
@@ -203,7 +216,7 @@ export const CacheView: React.FC = () => {
       <Card>
         <CardBody>
           <EmptyState headingLevel="h2" icon={ExclamationCircleIcon} titleText="Error loading cache information" status="danger">
-            <EmptyStateBody>{sanitizeErrorMessage(error)}</EmptyStateBody>
+            <EmptyStateBody>{sanitizeErrorMessage(error)}<ErrorDetails details={errorDetails} /></EmptyStateBody>
             <EmptyStateFooter>
               <EmptyStateActions>
                 <Button variant="primary" onClick={loadCacheInfo}>Retry</Button>
@@ -224,8 +237,8 @@ export const CacheView: React.FC = () => {
               <CardTitle className="pf-v6-u-m-0">Cleaning Package Cache</CardTitle>
             </FlexItem>
             <FlexItem>
-              <Button variant="danger" onClick={handleCancel}>
-                Cancel
+              <Button variant="danger" onClick={handleCancel} isDisabled={isCancelling}>
+                {isCancelling ? "Cancellation requested" : "Cancel"}
               </Button>
             </FlexItem>
           </Flex>
@@ -234,6 +247,7 @@ export const CacheView: React.FC = () => {
             <Spinner size="md" /> Cleaning cache (keeping {keepVersions} version{keepVersions !== 1 ? "s" : ""})...
           </div>
 
+          {isCancelling && <p>Waiting for the operation to finish cancelling.</p>}
           <ExpandableLogViewer
             log={log}
             placeholder="Starting..."

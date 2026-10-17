@@ -17,7 +17,6 @@ tokio = { version = "1", features = ["rt", "macros"] }
 
 [dependencies]
 alpm = "5"
-alpm-sys = "5"
 alpm-utils = "5"
 pacmanconf = "3"
 serde = { version = "1", features = ["derive"] }

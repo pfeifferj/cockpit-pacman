@@ -173,6 +173,8 @@ fn selected_for_cleanup(name: &str, mode: &str, packages: &HashSet<&str>) -> boo
 
 pub fn clean_cache(keep_versions: u32, filter_pkgs: &[String], mode: &str) -> Result<()> {
     validate_cache_selection(mode, filter_pkgs)?;
+    crate::util::setup_signal_handler()?;
+    crate::util::spawn_cancel_listener()?;
     let handle = get_handle()?;
     let cache_dir = get_cache_dir();
     let cache_path = Path::new(&cache_dir);
@@ -185,6 +187,8 @@ pub fn clean_cache(keep_versions: u32, filter_pkgs: &[String], mode: &str) -> Re
     if !cache_path.exists() {
         emit_event(&StreamEvent::Complete {
             success: true,
+            code: None,
+            details: None,
             message: Some("Cache directory does not exist".to_string()),
         });
         return Ok(());
@@ -216,6 +220,10 @@ pub fn clean_cache(keep_versions: u32, filter_pkgs: &[String], mode: &str) -> Re
 
         let mut kept = 0usize;
         for (entry, filename, _) in versions.iter() {
+            if crate::util::is_cancelled() {
+                crate::util::emit_cancellation_complete(&crate::util::CheckResult::Cancelled);
+                return Ok(());
+            }
             let path = entry.path();
 
             let loadable = path
@@ -277,6 +285,8 @@ pub fn clean_cache(keep_versions: u32, filter_pkgs: &[String], mode: &str) -> Re
 
     emit_event(&StreamEvent::Complete {
         success: true,
+        code: None,
+        details: None,
         message: Some(message),
     });
 

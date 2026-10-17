@@ -11,6 +11,11 @@ if command.startswith('signoff-'):
     env['COCKPIT_PACMAN_TEST_ARCHWEB_URL'] = 'http://127.0.0.1:18080'
 if command in ('list-archive-versions', 'downgrade-archive'):
     env['COCKPIT_PACMAN_TEST_ARCHIVE_URL'] = 'http://127.0.0.1:18080/archive'
+if command in ('refresh-keyring', 'init-keyring') and (STATE / 'keyring/enabled').exists():
+    info = (STATE / 'keyring').lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
+        raise SystemExit('Unsafe E2E keyring fixture directory')
+    env['PATH'] = str(STATE / 'keyring/bin') + ':/usr/bin'
 if command in ('cache-info', 'cache-files', 'clean-cache'):
     marker = STATE / 'cache-dir'
     if marker.exists():

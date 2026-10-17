@@ -64,6 +64,19 @@ fn no_command_at_all_exits_non_zero() {
 }
 
 #[test]
+fn upgrade_removal_approval_rejects_invalid_names_before_starting() {
+    for name in ["*", "../pacman", "old-driver,"] {
+        let envelope = expect_error_envelope(&["upgrade", "", "", name]);
+        assert!(
+            envelope["message"]
+                .as_str()
+                .unwrap()
+                .contains("Package name")
+        );
+    }
+}
+
+#[test]
 fn a_missing_required_argument_exits_non_zero() {
     for args in [
         vec!["security-info"],

@@ -64,6 +64,16 @@ describe("PreflightConfirmModal", () => {
     expect(proceed()).toBeEnabled();
   });
 
+  it("requires manual verification for a missing signing key", () => {
+    const { proceed, onProceed } = renderModal(preflight({ import_keys: [{ fingerprint: "ABCD1234", uid: "Example packager" }] }));
+    expect(screen.getByText("Signing keys require verification")).toBeInTheDocument();
+    expect(screen.getByText(/Example packager.*ABCD1234/)).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /trust these keys/ })).not.toBeInTheDocument();
+    expect(proceed()).toBeDisabled();
+    fireEvent.click(proceed());
+    expect(onProceed).not.toHaveBeenCalled();
+  });
+
   it("renders nothing while closed", () => {
     render(
       <PreflightConfirmModal isOpen={false} preflight={preflight()} onClose={vi.fn()} onProceed={vi.fn()} />

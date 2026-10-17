@@ -163,7 +163,7 @@ pub(crate) fn install_downgrade(
 
     commit_and_complete(
         &mut tx,
-        "Operation interrupted - package may be in inconsistent state",
+        &timeout,
         Some(format!("Successfully downgraded {} to {}", name, version)),
     )
 }

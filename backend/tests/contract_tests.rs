@@ -727,6 +727,8 @@ fn stream_event_event_package_serializes_as_null_when_none() {
 #[test]
 fn stream_event_complete_message_serializes_as_null_when_none() {
     let event = StreamEvent::Complete {
+        code: None,
+        details: None,
         success: true,
         message: None,
     };
@@ -2117,17 +2119,17 @@ fn the_messages_the_frontend_classifies_are_still_produced() {
     );
     assert_eq!(cancellation_message(&CheckResult::Continue), None);
 
-    // The two the backend classifies itself must agree with the fixture, or the
-    // envelope path and the streaming path would disagree about the same text.
     for entry in fixture["messages"].as_array().expect("array") {
         let message = entry["message"].as_str().expect("string");
         let code = entry["code"].as_str().expect("string");
-        if let Some(backend_code) = cockpit_pacman_backend::util::classify_message(message) {
-            assert_eq!(
-                backend_code, code,
-                "backend and frontend disagree on {message:?}"
-            );
+        if code == "cancelled" {
+            continue;
         }
+        assert_eq!(
+            cockpit_pacman_backend::util::failure_code(message, "transaction_failed"),
+            code,
+            "backend and frontend disagree on {message:?}"
+        );
     }
 }
 

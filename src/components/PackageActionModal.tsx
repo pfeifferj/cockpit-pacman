@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useStreamingLog } from "../hooks/useStreamingLog";
 import { useBackdropClose } from "../hooks/useBackdropClose";
 import {
   Modal,
@@ -20,7 +21,7 @@ import { ExpandableLogViewer } from "./LogViewer";
 import { ErrorAlert } from "./ErrorAlert";
 import { CheckCircleIcon } from "@patternfly/react-icons";
 import { checkUpdates, installPackage, removePackage, ErrorCode, UpgradeCallbacks } from "../api";
-import { appendCapped, sanitizeErrorMessage } from "../utils";
+import { sanitizeErrorMessage } from "../utils";
 import { useNavigation } from "../contexts/NavigationContext";
 
 type ModalState = "confirm" | "running" | "success" | "error";
@@ -54,12 +55,14 @@ export const PackageActionModal: React.FC<PackageActionModalProps & { config: Ac
   onSuccess,
   config,
 }) => {
-  useBackdropClose(isOpen, onClose);
   const { onViewUpdates } = useNavigation();
   const [state, setState] = useState<ModalState>("confirm");
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
-  const [log, setLog] = useState("");
+  const { log, appendLog, flushLog, resetLog } = useStreamingLog();
+  const [isCancelling, setIsCancelling] = useState(false);
+  const cancellingRef = useRef(false);
+  const [errorDetails, setErrorDetails] = useState<string | undefined>();
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [updateCheck, setUpdateCheck] = useState<{ count: number } | { error: string } | null>(null);
   const pendingUpdates = updateCheck && "count" in updateCheck ? updateCheck.count : null;
@@ -86,12 +89,13 @@ export const PackageActionModal: React.FC<PackageActionModalProps & { config: Ac
     setState("confirm");
     setError(null);
     setErrorCode(undefined);
-    setLog("");
+    setErrorDetails(undefined);
+    resetLog();
     setIsDetailsExpanded(false);
-  }, []);
+  }, [resetLog]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || cancelRef.current) return;
     Promise.resolve().then(resetState);
   }, [isOpen, resetState]);
 
@@ -105,20 +109,27 @@ export const PackageActionModal: React.FC<PackageActionModalProps & { config: Ac
 
   const handleConfirm = () => {
     setState("running");
-    setLog("");
+    resetLog();
     setIsDetailsExpanded(true);
 
     const { cancel } = config.run(
       {
-        onData: (data) => setLog((prev) => appendCapped(prev, data)),
+        onData: appendLog,
         onComplete: () => {
+          flushLog();
+          setIsCancelling(false);
+          cancellingRef.current = false;
           setState("success");
           cancelRef.current = null;
           onSuccess?.();
         },
-        onError: (err, code) => {
+        onError: (err, code, details) => {
+          flushLog();
+          setIsCancelling(false);
+          cancellingRef.current = false;
           setState("error");
           setError(err);
+          setErrorDetails(details);
           setErrorCode(code);
           cancelRef.current = null;
         },
@@ -129,21 +140,20 @@ export const PackageActionModal: React.FC<PackageActionModalProps & { config: Ac
   };
 
   const handleCancel = () => {
-    if (cancelRef.current) {
-      cancelRef.current();
-      cancelRef.current = null;
-    }
-    setState("confirm");
-    setLog("");
+    if (!cancelRef.current || cancellingRef.current) return;
+    cancellingRef.current = true;
+    setIsCancelling(true);
+    cancelRef.current();
   };
 
   const handleClose = () => {
     if (cancelRef.current) {
-      cancelRef.current();
-      cancelRef.current = null;
+      handleCancel();
+      return;
     }
     onClose();
   };
+  useBackdropClose(isOpen, handleClose);
 
   const renderContent = () => {
     switch (state) {
@@ -199,7 +209,7 @@ export const PackageActionModal: React.FC<PackageActionModalProps & { config: Ac
         return (
           <>
             <div className="pf-v6-u-mb-md">
-              <Spinner size="md" /> {config.runningText} {packageName}...
+              <Spinner size="md" /> {isCancelling ? "Cancellation requested. Waiting for the operation to finish safely." : <>{config.runningText} {packageName}...</>}
             </div>
             <ExpandableLogViewer
               log={log}
@@ -221,7 +231,10 @@ export const PackageActionModal: React.FC<PackageActionModalProps & { config: Ac
 
       case "error":
         return (
-          <ErrorAlert error={sanitizeErrorMessage(error)} code={errorCode} title="Error" />
+          <>
+            <ErrorAlert error={sanitizeErrorMessage(error)} code={errorCode} details={errorDetails} title="Error" />
+            {log && <ExpandableLogViewer log={log} isExpanded={isDetailsExpanded} onToggle={setIsDetailsExpanded} />}
+          </>
         );
 
       default:
@@ -250,8 +263,8 @@ export const PackageActionModal: React.FC<PackageActionModalProps & { config: Ac
 
       case "running":
         return (
-          <Button variant="danger" onClick={handleCancel}>
-            Cancel
+          <Button variant="danger" onClick={handleCancel} isDisabled={isCancelling}>
+            {isCancelling ? "Cancellation requested" : "Cancel"}
           </Button>
         );
 

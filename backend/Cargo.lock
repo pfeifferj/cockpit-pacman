@@ -354,7 +354,6 @@ name = "cockpit-pacman-backend"
 version = "0.3.8"
 dependencies = [
  "alpm",
- "alpm-sys",
  "alpm-utils",
  "anyhow",
  "arch-mirror-client",

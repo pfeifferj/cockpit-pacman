@@ -113,7 +113,7 @@ function asErrorCode(code: string): ErrorCode {
 }
 
 export function isNetworkErrorCode(code: ErrorCode): boolean {
-  return code === "network_error" || code === "timeout";
+  return code === "network_error";
 }
 
 export interface StructuredError {
@@ -376,7 +376,7 @@ export interface StreamingHandle {
   /** With gracefulCancel, asks the backend to stop and keeps the stream open
    * until onComplete/onError; otherwise closes the channel. */
   cancel: () => void;
-  /** Hard abort: close the channel. Same as cancel() unless gracefulCancel. */
+  /** Close the channel; this does not confirm that the backend has exited. */
   forceStop: () => void;
 }
 
@@ -388,6 +388,9 @@ function runStreamingBackend(
 ): StreamingHandle {
   let buffer = "";
   let completionHandled = false;
+  type Completion = { success: boolean; message?: string; code?: ErrorCode; details?: string };
+  let terminal: Completion | undefined;
+  let startupTimeout: Completion | undefined;
 
   const markComplete = (
     success: boolean,
@@ -395,12 +398,9 @@ function runStreamingBackend(
     code?: ErrorCode,
     details?: string,
   ) => {
-    // Guard against duplicate callbacks from concurrent paths (stream, then, catch)
-    // Set flag immediately before any other work to prevent re-entry
     if (completionHandled) return;
     completionHandled = true;
 
-    // Execute callback outside the guard check to avoid issues if callback throws
     try {
       if (success) {
         callbacks.onComplete();
@@ -434,6 +434,15 @@ function runStreamingBackend(
     return null;
   };
 
+  const recordErrorEnvelope = (envelope: { code: ErrorCode; message: string; details?: string }) => {
+    terminal = {
+      success: false,
+      ...envelope,
+      code: terminal && !terminal.success ? terminal.code ?? envelope.code : envelope.code,
+      details: envelope.details ?? terminal?.details,
+    };
+  };
+
   const proc = cockpit.spawn(
     [BACKEND_PATH, command, ...args],
     { superuser: callbacks.superuser || "require", err: "out" }
@@ -441,13 +450,14 @@ function runStreamingBackend(
 
   let firstOutputTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
     firstOutputTimer = undefined;
-    proc.close("timeout");
-    markComplete(
-      false,
-      `Backend command '${command}' produced no output within ${STREAM_FIRST_OUTPUT_TIMEOUT_MS / 1000}s. ` +
+    startupTimeout = {
+      success: false,
+      message: `Backend command '${command}' produced no output within ${STREAM_FIRST_OUTPUT_TIMEOUT_MS / 1000}s. ` +
         "The privileged bridge may be waiting for administrative access.",
-      "timeout"
-    );
+      code: "timeout",
+    };
+    if (options?.gracefulCancel) proc.input("cancel\n", true);
+    else proc.close("timeout");
   }, STREAM_FIRST_OUTPUT_TIMEOUT_MS);
 
   const clearFirstOutputTimer = () => {
@@ -472,7 +482,7 @@ function runStreamingBackend(
 
         const envelope = asErrorEnvelope(parsed);
         if (envelope) {
-          markComplete(false, envelope.message, envelope.code, envelope.details);
+          recordErrorEnvelope(envelope);
           continue;
         }
 
@@ -493,7 +503,7 @@ function runStreamingBackend(
         } else if (event.type === "event") {
           callbacks.onData?.(`${event.event}${event.package ? `: ${event.package}` : ""}\n`);
         } else if (event.type === "complete") {
-          markComplete(event.success, event.message);
+          terminal = { success: event.success, message: event.message, code: event.code ? asErrorCode(event.code) : undefined, details: event.details };
         } else if (event.type === "mirror_test") {
           callbacks.onData?.(
             `[${event.current}/${event.total}] ${event.url}: ${event.result.success ? `${event.result.latency_ms}ms` : event.result.error}\n`,
@@ -508,37 +518,45 @@ function runStreamingBackend(
     }
   });
 
-  proc.then(() => {
+  const finish = (failure?: unknown) => {
+    if (completionHandled) return;
     clearFirstOutputTimer();
-    // Process any remaining buffer
     if (buffer.trim()) {
       try {
         const parsed = JSON.parse(buffer) as Record<string, unknown>;
         const envelope = asErrorEnvelope(parsed);
         if (envelope) {
-          markComplete(false, envelope.message, envelope.code, envelope.details);
-          return;
-        }
-        const event = parsed as unknown as StreamEvent;
-        if (event.type === "complete") {
-          markComplete(event.success, event.message);
-          return;
+          recordErrorEnvelope(envelope);
+        } else {
+          const event = parsed as unknown as StreamEvent;
+          if (event.type === "complete") {
+            terminal = { success: event.success, message: event.message, code: event.code ? asErrorCode(event.code) : undefined, details: event.details };
+          }
         }
       } catch {
-        // Not valid JSON - fall through to error handling
+        callbacks.onData?.(buffer + "\n");
       }
     }
-    // If no complete event was received, this is an error condition
-    // The backend should always emit a complete event
-    if (!completionHandled) {
+    const problem = failure && typeof failure === "object" && "problem" in failure ? failure.problem : undefined;
+    if (problem === "disconnected" || problem === "connection-lost" || problem === "connection-closed") {
+      markComplete(false,
+        "Connection to the backend was lost. The operation may still be finishing; check its state before retrying.",
+        "internal_error",
+        terminal?.details ?? extractErrorMessage(failure));
+      return;
+    }
+    // Complete may arrive while the transaction still holds db.lck.
+    const result = terminal && (!terminal.success || failure === undefined) ? terminal : startupTimeout;
+    if (result) {
+      markComplete(result.success, result.message, result.code, result.details);
+    } else if (failure !== undefined) {
+      markComplete(false, extractErrorMessage(failure));
+    } else {
       markComplete(false, "Backend process ended without sending completion status");
     }
-  });
-
-  proc.catch((ex: unknown) => {
-    clearFirstOutputTimer();
-    markComplete(false, extractErrorMessage(ex));
-  });
+  };
+  proc.then(() => finish());
+  proc.catch((ex: unknown) => finish(ex));
 
   const forceStop = () => proc.close("cancelled");
   return {
@@ -547,12 +565,12 @@ function runStreamingBackend(
   };
 }
 
-export function runUpgrade(callbacks: UpgradeCallbacks, ignore?: string[]): StreamingHandle {
-  const args: string[] = [];
-  args.push(ignore && ignore.length > 0 ? ignore.map(pkg => sanitizeSearchInput(pkg)).join(",") : "");
-  if (callbacks.timeout !== undefined) {
-    args.push(String(callbacks.timeout));
-  }
+export function runUpgrade(callbacks: UpgradeCallbacks, ignore?: string[], approvedRemovals: string[] = []): StreamingHandle {
+  const args = [
+    (ignore ?? []).map(pkg => sanitizeSearchInput(pkg)).join(","),
+    callbacks.timeout === undefined ? "" : String(callbacks.timeout),
+    approvedRemovals.map(pkg => sanitizeSearchInput(pkg)).join(","),
+  ];
   return runStreamingBackend("upgrade", args, callbacks, { gracefulCancel: true });
 }
 
@@ -561,7 +579,7 @@ export function syncDatabase(callbacks: UpgradeCallbacks, force = false): Stream
   if (callbacks.timeout !== undefined) {
     args.push(String(callbacks.timeout));
   }
-  return runStreamingBackend("sync-database", args, callbacks);
+  return runStreamingBackend("sync-database", args, callbacks, { gracefulCancel: true });
 }
 
 export function formatSize(bytes: number): string {
@@ -578,11 +596,11 @@ export async function getKeyringStatus(): Promise<KeyringStatusResponse> {
 }
 
 export function refreshKeyring(callbacks: UpgradeCallbacks): StreamingHandle {
-  return runStreamingBackend("refresh-keyring", [], callbacks);
+  return runStreamingBackend("refresh-keyring", [], callbacks, { gracefulCancel: true });
 }
 
 export function initKeyring(callbacks: UpgradeCallbacks): StreamingHandle {
-  return runStreamingBackend("init-keyring", [], callbacks);
+  return runStreamingBackend("init-keyring", [], callbacks, { gracefulCancel: true });
 }
 
 export async function listOrphans(): Promise<OrphanResponse> {
@@ -655,7 +673,7 @@ export function cleanCache(callbacks: UpgradeCallbacks, keepVersions = 3, select
   if (selection.mode === "only" && names.length === 0) {
     throw new Error("Select at least one package to clean");
   }
-  return runStreamingBackend("clean-cache", [String(keepVersions), names.join(","), selection.mode], callbacks);
+  return runStreamingBackend("clean-cache", [String(keepVersions), names.join(","), selection.mode], callbacks, { gracefulCancel: true });
 }
 
 export type HistoryFilterType = "all" | "upgraded" | "installed" | "removed";

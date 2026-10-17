@@ -35,7 +35,9 @@ import {
   formatSize,
 } from "../api";
 import { TimeAgo } from "./TimeAgo";
-import { appendCapped } from "../utils";
+import { useStreamingLog } from "../hooks/useStreamingLog";
+import { BackendError } from "../api";
+import type { ErrorCode } from "../api";
 
 type ViewState = "loading" | "ready" | "removing" | "success";
 
@@ -52,7 +54,11 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
   const [searchValue, setSearchValue] = useState("");
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   useBackdropClose(confirmModalOpen, () => setConfirmModalOpen(false));
-  const [log, setLog] = useState("");
+  const { log, appendLog, flushLog, resetLog } = useStreamingLog();
+  const [isCancelling, setIsCancelling] = useState(false);
+  const cancellingRef = useRef(false);
+  const [errorCode, setErrorCode] = useState<ErrorCode | undefined>();
+  const [errorDetails, setErrorDetails] = useState<string | undefined>();
   const [logExpanded, setLogExpanded] = useState(false);
   const cancelRef = useRef<(() => void) | null>(null);
 
@@ -70,15 +76,22 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
   }, []);
 
   const loadOrphans = useCallback(async () => {
+    if (cancelRef.current) return;
     setViewState("loading");
     setError(null);
+    setErrorCode(undefined);
+    setErrorDetails(undefined);
     try {
       const response = await listOrphans();
+      if (cancelRef.current) return;
       setOrphanData(response);
       onOrphansLoaded?.(response.orphans.length);
       setViewState("ready");
     } catch (ex) {
+      if (cancelRef.current) return;
       setError(ex instanceof Error ? ex.message : String(ex));
+      setErrorCode(ex instanceof BackendError ? ex.code : undefined);
+      setErrorDetails(ex instanceof BackendError ? ex.details : undefined);
       setViewState("ready");
     }
   }, [onOrphansLoaded]);
@@ -90,17 +103,25 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
   const startRemoval = () => {
     setConfirmModalOpen(false);
     setViewState("removing");
-    setLog("");
+    resetLog();
     setLogExpanded(true);
 
     const { cancel } = removeOrphans({
-      onData: (data) => setLog((prev) => appendCapped(prev, data)),
+      onData: appendLog,
       onComplete: () => {
+        flushLog();
+        setIsCancelling(false);
+        cancellingRef.current = false;
         setViewState("success");
         setOrphanData(null);
         cancelRef.current = null;
       },
-      onError: (err) => {
+      onError: (err, code, details) => {
+        flushLog();
+        setIsCancelling(false);
+        cancellingRef.current = false;
+        setErrorCode(code);
+        setErrorDetails(details);
         setViewState("ready");
         setError(err);
         cancelRef.current = null;
@@ -110,17 +131,15 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
   };
 
   const handleCancel = () => {
-    if (cancelRef.current) {
-      cancelRef.current();
-      cancelRef.current = null;
-      setViewState("ready");
-      setLog("");
-    }
+    if (!cancelRef.current || cancellingRef.current) return;
+    cancellingRef.current = true;
+    setIsCancelling(true);
+    cancelRef.current();
   };
 
   const handleSuccessRefresh = () => {
     setViewState("loading");
-    setLog("");
+    resetLog();
     loadOrphans();
   };
 
@@ -162,7 +181,7 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
   }
 
   if (error) {
-    return <ErrorAlert error={error} title="Error loading orphans" />;
+    return <ErrorAlert error={error} code={errorCode} details={errorDetails} title="Error loading orphans" />;
   }
 
   if (viewState === "removing") {
@@ -173,14 +192,14 @@ export const OrphansView: React.FC<OrphansViewProps> = ({ onRowClick, onOrphansL
             <strong>Removing Orphan Packages</strong>
           </FlexItem>
           <FlexItem>
-            <Button variant="danger" onClick={handleCancel}>
-              Cancel
+            <Button variant="danger" onClick={handleCancel} isDisabled={isCancelling}>
+              {isCancelling ? "Cancellation requested" : "Cancel"}
             </Button>
           </FlexItem>
         </Flex>
 
         <div className="pf-v6-u-mb-md">
-          <Spinner size="md" /> Removing packages...
+          <Spinner size="md" /> {isCancelling ? "Cancellation requested. Waiting for the operation to finish safely." : "Removing packages..."}
         </div>
 
         <ExpandableLogViewer

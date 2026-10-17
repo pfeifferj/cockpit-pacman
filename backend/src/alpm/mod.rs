@@ -2,9 +2,9 @@ mod callbacks;
 mod sysupgrade;
 mod transaction;
 
-pub use callbacks::{Verbosity, interrupt_if_cancelled, setup_dl_cb, setup_log_cb};
+pub use callbacks::{Verbosity, setup_dl_cb, setup_log_cb};
 pub use sysupgrade::{InterventionFlags, SysupgradeOutcome, run_sysupgrade};
-pub use transaction::{TransactionGuard, try_interrupt};
+pub use transaction::TransactionGuard;
 
 use alpm::{Alpm, LogLevel, Progress};
 use alpm_utils::alpm_with_conf;

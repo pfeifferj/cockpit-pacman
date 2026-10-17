@@ -1,5 +1,6 @@
 use alpm::{Alpm, AnyQuestion, Question, TransFlag};
 use anyhow::Result;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -51,7 +52,6 @@ pub enum SysupgradeOutcome {
         packages: usize,
     },
     CancelledEarly(CheckResult),
-    Interrupted,
     CompletedDespiteCancel {
         packages: usize,
     },
@@ -77,13 +77,14 @@ macro_rules! checkpoint {
 /// One sysupgrade transaction: init, sync, prepare, gate, commit. Callbacks
 /// and reporting stay with the caller. `flags` gates the run for unattended
 /// callers (which must have called `install` on the handle); interactive
-/// callers pass None and answer in their own question cb. Callers hold a
-/// ShutdownInhibitor across this call and their result recording. Err only
-/// when the transaction cannot be initialized.
+/// callers pass their confirmed removal names, which are checked after prepare.
+/// Callers hold a ShutdownInhibitor across this call and their result recording.
+/// Err only when the transaction cannot be initialized.
 pub fn run_sysupgrade(
     handle: &mut Alpm,
     timeout: &TimeoutGuard,
     flags: Option<&InterventionFlags>,
+    approved_removals: Option<&[String]>,
 ) -> Result<SysupgradeOutcome> {
     checkpoint!(timeout);
 
@@ -114,11 +115,17 @@ pub fn run_sysupgrade(
         return Ok(SysupgradeOutcome::PrepareFailed(e));
     }
 
+    if let Some(approved) = approved_removals
+        && let Err(error) =
+            check_approved_removals(tx.remove().iter().map(|pkg| pkg.name()), approved)
+    {
+        return Ok(SysupgradeOutcome::PrepareFailed(error));
+    }
+
     let packages = tx.add().len();
     if packages == 0 && tx.remove().is_empty() {
         return Ok(SysupgradeOutcome::NothingToDo);
     }
-    let targets: Vec<String> = tx.add().iter().map(|p| p.name().to_string()).collect();
 
     checkpoint!(timeout);
 
@@ -128,57 +135,32 @@ pub fn run_sysupgrade(
     drop(tx);
 
     match commit_err {
-        None => Ok(classify_commit_ok(check, packages, || {
-            applied_state(handle, &targets)
-        })),
+        None => Ok(classify_commit_ok(check, packages)),
         Some(e) => Ok(classify_commit_error(check, intervention, e)),
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-enum Applied {
-    All,
-    None,
-    Some,
-}
-
-fn applied_state(handle: &Alpm, targets: &[String]) -> Applied {
-    let local = handle.localdb();
-    let landed = targets
-        .iter()
-        .filter(|name| match local.pkg(name.as_str()) {
-            Ok(installed) => !handle.syncdbs().iter().any(|db| {
-                db.pkg(name.as_str())
-                    .map(|sync| sync.version() > installed.version())
-                    .unwrap_or(false)
-            }),
-            Err(_) => false,
-        })
-        .count();
-
-    applied_from_counts(landed, targets.len())
-}
-
-fn applied_from_counts(landed: usize, planned: usize) -> Applied {
-    match landed {
-        0 => Applied::None,
-        n if n == planned => Applied::All,
-        _ => Applied::Some,
+fn check_approved_removals<'a>(
+    removals: impl Iterator<Item = &'a str>,
+    approved: &[String],
+) -> Result<(), String> {
+    let approved: HashSet<&str> = approved.iter().map(String::as_str).collect();
+    let mut unapproved: Vec<&str> = removals.filter(|name| !approved.contains(name)).collect();
+    unapproved.sort_unstable();
+    unapproved.dedup();
+    if unapproved.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Upgrade plan changed: removal of {} was not approved. Review the upgrade again before applying it.",
+            unapproved.join(", ")
+        ))
     }
 }
 
-/// alpm returns Ok both from an interrupted commit and a completed one; the db settles which.
-fn classify_commit_ok(
-    check: CheckResult,
-    packages: usize,
-    applied: impl FnOnce() -> Applied,
-) -> SysupgradeOutcome {
+fn classify_commit_ok(check: CheckResult, packages: usize) -> SysupgradeOutcome {
     match check {
-        CheckResult::Cancelled => match applied() {
-            Applied::All => SysupgradeOutcome::CompletedDespiteCancel { packages },
-            Applied::None => SysupgradeOutcome::CancelledEarly(CheckResult::Cancelled),
-            Applied::Some => SysupgradeOutcome::Interrupted,
-        },
+        CheckResult::Cancelled => SysupgradeOutcome::CompletedDespiteCancel { packages },
         CheckResult::Continue | CheckResult::TimedOut(_) => {
             SysupgradeOutcome::Upgraded { packages }
         }
@@ -190,37 +172,48 @@ fn classify_commit_error(
     intervention: Option<Vec<&'static str>>,
     error: String,
 ) -> SysupgradeOutcome {
-    match check {
-        CheckResult::Cancelled => SysupgradeOutcome::Interrupted,
-        CheckResult::Continue | CheckResult::TimedOut(_) => match intervention {
-            Some(reasons) => SysupgradeOutcome::Intervention {
-                reasons,
-                error: Some(error),
-            },
-            None => SysupgradeOutcome::CommitFailed(error),
+    let error = if matches!(check, CheckResult::Cancelled) {
+        format!("{error}. Cancellation was requested while committing")
+    } else {
+        error
+    };
+    match intervention {
+        Some(reasons) => SysupgradeOutcome::Intervention {
+            reasons,
+            error: Some(error),
         },
+        None => SysupgradeOutcome::CommitFailed(error),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        Applied, InterventionFlags, SysupgradeOutcome, applied_from_counts, classify_commit_error,
-        classify_commit_ok,
-    };
+    use super::{InterventionFlags, SysupgradeOutcome, classify_commit_error, classify_commit_ok};
     use crate::util::CheckResult;
     use std::sync::atomic::Ordering;
 
     #[test]
-    fn an_empty_plan_never_reads_as_fully_applied() {
-        assert_eq!(applied_from_counts(0, 0), Applied::None);
+    fn a_new_removal_requires_another_confirmation() {
+        let error = super::check_approved_removals(
+            ["old-driver", "newly-conflicting"].into_iter(),
+            &["old-driver".to_string()],
+        )
+        .unwrap_err();
+        assert!(error.contains("newly-conflicting"));
+        assert!(!error.contains("old-driver"));
     }
 
     #[test]
-    fn a_partly_applied_plan_reads_as_some() {
-        assert_eq!(applied_from_counts(0, 3), Applied::None);
-        assert_eq!(applied_from_counts(2, 3), Applied::Some);
-        assert_eq!(applied_from_counts(3, 3), Applied::All);
+    fn missing_consent_refuses_removals_but_allows_ordinary_upgrades() {
+        assert!(super::check_approved_removals(["old-driver"].into_iter(), &[]).is_err());
+        assert!(super::check_approved_removals(std::iter::empty(), &[]).is_ok());
+        assert!(
+            super::check_approved_removals(
+                ["old-driver"].into_iter(),
+                &["old-driver".to_string(), "unused-approval".to_string()],
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -242,64 +235,38 @@ mod tests {
     }
 
     #[test]
-    fn an_ok_commit_with_a_pending_cancel_is_classified_by_what_landed() {
+    fn cancellation_after_commit_does_not_discard_completion() {
         assert_eq!(
-            classify_commit_ok(CheckResult::Cancelled, 10, || Applied::All),
+            classify_commit_ok(CheckResult::Cancelled, 10),
             SysupgradeOutcome::CompletedDespiteCancel { packages: 10 }
         );
         assert_eq!(
-            classify_commit_ok(CheckResult::Cancelled, 10, || Applied::None),
-            SysupgradeOutcome::CancelledEarly(CheckResult::Cancelled)
-        );
-        assert_eq!(
-            classify_commit_ok(CheckResult::Cancelled, 10, || Applied::Some),
-            SysupgradeOutcome::Interrupted
-        );
-    }
-
-    #[test]
-    fn an_ok_commit_without_a_cancel_is_an_upgrade() {
-        assert_eq!(
-            classify_commit_ok(CheckResult::Continue, 10, || panic!("must not re-check")),
-            SysupgradeOutcome::Upgraded { packages: 10 }
-        );
-        assert_eq!(
-            classify_commit_ok(CheckResult::TimedOut(1800), 10, || panic!(
-                "must not re-check"
-            )),
+            classify_commit_ok(CheckResult::Continue, 10),
             SysupgradeOutcome::Upgraded { packages: 10 }
         );
     }
 
     #[test]
-    fn commit_error_classification_precedence() {
-        let reasons = || Some(vec!["key imports required"]);
+    fn cancellation_preserves_commit_failure() {
+        let outcome = classify_commit_error(CheckResult::Cancelled, None, "disk full".into());
+        let SysupgradeOutcome::CommitFailed(error) = outcome else {
+            panic!("{outcome:?}")
+        };
+        assert!(error.contains("disk full"));
+    }
 
+    #[test]
+    fn intervention_preserves_commit_failure() {
         assert_eq!(
-            classify_commit_error(CheckResult::Cancelled, reasons(), "err".into()),
-            SysupgradeOutcome::Interrupted
-        );
-        assert_eq!(
-            classify_commit_error(CheckResult::TimedOut(300), None, "err".into()),
-            SysupgradeOutcome::CommitFailed("err".into())
-        );
-        assert_eq!(
-            classify_commit_error(CheckResult::TimedOut(300), reasons(), "err".into()),
+            classify_commit_error(
+                CheckResult::Continue,
+                Some(vec!["key imports required"]),
+                "untrusted key".into()
+            ),
             SysupgradeOutcome::Intervention {
                 reasons: vec!["key imports required"],
-                error: Some("err".into())
+                error: Some("untrusted key".into())
             }
-        );
-        assert_eq!(
-            classify_commit_error(CheckResult::Continue, reasons(), "err".into()),
-            SysupgradeOutcome::Intervention {
-                reasons: vec!["key imports required"],
-                error: Some("err".into())
-            }
-        );
-        assert_eq!(
-            classify_commit_error(CheckResult::Continue, None, "err".into()),
-            SysupgradeOutcome::CommitFailed("err".into())
         );
     }
 }

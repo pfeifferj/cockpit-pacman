@@ -214,7 +214,7 @@ pub fn set_schedule_config(
 
     // Latch a TERM instead of dying on it: the default disposition would tear
     // this down between the systemd apply and the config write.
-    setup_signal_handler();
+    setup_signal_handler()?;
 
     // The apply reaches systemd before the config write, so a failed write
     // leaves the timer and config.json disagreeing.
@@ -507,7 +507,7 @@ pub fn scheduled_run() -> Result<()> {
     }
 
     // Set up signal handler and timeout guard
-    setup_signal_handler();
+    setup_signal_handler()?;
     let _timeout_guard = TimeoutGuard::new(SCHEDULED_TIMEOUT_SECS);
 
     let ignored_packages = config.ignored_packages.clone();
@@ -662,7 +662,7 @@ pub fn scheduled_run() -> Result<()> {
 
     let _inhibitor = ShutdownInhibitor::take("Applying scheduled package upgrade");
 
-    let outcome = match run_sysupgrade(&mut handle, &_timeout_guard, Some(&flags)) {
+    let outcome = match run_sysupgrade(&mut handle, &_timeout_guard, Some(&flags), None) {
         Ok(outcome) => outcome,
         Err(e) => {
             let entry = LogEntry::new(
@@ -748,12 +748,6 @@ fn outcome_to_log_parts(
             "failed",
             0,
             Some("Operation cancelled or timed out with nothing applied".to_string()),
-            None,
-        ),
-        SysupgradeOutcome::Interrupted => (
-            "failed",
-            0,
-            Some("Upgrade interrupted during commit".to_string()),
             None,
         ),
         SysupgradeOutcome::CompletedDespiteCancel { packages } => (
@@ -1036,7 +1030,6 @@ mod tests {
             SysupgradeOutcome::CommitFailed("e".into()),
             SysupgradeOutcome::CancelledEarly(CheckResult::Cancelled),
             SysupgradeOutcome::CancelledEarly(CheckResult::TimedOut(1800)),
-            SysupgradeOutcome::Interrupted,
         ];
         for outcome in cases {
             let (status, upgraded, error, _) = outcome_to_log_parts(&outcome);

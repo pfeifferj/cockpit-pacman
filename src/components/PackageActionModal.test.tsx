@@ -157,3 +157,33 @@ describe("PackageActionModal pending-updates warning", () => {
     expect(api.installPackage).not.toHaveBeenCalled();
   });
 });
+
+
+describe("PackageActionModal cancellation", () => {
+  afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+  it.each(["Cancel", "Escape", "backdrop", "close"])("keeps the operation busy after %s until completion", async (dismissal) => {
+    vi.mocked(api.checkUpdates).mockResolvedValue({ updates: [], warnings: [] });
+    const cancel = vi.fn();
+    vi.mocked(api.installPackage).mockReturnValue({ cancel, forceStop: vi.fn() });
+    const onClose = renderModal(installConfig);
+    const confirm = await screen.findByRole("button", { name: "Confirm Install" });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    fireEvent.click(confirm);
+    const callbacks = vi.mocked(api.installPackage).mock.lastCall![0];
+    act(() => callbacks.onData?.("Installing files\n"));
+    if (dismissal === "Escape") fireEvent.keyDown(document.body, { key: "Escape" });
+    else if (dismissal === "backdrop") fireEvent.mouseDown(document.querySelector(".pf-v6-c-backdrop")!);
+    else fireEvent.click(screen.getByRole("button", { name: dismissal === "close" ? "Close" : "Cancel" }));
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Cancellation requested" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Confirm Install" })).not.toBeInTheDocument();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(cancel).toHaveBeenCalledOnce();
+    act(() => callbacks.onError("Cancelled", "cancelled", "No package changes were committed"));
+    expect(screen.getByText("No package changes were committed")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Close" })[0]);
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+});

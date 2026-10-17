@@ -154,7 +154,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const { onViewDependencies, onViewHistory } = useNavigation();
   const [state, setState] = useState<ViewState>("loading");
   const [updates, setUpdates] = useState<UpdateInfo[]>([]);
-  const { log, appendLog, resetLog } = useStreamingLog();
+  const { log, appendLog, flushLog, resetLog } = useStreamingLog();
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
   const [errorDetails, setErrorDetails] = useState<string | undefined>(undefined);
@@ -599,17 +599,21 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
 
   const handleRefresh = async () => {
-    // Hard close so the old op releases db.lck before the new spawn takes it.
-    cancelRef.current?.forceStop();
+    if (cancelRef.current) return;
     setState("checking");
     resetLog();
-    setSelectedPackages(new Set());
     setLockRetryExhausted(false);
     cancelRef.current = syncDatabase(
       {
         onData: appendLog,
-        onComplete: () => loadUpdates(),
+        onComplete: () => {
+          cancelRef.current = null;
+          flushLog();
+          void loadUpdates();
+        },
         onError: (err, code, details) => {
+          cancelRef.current = null;
+          flushLog();
           void loadSecurityData();
           failWith("sync", err, code, details);
         },
@@ -653,15 +657,14 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         return;
       }
 
-      // No issues - proceed directly
-      startUpgrade();
+      startUpgrade(preflight.removals ?? []);
     } catch (ex) {
       setPreflightLoading(false);
       failWith("preflight", ex instanceof Error ? ex.message : String(ex), ex instanceof BackendError ? ex.code : undefined, ex instanceof BackendError ? ex.details : undefined);
     }
   };
 
-  const startUpgrade = () => {
+  const startUpgrade = (approvedRemovals: string[]) => {
     setConfirmModalOpen(false);
     setState("applying");
     resetLog();
@@ -712,6 +715,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       onEvent: handleEvent,
       onData: appendLog,
       onComplete: () => {
+        flushLog();
         autoResumedRef.current = false;
         if (isCancellingRef.current) {
           setCancelling(false);
@@ -738,9 +742,11 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         });
       },
       onError: (err, code, details) => {
+        flushLog();
         cancelRef.current = null;
-        if (isCancellingRef.current) {
-          setCancelling(false);
+        const cancellationRequested = isCancellingRef.current;
+        setCancelling(false);
+        if (cancellationRequested && code === "cancelled") {
           setCancelOutcome({ kind: "stopped", detail: err });
           loadUpdates();
           loadRebootStatus();
@@ -749,7 +755,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         }
         failWith("upgrade", err, code, details);
       },
-    }, ignoredPackages);
+    }, ignoredPackages, approvedRemovals);
   };
 
   const resumeRef = useRef({ apply: handleApplyUpdates, refresh: handleRefresh });
@@ -791,8 +797,6 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     setCancelModalOpen(true);
   };
 
-  // Cancellation is a request: stay in "applying" until the backend's terminal
-  // event confirms. cancelRef is kept for Force stop.
   const confirmCancel = () => {
     if (isCancellingRef.current) return;
     setCancelModalOpen(false);
@@ -1123,8 +1127,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     // timeout, or the unqualified word "network", is not an unreachable-host
     // condition, so it keeps its specific message rather than the offline page.
     const networkError = !isLockError && (
-      errorCode === "network_error" ||
-      (error ? /failed to retrieve|unable to connect|could not resolve|dns|connection refused/i.test(error) : false)
+      errorCode ? errorCode === "network_error" :
+        (error ? /failed to retrieve|could not resolve|dns/i.test(error) : false)
     );
     return (
       <Card>
@@ -1196,17 +1200,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
               variant="info"
               isInline
               className="pf-v6-u-mt-md"
-              title={upgradeProgress.phase === "installing" || upgradeProgress.phase === "hooks"
-                ? "Cancelling: waiting for the in-flight package to finish safely"
-                : "Cancelling: stopping before any package is installed"}
-              actionLinks={
-                <Button variant="link" isInline isDanger onClick={() => cancelRef.current?.forceStop()}>
-                  Force stop
-                </Button>
-              }
+              title="Cancellation requested"
             >
-              Completed packages stay installed. Force stop abandons the backend
-              process mid-transaction and may leave a stale database lock.
+              Waiting for the operation to finish safely. A transaction that has
+              started committing will finish its package changes and hooks.
             </Alert>
           )}
 
@@ -1262,28 +1259,17 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         >
           <ModalHeader title="Cancel upgrade?" />
           <ModalBody>
-            {upgradeProgress.phase === "downloading" || upgradeProgress.phase === "preparing" ? (
-              <Content>
-                <Content component={ContentVariants.p}>
-                  The upgrade has not started modifying your system yet. It is safe to cancel now.
-                </Content>
+            <Content>
+              <Content component={ContentVariants.p}>
+                Cancellation stops work before the transaction commits. If commit has
+                already started, package changes and hooks will finish before this
+                operation ends.
               </Content>
-            ) : (
-              <Content>
-                <Content component={ContentVariants.p}>
-                  <strong>Warning:</strong> The upgrade is currently {upgradeProgress.phase === "hooks" ? "running post-transaction hooks" : "installing packages"}.
-                </Content>
-                <Content component={ContentVariants.p}>
-                  Cancelling now may leave your system in an inconsistent state. You may need to run <code>pacman -Syu</code> manually to complete the upgrade.
-                </Content>
-              </Content>
-            )}
+            </Content>
           </ModalBody>
           <ModalFooter>
             <Button key="cancel-confirm" variant="danger" onClick={confirmCancel} isDisabled={isCancelling} isLoading={isCancelling}>
-              {upgradeProgress.phase === "downloading" || upgradeProgress.phase === "preparing"
-                ? "Cancel Upgrade"
-                : "Cancel Anyway"}
+              Request cancellation
             </Button>
             <Button key="cancel-dismiss" variant="link" onClick={() => setCancelModalOpen(false)} isDisabled={isCancelling}>
               Continue Upgrade
@@ -1722,7 +1708,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         isOpen={confirmModalOpen}
         preflight={preflightData}
         onClose={() => setConfirmModalOpen(false)}
-        onProceed={startUpgrade}
+        onProceed={() => startUpgrade(preflightData?.removals ?? [])}
       />
 
       <IgnoredPackagesModal

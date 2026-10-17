@@ -238,9 +238,9 @@ describe("listInstalled", () => {
 });
 
 describe("isNetworkErrorCode", () => {
-  it("treats network_error and timeout as connectivity failures", () => {
+  it("treats only explicit network errors as connectivity failures", () => {
     expect(isNetworkErrorCode("network_error")).toBe(true);
-    expect(isNetworkErrorCode("timeout")).toBe(true);
+    expect(isNetworkErrorCode("timeout")).toBe(false);
   });
 
   it("treats other codes as non-connectivity", () => {
@@ -336,6 +336,22 @@ describe("runUpgrade", () => {
     vi.clearAllMocks();
   });
 
+  it("passes only explicitly approved removals in the consent argument", () => {
+    mockSpawn.mockReturnValue(createMockStreamingProcess());
+    runUpgrade({ onComplete: vi.fn(), onError: vi.fn() }, ["ignored"], ["old-driver", "old-library"]);
+    expect(mockSpawn.mock.calls[0][0]).toEqual([
+      expect.any(String), "upgrade", "ignored", "", "old-driver,old-library",
+    ]);
+  });
+
+  it("sends an empty removal approval list by default", () => {
+    mockSpawn.mockReturnValue(createMockStreamingProcess());
+    runUpgrade({ onComplete: vi.fn(), onError: vi.fn(), timeout: 900 });
+    expect(mockSpawn.mock.calls[0][0]).toEqual([
+      expect.any(String), "upgrade", "", "900", "",
+    ]);
+  });
+
   it("calls onComplete when receiving success complete event", () => {
     const mockProc = createMockStreamingProcess();
     mockSpawn.mockReturnValue(mockProc);
@@ -351,16 +367,19 @@ describe("runUpgrade", () => {
     const completeEvent: StreamEvent = { type: "complete", success: true };
     mockProc._emit(JSON.stringify(completeEvent) + "\n");
 
+    mockProc._complete();
+
     expect(callbacks.onComplete).toHaveBeenCalledTimes(1);
     expect(callbacks.onError).not.toHaveBeenCalled();
   });
 
-  it("fails a stream that never produces any output", () => {
+  it("requests cancellation on a silent mutation and waits for process exit", () => {
     vi.useFakeTimers();
     try {
       const mockProc = createMockStreamingProcess();
       const close = vi.fn();
       mockProc.close = close;
+      mockProc.input = vi.fn();
       mockSpawn.mockReturnValue(mockProc);
 
       const callbacks = { onComplete: vi.fn(), onError: vi.fn() };
@@ -368,9 +387,12 @@ describe("runUpgrade", () => {
 
       vi.advanceTimersByTime(STREAM_FIRST_OUTPUT_TIMEOUT_MS + 1);
 
+      mockProc._complete();
+
       expect(callbacks.onError).toHaveBeenCalledTimes(1);
       expect(callbacks.onError.mock.calls[0][1]).toBe("timeout");
-      expect(close).toHaveBeenCalled();
+      expect(close).not.toHaveBeenCalled();
+      expect(mockProc.input).toHaveBeenCalledWith("cancel\n", true);
       expect(callbacks.onComplete).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
@@ -392,6 +414,7 @@ describe("runUpgrade", () => {
       expect(callbacks.onError).not.toHaveBeenCalled();
 
       mockProc._emit(JSON.stringify({ type: "complete", success: true }) + "\n");
+      mockProc._complete();
       expect(callbacks.onComplete).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
@@ -416,6 +439,8 @@ describe("runUpgrade", () => {
     };
     mockProc._emit(JSON.stringify(completeEvent) + "\n");
 
+    mockProc._complete();
+
     expect(callbacks.onError).toHaveBeenCalledWith("Package conflict", "internal_error", undefined);
     expect(callbacks.onComplete).not.toHaveBeenCalled();
   });
@@ -436,6 +461,8 @@ describe("runUpgrade", () => {
     mockProc._emit(
       JSON.stringify({ code: "network_error", message: "failed retrieving file" }) + "\n"
     );
+
+    mockProc._complete();
 
     expect(callbacks.onError).toHaveBeenCalledWith("failed retrieving file", "network_error", undefined);
     expect(callbacks.onComplete).not.toHaveBeenCalled();
@@ -460,6 +487,8 @@ describe("runUpgrade", () => {
       }) + "\n"
     );
 
+    mockProc._complete();
+
     expect(callbacks.onError).toHaveBeenCalledWith(
       "failed to refresh package databases",
       "network_error",
@@ -479,6 +508,8 @@ describe("runUpgrade", () => {
     runUpgrade(callbacks);
 
     mockProc._emit(JSON.stringify({ code: "some_future_code", message: "unexpected" }) + "\n");
+
+    mockProc._complete();
 
     expect(callbacks.onError).toHaveBeenCalledWith("unexpected", "internal_error", undefined);
     expect(callbacks.onComplete).not.toHaveBeenCalled();
@@ -554,6 +585,7 @@ describe("runUpgrade", () => {
     expect(callbacks.onEvent).not.toHaveBeenCalled();
 
     mockProc._emit(json.substring(10) + "\n");
+    mockProc._complete();
     expect(callbacks.onComplete).toHaveBeenCalled();
   });
 
@@ -571,6 +603,8 @@ describe("runUpgrade", () => {
     const completeEvent: StreamEvent = { type: "complete", success: true };
     mockProc._emit(JSON.stringify(completeEvent) + "\n");
     mockProc._emit(JSON.stringify(completeEvent) + "\n");
+
+    mockProc._complete();
 
     expect(callbacks.onComplete).toHaveBeenCalledTimes(1);
   });
@@ -604,6 +638,8 @@ describe("runUpgrade", () => {
     runUpgrade(callbacks);
 
     mockProc._fail({ message: "Permission denied" });
+
+    mockProc._complete();
 
     expect(callbacks.onError).toHaveBeenCalledWith("Permission denied", "permission_denied", undefined);
     expect(callbacks.onComplete).not.toHaveBeenCalled();
@@ -660,17 +696,22 @@ describe("runUpgrade", () => {
     expect(mockProc.close).toHaveBeenCalledWith("cancelled");
   });
 
-  it("cancel on non-graceful streams still closes the channel", () => {
+  it("cancels database sync through stdin and waits for the backend", () => {
     const mockProc = createMockStreamingProcess();
     mockProc.close = vi.fn();
     mockProc.input = vi.fn();
     mockSpawn.mockReturnValue(mockProc);
 
-    const { cancel } = syncDatabase({ onComplete: vi.fn(), onError: vi.fn() });
+    const callbacks = { onComplete: vi.fn(), onError: vi.fn() };
+    const { cancel } = syncDatabase(callbacks);
     cancel();
 
-    expect(mockProc.close).toHaveBeenCalledWith("cancelled");
-    expect(mockProc.input).not.toHaveBeenCalled();
+    expect(mockProc.close).not.toHaveBeenCalled();
+    expect(mockProc.input).toHaveBeenCalledWith("cancel\n", true);
+    mockProc._emit(JSON.stringify({ type: "complete", success: false, code: "cancelled", message: "Operation cancelled" }) + "\n");
+    expect(callbacks.onError).not.toHaveBeenCalled();
+    mockProc._complete();
+    expect(callbacks.onError).toHaveBeenCalledWith("Operation cancelled", "cancelled", undefined);
   });
 
   it("handles complete event in buffer when process ends", () => {
@@ -686,6 +727,8 @@ describe("runUpgrade", () => {
 
     const completeEvent: StreamEvent = { type: "complete", success: true };
     mockProc._emit(JSON.stringify(completeEvent));
+    mockProc._complete();
+
     mockProc._complete();
 
     expect(callbacks.onComplete).toHaveBeenCalledTimes(1);
@@ -705,6 +748,8 @@ describe("runUpgrade", () => {
 
     const logEvent: StreamEvent = { type: "log", level: "info", message: "Starting" };
     mockProc._emit(JSON.stringify(logEvent) + "\n");
+    mockProc._complete();
+
     mockProc._complete();
 
     expect(callbacks.onError).toHaveBeenCalledWith(
@@ -731,6 +776,8 @@ describe("runUpgrade", () => {
 
     const completeEvent: StreamEvent = { type: "complete", success: true };
     mockProc._emit(JSON.stringify(completeEvent) + "\n");
+
+    mockProc._complete();
 
     expect(callbacks.onComplete).toHaveBeenCalledTimes(1);
     expect(callbacks.onError).not.toHaveBeenCalled();
@@ -928,6 +975,8 @@ describe("downgradeFromArchive", () => {
     const completeEvent: StreamEvent = { type: "complete", success: true };
     mockProc._emit(JSON.stringify(completeEvent) + "\n");
 
+    mockProc._complete();
+
     expect(callbacks.onComplete).toHaveBeenCalledTimes(1);
     expect(callbacks.onError).not.toHaveBeenCalled();
   });
@@ -962,5 +1011,76 @@ describe("signoff credentials", () => {
 
     expect(sentToStdin).toHaveLength(1);
     expect(JSON.parse(atob(sentToStdin[0]))).toEqual(credentials);
+  });
+});
+
+
+describe("stream settlement", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it.each([true, false])("preserves an explicit Complete code before an envelope with newline=%s", (newline) => {
+    const process = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(process);
+    const callbacks = { onComplete: vi.fn(), onError: vi.fn() };
+    runUpgrade(callbacks);
+    process._emit(JSON.stringify({ type: "complete", success: false, code: "transaction_failed", message: "disk full" }) + "\n");
+    process._emit(JSON.stringify({ code: "internal_error", message: "Failed to commit: disk full", details: "Writing /usr/lib/example: disk full" }) + (newline ? "\n" : ""));
+    expect(callbacks.onError).not.toHaveBeenCalled();
+    process._complete();
+    expect(callbacks.onError).toHaveBeenCalledExactlyOnceWith("Failed to commit: disk full", "transaction_failed", "Writing /usr/lib/example: disk full");
+  });
+
+  it.each([false, true])("reports uncertain completion after connection loss with terminal=%s", (hasTerminal) => {
+    const process = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(process);
+    const callbacks = { onComplete: vi.fn(), onError: vi.fn() };
+    runUpgrade(callbacks);
+    if (hasTerminal) process._emit(JSON.stringify({ type: "complete", success: true, details: "Package changes were written" }) + "\n");
+    process._fail({ problem: "disconnected", message: "Cockpit transport closed" });
+    expect(callbacks.onComplete).not.toHaveBeenCalled();
+    expect(callbacks.onError).toHaveBeenCalledExactlyOnceWith(
+      "Connection to the backend was lost. The operation may still be finishing; check its state before retrying.",
+      "internal_error",
+      hasTerminal ? "Package changes were written" : "Cockpit transport closed",
+    );
+  });
+
+  it.each([true, false])("waits for exit after a Complete event with success=%s", (success) => {
+    const process = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(process);
+    const callbacks = { onComplete: vi.fn(), onError: vi.fn() };
+    runUpgrade(callbacks);
+    process._emit(JSON.stringify({ type: "complete", success, code: "transaction_failed", message: "disk full", details: "Writing /usr/lib/example" }) + "\n");
+    expect(callbacks.onComplete).not.toHaveBeenCalled();
+    expect(callbacks.onError).not.toHaveBeenCalled();
+    if (success) {
+      process._complete();
+      expect(callbacks.onComplete).toHaveBeenCalledOnce();
+    } else {
+      process._fail({ message: "exited with code 1" });
+      expect(callbacks.onError).toHaveBeenCalledExactlyOnceWith("disk full", "transaction_failed", "Writing /usr/lib/example");
+    }
+  });
+
+  it("does not accept success followed by an unsuccessful exit", () => {
+    const process = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(process);
+    const callbacks = { onComplete: vi.fn(), onError: vi.fn() };
+    runUpgrade(callbacks);
+    process._emit(JSON.stringify({ type: "complete", success: true }) + "\n");
+    process._fail({ message: "process terminated" });
+    expect(callbacks.onComplete).not.toHaveBeenCalled();
+    expect(callbacks.onError).toHaveBeenCalledOnce();
+  });
+
+  it("waits for exit after an error envelope", () => {
+    const process = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(process);
+    const callbacks = { onComplete: vi.fn(), onError: vi.fn() };
+    runUpgrade(callbacks);
+    process._emit(JSON.stringify({ code: "cancelled", message: "Cancelled before commit" }) + "\n");
+    expect(callbacks.onError).not.toHaveBeenCalled();
+    process._fail({ message: "exited with code 1" });
+    expect(callbacks.onError).toHaveBeenCalledExactlyOnceWith("Cancelled before commit", "cancelled", undefined);
   });
 });

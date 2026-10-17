@@ -41,7 +41,9 @@ test.describe("Archive transactions", () => {
   test("reports a failed download without modifying the installed version", async ({ pacman }) => {
     await guestCommand(pacman.frame, [FIXTURE, "archive-failure"]);
     const modal = await openArchive(pacman);
-    await expect(modal.getByRole("heading", { name: "Can't reach Arch Linux services" })).toBeVisible();
+    await expect(modal).toContainText(/Failed to download htop [^:]+: failed to retrieve some files/);
+    await expect(modal).toContainText(/The requested URL returned error:\s*503/);
+    await expect(modal.getByRole("button", { name: "Retry", exact: true })).toBeEnabled();
     await expect(modal.getByText("Version change complete", { exact: true })).toHaveCount(0);
     const state = await archiveState(pacman);
     expect(state.downloads).toBeGreaterThan(0);
@@ -54,12 +56,18 @@ test.describe("Archive transactions", () => {
     await expect.poll(async () => (await archiveState(pacman)).downloads).toBeGreaterThan(0);
     await expect.poll(async () => (await archiveState(pacman)).active_transactions).toBeGreaterThan(0);
     await modal.getByRole("button", { name: "Cancel", exact: true }).click();
-    await expect(modal.locator("tbody tr").first()).toBeVisible();
+    await expect(modal.getByRole("button", { name: "Cancellation requested", exact: true })).toBeDisabled();
+    await expect(modal.locator("tbody tr")).toHaveCount(0);
+    await pacman.page.keyboard.press("Escape");
+    await expect(modal).toBeVisible();
     await guestCommand(pacman.frame, [FIXTURE, "archive-release"]);
     await expect.poll(async () => (await archiveState(pacman)).completed).toBeGreaterThan(0);
     await expect.poll(async () => (await archiveState(pacman)).active_transactions, { timeout: 30000 }).toBe(0);
     await expect.poll(async () => guestCommand(pacman.frame, ["test", "!", "-e", "/var/lib/pacman/db.lck"])
       .then(() => true, () => false), { timeout: 30000 }).toBe(true);
+    await expect(modal.getByText("Operation cancelled by user", { exact: true })).toBeVisible();
+    await expect(modal.getByRole("button", { name: "Retry", exact: true })).toBeEnabled();
+    await expect(modal.getByRole("button", { name: "Cancellation requested", exact: true })).toHaveCount(0);
     expect((await guestCommand(pacman.frame, ["pacman", "-Q", "htop"])).trim()).toBe(installed);
   });
 
@@ -74,7 +82,10 @@ test.describe("Archive transactions", () => {
   test("rejects the archive when its required signature is missing", async ({ pacman }) => {
     await guestCommand(pacman.frame, [FIXTURE, "archive-unsigned"]);
     const modal = await openArchive(pacman);
-    await expect(modal.getByRole("heading", { name: /Error|Can't reach Arch Linux services/ })).toBeVisible();
+    await expect(modal).toContainText(/Failed to download htop [^:]+: failed to retrieve some files/);
+    await expect(modal).toContainText(/failed retrieving file 'htop-[^']+\.sig'/);
+    await expect(modal).toContainText(/The requested URL returned error:\s*404/);
+    await expect(modal.getByRole("button", { name: "Retry", exact: true })).toBeEnabled();
     await expect(modal.getByText("Version change complete", { exact: true })).toHaveCount(0);
     const state = await archiveState(pacman);
     expect(state.completed).toBeGreaterThan(0);

@@ -25,14 +25,13 @@ interface Props {
 const ConfirmBody: React.FC<Omit<Props, "isOpen">> = ({ preflight, onClose, onProceed }) => {
   const [acknowledgedRemovals, setAcknowledgedRemovals] = useState(false);
   const [acknowledgedConflicts, setAcknowledgedConflicts] = useState(false);
-  const [acknowledgedKeyImports, setAcknowledgedKeyImports] = useState(false);
   const [acknowledgedWarnings, setAcknowledgedWarnings] = useState<Set<string>>(new Set());
 
   const allDangerousActionsAcknowledged = useMemo(() => {
     if (!preflight) return true;
     const needsRemovalAck = (preflight.removals?.length ?? 0) > 0;
     const needsConflictAck = (preflight.conflicts?.length ?? 0) > 0;
-    const needsKeyImportAck = (preflight.import_keys?.length ?? 0) > 0;
+    const missingKeys = (preflight.import_keys?.length ?? 0) > 0;
     const warningsNeedingAck = (preflight.warnings ?? []).filter(
       (w) => w.severity === "warning" || w.severity === "danger"
     );
@@ -40,10 +39,10 @@ const ConfirmBody: React.FC<Omit<Props, "isOpen">> = ({ preflight, onClose, onPr
     return (
       (!needsRemovalAck || acknowledgedRemovals) &&
       (!needsConflictAck || acknowledgedConflicts) &&
-      (!needsKeyImportAck || acknowledgedKeyImports) &&
+      !missingKeys &&
       allWarningsAcked
     );
-  }, [preflight, acknowledgedRemovals, acknowledgedConflicts, acknowledgedKeyImports, acknowledgedWarnings]);
+  }, [preflight, acknowledgedRemovals, acknowledgedConflicts, acknowledgedWarnings]);
 
   return (
     <Modal
@@ -102,9 +101,10 @@ const ConfirmBody: React.FC<Omit<Props, "isOpen">> = ({ preflight, onClose, onPr
             )}
 
             {(preflight.import_keys?.length ?? 0) > 0 && (
-              <Alert variant="warning" title="PGP keys will be imported" isInline className="pf-v6-u-mt-md">
+              <Alert variant="warning" title="Signing keys require verification" isInline className="pf-v6-u-mt-md">
                 <Content component={ContentVariants.p}>
-                  The following keys will be imported to verify package signatures:
+                  Verify these fingerprints and import the keys with pacman-key before retrying.
+                  This page does not import signing keys automatically.
                 </Content>
                 <List>
                   {preflight.import_keys!.map((k) => (
@@ -113,13 +113,7 @@ const ConfirmBody: React.FC<Omit<Props, "isOpen">> = ({ preflight, onClose, onPr
                     </ListItem>
                   ))}
                 </List>
-                <Checkbox
-                  id="acknowledge-key-imports"
-                  label="I trust these keys and want to import them"
-                  isChecked={acknowledgedKeyImports}
-                  onChange={(_event, checked) => setAcknowledgedKeyImports(checked)}
-                  className="pf-v6-u-mt-sm"
-                />
+
               </Alert>
             )}
 

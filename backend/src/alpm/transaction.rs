@@ -1,29 +1,5 @@
 use alpm::{Alpm, TransFlag};
 use anyhow::Result;
-use std::cell::RefCell;
-use std::ptr::NonNull;
-
-thread_local! {
-    // Only ever touched on the commit thread (guard setup/teardown and the alpm
-    // callbacks that run inside trans_commit), so a thread-local cell needs no
-    // Send/Sync and no lock.
-    static INTERRUPT_HANDLE: RefCell<Option<NonNull<alpm_sys::alpm_handle_t>>> =
-        const { RefCell::new(None) };
-}
-
-pub fn try_interrupt() {
-    // Copy the pointer out and drop the borrow before the FFI call, so the cell
-    // is free even if libalpm were ever to re-enter this thread.
-    let ptr = INTERRUPT_HANDLE.with_borrow(|handle| *handle);
-    if let Some(ptr) = ptr {
-        // SAFETY: Drop clears the cell before trans_release, so a stashed
-        // handle is always live here.
-        unsafe {
-            alpm_sys::alpm_trans_interrupt(ptr.as_ptr());
-        }
-    }
-}
-
 pub struct TransactionGuard<'a> {
     handle: &'a mut Alpm,
 }
@@ -33,8 +9,6 @@ impl<'a> TransactionGuard<'a> {
         handle
             .trans_init(flags)
             .map_err(|e| anyhow::anyhow!("Failed to initialize transaction: {}", e))?;
-        let ptr = NonNull::new(handle.as_alpm_handle_t());
-        INTERRUPT_HANDLE.with_borrow_mut(|h| *h = ptr);
         Ok(Self { handle })
     }
 
@@ -77,6 +51,7 @@ impl<'a> TransactionGuard<'a> {
     }
 
     pub fn commit(&mut self) -> Result<(), alpm::CommitError> {
+        // Interrupting libalpm can skip post hooks after pre hooks changed boot files.
         self.handle.trans_commit()
     }
 
@@ -115,8 +90,6 @@ impl<'a> TransactionGuard<'a> {
 
 impl Drop for TransactionGuard<'_> {
     fn drop(&mut self) {
-        // Clear before trans_release: try_interrupt must not reach a freed handle.
-        INTERRUPT_HANDLE.with_borrow_mut(|h| *h = None);
         let _ = self.handle.trans_release();
     }
 }

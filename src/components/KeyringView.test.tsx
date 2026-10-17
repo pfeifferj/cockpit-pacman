@@ -282,7 +282,8 @@ describe("KeyringView", () => {
       fireEvent.click(cancelButton);
     });
 
-    expect(mockCancel).toHaveBeenCalled();
+    expect(mockCancel).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Cancellation requested" })).toBeDisabled();
   });
 
   it("does not offer to initialize a keyring it could not read", async () => {
@@ -501,5 +502,17 @@ describe("KeyringView", () => {
     });
 
     expect(screen.getByText(/Refreshing keys from keyserver/i)).toBeInTheDocument();
+  });
+});
+
+
+describe("KeyringView local failures", () => {
+  afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+  it("shows local timeout details without claiming Arch services are unreachable", async () => {
+    mockGetKeyringStatus.mockRejectedValue(new api.BackendError("Keyring query timed out", "timeout", "gpg did not exit"));
+    render(<KeyringView />);
+    expect(await screen.findByText("gpg did not exit")).toBeInTheDocument();
+    expect(screen.queryByText("Can't reach Arch Linux services")).not.toBeInTheDocument();
   });
 });

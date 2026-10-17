@@ -181,7 +181,7 @@ export type SignoffGroupWithLocal = { pkgbase: string, pkgnames: Array<string>, 
 
 export type SignoffListResponse = { signoff_groups: Array<SignoffGroupWithLocal>, total: number, };
 
-export type StreamEvent = { "type": "log", level: string, message: string, } | { "type": "progress", operation: string, package: string, percent: number, current: number, total: number, } | { "type": "download", filename: string, event: string, downloaded?: number, total?: number, } | { "type": "event", event: string, package?: string, } | { "type": "complete", success: boolean, message?: string, } | { "type": "mirror_test", url: string, current: number, total: number, result: MirrorTestResult, };
+export type StreamEvent = { "type": "log", level: string, message: string, } | { "type": "progress", operation: string, package: string, percent: number, current: number, total: number, } | { "type": "download", filename: string, event: string, downloaded?: number, total?: number, } | { "type": "event", event: string, package?: string, } | { "type": "complete", success: boolean, message?: string, code?: string, details?: string, } | { "type": "mirror_test", url: string, current: number, total: number, result: MirrorTestResult, };
 
 export type SyncPackageDetails = { name: string, version: string, description: string | null, url: string | null, licenses: Array<string>, groups: Array<string>, provides: Array<string>, depends: Array<string>, optdepends: Array<string>, conflicts: Array<string>, replaces: Array<string>, download_size: number, installed_size: number, packager: string | null, architecture: string | null, build_date: number, repository: string, };
 
