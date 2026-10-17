@@ -44,15 +44,13 @@ def as_dev(args, **kwargs):
 
 def credentials(enabled):
     if enabled:
-        control = f'/run/user/{pwd.getpwnam("dev").pw_uid}/keyring'
         as_dev(['systemctl', '--user', 'start', 'gnome-keyring-daemon.service'])
-        as_dev(['gnome-keyring-daemon', '--unlock', '--control-directory=' + control], input=read('credentials.json')['password'], text=True,
-               stdout=subprocess.DEVNULL)
-        as_dev(['secret-tool', 'store', '--label=Cockpit E2E', 'service', 'cockpit-pacman', 'type', 'archweb',
+        as_dev(['secret-tool', 'store', '--collection=/org/freedesktop/secrets/collection/session',
+                '--label=Cockpit E2E', 'service', 'cockpit-pacman', 'type', 'archweb',
                 'username', 'fixture'], input=read('credentials.json')['password'], text=True,
                stdout=subprocess.DEVNULL)
         state = read('service.json')
-        state.update(signed=False, logins=0)
+        state.update(signed=False, signed_packages=[], logins=0, logouts=0, signoff_bulk=False, fail_signoff=False)
         write('service.json', state)
     else:
         subprocess.run(['runuser', '-u', 'dev', '--', 'env',
@@ -65,7 +63,7 @@ def prepare():
     STATE.mkdir(mode=0o755, exist_ok=True)
     if not (STATE / 'credentials.json').exists():
         write('credentials.json', {'password': secrets.token_urlsafe(24)})
-    write('service.json', {'archive': 'failure', 'signed': False, 'downloads': 0, 'disconnections': 0, 'logins': 0})
+    write('service.json', {'archive': 'failure', 'signed': False, 'signed_packages': [], 'downloads': 0, 'disconnections': 0, 'logins': 0, 'logouts': 0, 'signoff_bulk': False, 'fail_signoff': False})
     command(['loginctl', 'enable-linger', 'dev'])
     command(['systemctl', 'start', f'user@{pwd.getpwnam("dev").pw_uid}.service'])
     credentials(True)
@@ -128,7 +126,13 @@ class Handler(BaseHTTPRequestHandler):
                      'last_update': '2026-10-11T12:00:00Z', 'known_bad': False, 'approved': state['signed'],
                      'required': 1, 'enabled': True,
                      'signoffs': [{'user': 'fixture', 'created': '2026-10-11T12:01:00Z', 'revoked': False}] if state['signed'] else []}
-            self.reply(200, json.dumps({'signoff_groups': [group]}).encode(), {'Content-Type': 'application/json'})
+            groups = [group]
+            if state.get('signoff_bulk'):
+                version = subprocess.check_output(['pacman', '-Q', 'tree'], text=True).split()[1]
+                signed = 'tree' in state.get('signed_packages', [])
+                groups.append({**group, 'pkgbase': 'tree', 'pkgnames': ['tree'], 'version': version,
+                               'approved': signed, 'signoffs': [{'user': 'fixture', 'created': '2026-10-11T12:01:00Z', 'revoked': False}] if signed else []})
+            self.reply(200, json.dumps({'signoff_groups': groups}).encode(), {'Content-Type': 'application/json'})
         elif self.path == '/archive/h/htop/':
             package = Path(read('packages.json')['target'])
             self.reply(200, f'<a href="{package.name}">htop</a> {package.stat().st_size}\n'.encode())
@@ -193,14 +197,24 @@ class Handler(BaseHTTPRequestHandler):
                 write('service.json', state)
             self.reply(302, headers={'Set-Cookie': 'sessionid=fixture-session; Path=/', 'Location': '/'})
         elif self.path == '/logout/':
+            with STATE_LOCK:
+                state = read('service.json')
+                state['logouts'] = state.get('logouts', 0) + 1
+                write('service.json', state)
             self.reply(200)
-        elif self.path in ('/packages/extra-testing/x86_64/htop/signoff/', '/packages/extra-testing/x86_64/htop/signoff/revoke/'):
+        elif self.path in ('/packages/extra-testing/x86_64/htop/signoff/', '/packages/extra-testing/x86_64/htop/signoff/revoke/', '/packages/extra-testing/x86_64/tree/signoff/'):
             if 'sessionid=fixture-session' not in self.headers.get('Cookie', '') or data.get('csrfmiddlewaretoken') != ['fixturecsrf']:
                 self.reply(403)
                 return
             with STATE_LOCK:
                 state = read('service.json')
-                state['signed'] = not self.path.endswith('/revoke/')
+                if '/tree/' in self.path:
+                    if state.get('fail_signoff'):
+                        self.reply(500)
+                        return
+                    state['signed_packages'] = ['tree']
+                else:
+                    state['signed'] = not self.path.endswith('/revoke/')
                 write('service.json', state)
             self.reply(200)
         else:
@@ -211,7 +225,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['prepare', 'serve', 'secrets-enable', 'secrets-disable',
                                           'archive-failure', 'archive-stall', 'archive-ready', 'archive-unsigned', 'archive-release',
-                                          'restore-package', 'state'])
+                                          'signoffs-partial', 'signoffs-bulk', 'restore-package', 'state'])
     args = parser.parse_args()
     if os.geteuid() != 0:
         raise SystemExit('Guest fixture requires root')
@@ -221,6 +235,10 @@ def main():
         ThreadingHTTPServer(('127.0.0.1', 18080), Handler).serve_forever()
     elif args.action.startswith('secrets-'):
         credentials(args.action == 'secrets-enable')
+    elif args.action.startswith('signoffs-'):
+        state = read('service.json')
+        state.update(signoff_bulk=True, fail_signoff=args.action == 'signoffs-partial')
+        write('service.json', state)
     elif args.action.startswith('archive-'):
         state = read('service.json')
         state['archive'] = args.action.removeprefix('archive-')

@@ -769,6 +769,31 @@ pub struct SignoffActionResponse {
     pub error: Option<String>,
 }
 
+#[derive(Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct SignoffTarget {
+    pub pkgbase: String,
+    pub repo: String,
+    pub arch: String,
+}
+
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct SignoffBatchResult {
+    pub target: SignoffTarget,
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct SignoffBatchResponse {
+    pub results: Vec<SignoffBatchResult>,
+}
+
 #[derive(Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct PackageSecurityAdvisory {

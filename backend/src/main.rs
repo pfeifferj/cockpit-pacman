@@ -9,12 +9,12 @@ use cockpit_pacman_backend::handlers::{
     get_services_status, get_settings, init_keyring, install_package, keyring_status,
     list_archive_versions, list_downgrades, list_ignored, list_installed, list_mirror_backups,
     list_mirrors, list_orphans, list_repo_backups, list_repos, local_package_info, mark_dismissed,
-    mark_news_read, preflight_upgrade, read_credentials_from_stdin, read_dismissal,
-    read_news_state, record_interrupted, refresh_keyring, refresh_mirrors, remove_ignored,
-    remove_orphans, remove_package, remove_stale_lock, restore_mirror_backup, restore_repo_backup,
-    run_upgrade, save_mirrorlist, save_repos, scheduled_run, search, security_info,
-    set_schedule_config, set_settings, signoff_list, signoff_revoke, signoff_sign, sync_database,
-    sync_package_info, test_mirrors, validate_cache_selection,
+    mark_news_read, parse_signoff_batch, preflight_upgrade, read_credentials_from_stdin,
+    read_dismissal, read_news_state, record_interrupted, refresh_keyring, refresh_mirrors,
+    remove_ignored, remove_orphans, remove_package, remove_stale_lock, restore_mirror_backup,
+    restore_repo_backup, run_upgrade, save_mirrorlist, save_repos, scheduled_run, search,
+    security_info, set_schedule_config, set_settings, signoff_batch, signoff_list, signoff_revoke,
+    signoff_sign, sync_database, sync_package_info, test_mirrors, validate_cache_selection,
 };
 use cockpit_pacman_backend::models::{MirrorEntry, RepoEntry, StructuredError};
 use cockpit_pacman_backend::util::{classify_error, emit_json, shutdown_event_writer};
@@ -80,6 +80,7 @@ const COMMANDS: &[&str] = &[
     "fetch-news",
     "news-read-state",
     "news-mark-read",
+    "signoff-batch",
     "signoff-list",
     "signoff-sign",
     "signoff-revoke",
@@ -221,6 +222,7 @@ Commands:
                          days: lookback period (default: 30)
   news-read-state        Get read state of news items
   news-mark-read LINK    Mark a news item as read
+  signoff-batch JSON     Sign off up to 100 packages using one session
   signoff-list           List packages awaiting signoff
   signoff-sign PKGBASE REPO ARCH
                          Sign off a package
@@ -717,6 +719,13 @@ fn main() {
             }
             mark_dismissed(&args[2], &args[3])
         }
+        "signoff-batch" => args
+            .get(2)
+            .ok_or_else(|| anyhow::anyhow!("signoff-batch requires a JSON array of targets"))
+            .and_then(|payload| parse_signoff_batch(payload))
+            .and_then(|targets| {
+                read_credentials_from_stdin().and_then(|creds| signoff_batch(&creds, &targets))
+            }),
         "signoff-list" => read_credentials_from_stdin().and_then(|creds| signoff_list(&creds)),
         "signoff-sign" => {
             if args.len() < 5 {

@@ -10,7 +10,7 @@ import {
   createMockStreamingProcess,
 } from "./test/mocks";
 import { STREAM_FIRST_OUTPUT_TIMEOUT_MS } from "./constants";
-import { getSignoffList, signoffPackage, revokeSignoff } from "./api";
+import { getSignoffList, signoffPackage, signoffPackages, revokeSignoff } from "./api";
 import {
   formatSize,
   listInstalled,
@@ -1119,5 +1119,43 @@ describe("read cancellation", () => {
     await expect(result).rejects.toMatchObject({ code: "cancelled" });
     expect(close).toHaveBeenCalledExactlyOnceWith("cancelled");
     expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function));
+  });
+});
+
+describe("UTF-8 signoff credentials", () => {
+  it.each(["pásswörd", "密碼", "🔑 password"])("round-trips Unicode credentials (%s)", async (password) => {
+    const process = createMockSpawnPromise("{}");
+    process.input = vi.fn();
+    mockSpawn.mockReturnValue(process);
+    const credentials = { username: "josie", password };
+    await getSignoffList(credentials);
+    const encoded = (vi.mocked(process.input).mock.calls[0] as unknown as [string])[0];
+    const decoded = new TextDecoder().decode(Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0)));
+    expect(JSON.parse(decoded)).toEqual(credentials);
+    expect(mockSpawn.mock.lastCall?.[0]).toEqual(expect.not.arrayContaining([password]));
+  });
+});
+
+
+describe("signoff batch API", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("sends targets together with UTF-8 credentials on stdin", async () => {
+    const process = createMockSpawnPromise('{"results":[]}');
+    process.input = vi.fn();
+    mockSpawn.mockReturnValue(process);
+    const targets = [{ pkgbase: "htop", repo: "extra-testing", arch: "x86_64" }];
+    await signoffPackages(targets, { username: "fixture", password: "秘密" });
+    expect(mockSpawn.mock.lastCall).toEqual([
+      ["/usr/libexec/cockpit-pacman/cockpit-pacman-backend", "signoff-batch", JSON.stringify(targets)],
+      { err: "message" },
+    ]);
+    expect(process.input).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an oversized batch before spawning", async () => {
+    const targets = Array.from({ length: 101 }, (_, index) => ({ pkgbase: `pkg${index}`, repo: "extra-testing", arch: "x86_64" }));
+    await expect(signoffPackages(targets, { username: "fixture", password: "secret" })).rejects.toMatchObject({ code: "validation_error" });
+    expect(mockSpawn).not.toHaveBeenCalled();
   });
 });

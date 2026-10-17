@@ -175,9 +175,15 @@ export type Signoff = { user: string, created: string, revoked: boolean, };
 
 export type SignoffActionResponse = { success: boolean, pkgbase: string, action: string, error: string | null, };
 
+export type SignoffBatchResponse = { results: Array<SignoffBatchResult>, };
+
+export type SignoffBatchResult = { target: SignoffTarget, success: boolean, error?: string, };
+
 export type SignoffGroupWithLocal = { pkgbase: string, pkgnames: Array<string>, version: string, arch: string, repo: string, packager: string, comments?: string, last_update: string, known_bad: boolean, approved: boolean, required: number, enabled: boolean, signoffs: Array<Signoff>, local_version: string | null, version_match: VersionMatch, };
 
 export type SignoffListResponse = { signoff_groups: Array<SignoffGroupWithLocal>, total: number, };
+
+export type SignoffTarget = { pkgbase: string, repo: string, arch: string, };
 
 export type StreamEvent = { "type": "log", level: string, message: string, } | { "type": "progress", operation: string, package: string, percent: number, current: number, total: number, } | { "type": "download", filename: string, event: string, downloaded?: number, total?: number, } | { "type": "event", event: string, package?: string, } | { "type": "complete", success: boolean, message?: string, code?: string, details?: string, } | { "type": "mirror_test", url: string, current: number, total: number, result: MirrorTestResult, };
 

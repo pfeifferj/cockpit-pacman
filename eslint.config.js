@@ -36,6 +36,7 @@ export default [
         URL: "readonly",
         AbortController: "readonly",
         AbortSignal: "readonly",
+        TextEncoder: "readonly",
         TextDecoder: "readonly",
         Uint8Array: "readonly",
         atob: "readonly",

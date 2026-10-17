@@ -47,4 +47,7 @@ pub use scheduled::{
 };
 pub use security::{check_security, security_info};
 pub use services::get_services_status;
-pub use signoff::{read_credentials_from_stdin, signoff_list, signoff_revoke, signoff_sign};
+pub use signoff::{
+    parse_signoff_batch, read_credentials_from_stdin, signoff_batch, signoff_list, signoff_revoke,
+    signoff_sign,
+};

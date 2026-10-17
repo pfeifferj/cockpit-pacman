@@ -46,11 +46,14 @@ import type {
   KeyringCredentials,
   SignoffGroupWithLocal,
   SignoffListResponse,
+  SignoffTarget,
   ErrorCode,
 } from "../api";
 import {
   getSignoffList,
   signoffPackage,
+  signoffPackages,
+  SIGNOFF_BATCH_LIMIT,
   revokeSignoff,
   BackendError,
 } from "../api";
@@ -59,6 +62,7 @@ import { usePackageDetails } from "../hooks/usePackageDetails";
 import { usePagination } from "../hooks/usePagination";
 import { useSortableTable } from "../hooks/useSortableTable";
 import { PackageDetailsModal } from "./PackageDetailsModal";
+import { ErrorDetails } from "./ErrorDetails";
 import { NetworkErrorState } from "./NetworkErrorState";
 import { sanitizeErrorMessage } from "../utils";
 import { PER_PAGE_OPTIONS } from "../constants";
@@ -71,7 +75,8 @@ const isPending = (g: SignoffGroupWithLocal) =>
 const isSignedBy = (g: SignoffGroupWithLocal, user: string) =>
   g.signoffs.some((s) => !s.revoked && s.user === user);
 const isKnownBad = (g: SignoffGroupWithLocal) => g.known_bad;
-const signoffKey = (g: SignoffGroupWithLocal) => `${g.pkgbase}\0${g.repo}\0${g.arch}`;
+const isSelectable = (g: SignoffGroupWithLocal, user: string) => !g.known_bad && !isSignedBy(g, user);
+const signoffKey = (g: SignoffTarget) => `${g.pkgbase}\0${g.repo}\0${g.arch}`;
 
 interface SignoffsViewProps {
   credentials: KeyringCredentials;
@@ -83,6 +88,7 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
   const [data, setData] = useState<SignoffListResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<ErrorCode | undefined>(undefined);
+  const [errorDetails, setErrorDetails] = useState<string | undefined>();
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<Set<SignoffFilter>>(new Set(["installed"]));
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
@@ -104,15 +110,19 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
   const reportError = useCallback((err: unknown) => {
     setError(sanitizeErrorMessage(err instanceof Error ? err.message : null));
     setErrorCode(err instanceof BackendError ? err.code : undefined);
+    setErrorDetails(err instanceof BackendError ? err.details : undefined);
   }, []);
 
   const fetchSignoffs = useCallback(async () => {
     setLoading(true);
     setError(null);
     setErrorCode(undefined);
+    setErrorDetails(undefined);
     try {
       const result = await getSignoffList(credentials);
       setData(result);
+      const selectable = new Set(result.signoff_groups.filter((g) => isSelectable(g, credentials.username)).map(signoffKey));
+      setSelected((current) => new Set([...current].filter((key) => selectable.has(key))));
     } catch (err) {
       reportError(err);
     } finally {
@@ -260,10 +270,7 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
   }, [filteredGroups, page, perPage]);
 
   const selectableGroups = useMemo(() => {
-    return filteredGroups.filter((g) => {
-      if (g.known_bad) return false;
-      return !g.signoffs.some((s) => !s.revoked && s.user === username);
-    });
+    return filteredGroups.filter((g) => isSelectable(g, username));
   }, [filteredGroups, username]);
 
   const selectAll = () => setSelected(new Set(selectableGroups.map(signoffKey)));
@@ -276,23 +283,29 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
     const toSign = filteredGroups.filter((g) => selected.has(signoffKey(g)));
     if (toSign.length === 0) return;
     setBulkInProgress(true);
+    setError(null);
+    setErrorCode(undefined);
+    setErrorDetails(undefined);
+    const remaining = new Set(selected);
     const errors: string[] = [];
-    for (const group of toSign) {
-      try {
-        const result = await signoffPackage(group.pkgbase, group.repo, group.arch, credentials);
-        if (!result.success) {
-          errors.push(`${group.pkgbase}: ${result.error || "failed"}`);
+    try {
+      for (let offset = 0; offset < toSign.length; offset += SIGNOFF_BATCH_LIMIT) {
+        const targets = toSign.slice(offset, offset + SIGNOFF_BATCH_LIMIT)
+          .map(({ pkgbase, repo, arch }) => ({ pkgbase, repo, arch }));
+        const response = await signoffPackages(targets, credentials);
+        for (const result of response.results) {
+          if (result.success) remaining.delete(signoffKey(result.target));
+          else errors.push(`${result.target.pkgbase}: ${result.error || "Signoff failed"}`);
         }
-      } catch (err) {
-        errors.push(`${group.pkgbase}: ${err instanceof Error ? err.message : "failed"}`);
       }
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSelected(remaining);
+      await fetchSignoffs();
+      if (errors.length > 0) reportError(new Error(errors.join("; ")));
+      setBulkInProgress(false);
     }
-    if (errors.length > 0) {
-      setError(errors.join("; "));
-    }
-    setSelected(new Set());
-    await fetchSignoffs();
-    setBulkInProgress(false);
   };
 
   const renderVersionMatch = (group: SignoffGroupWithLocal) => {
@@ -333,6 +346,7 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
           className="pf-v6-u-mb-md"
         >
           {error}
+          <ErrorDetails details={errorDetails} />
         </Alert>
       )}
       <Card>

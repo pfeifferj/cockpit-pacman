@@ -3,7 +3,8 @@ use archweb_client::models::SignoffSpec;
 use archweb_client::{DEFAULT_BASE_URL, SignoffSession};
 
 use crate::models::{
-    Signoff, SignoffActionResponse, SignoffGroupWithLocal, SignoffListResponse, VersionMatch,
+    Signoff, SignoffActionResponse, SignoffBatchResponse, SignoffBatchResult,
+    SignoffGroupWithLocal, SignoffListResponse, SignoffTarget, VersionMatch,
 };
 use crate::util::emit_json;
 
@@ -176,4 +177,111 @@ pub fn signoff_revoke(creds_b64: &str, args: &[String]) -> Result<()> {
     run_signoff_action(creds_b64, args, "revoke", |session, spec| {
         session.revoke_package(spec)
     })
+}
+
+const MAX_SIGNOFF_BATCH: usize = 100;
+
+pub fn parse_signoff_batch(payload: &str) -> Result<Vec<SignoffTarget>> {
+    crate::validation::validate_json_payload_size(payload)?;
+    let targets: Vec<SignoffTarget> =
+        serde_json::from_str(payload).context("Invalid signoff batch JSON")?;
+    if targets.is_empty() || targets.len() > MAX_SIGNOFF_BATCH {
+        anyhow::bail!("A signoff batch requires between 1 and {MAX_SIGNOFF_BATCH} packages");
+    }
+    let mut seen = std::collections::HashSet::new();
+    for target in &targets {
+        crate::validation::validate_signoff_arg(&target.pkgbase, "pkgbase")?;
+        crate::validation::validate_signoff_arg(&target.repo, "repo")?;
+        crate::validation::validate_signoff_arg(&target.arch, "arch")?;
+        if !seen.insert((&target.pkgbase, &target.repo, &target.arch)) {
+            anyhow::bail!("Duplicate signoff target: {}", target.pkgbase);
+        }
+    }
+    Ok(targets)
+}
+
+fn collect_signoffs(
+    targets: &[SignoffTarget],
+    mut sign: impl FnMut(&SignoffSpec) -> Result<()>,
+) -> SignoffBatchResponse {
+    SignoffBatchResponse {
+        results: targets
+            .iter()
+            .map(|target| {
+                let result = sign(&SignoffSpec {
+                    pkgbase: target.pkgbase.clone(),
+                    repo: target.repo.clone(),
+                    arch: target.arch.clone(),
+                });
+                SignoffBatchResult {
+                    target: target.clone(),
+                    success: result.is_ok(),
+                    error: result.err().map(|error| format!("{error:#}")),
+                }
+            })
+            .collect(),
+    }
+}
+
+pub fn signoff_batch(creds_b64: &str, targets: &[SignoffTarget]) -> Result<()> {
+    let (username, password) = resolve_credentials(creds_b64)?;
+    let session = SignoffSession::login(
+        &username,
+        &password,
+        &crate::endpoints::endpoint(DEFAULT_BASE_URL, "COCKPIT_PACMAN_TEST_ARCHWEB_URL")?,
+        crate::util::detected_ip_family(),
+    )?;
+    let response = collect_signoffs(targets, |spec| session.signoff_package(spec));
+    session.logout();
+    emit_json(&response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validates_every_target_before_opening_a_session() {
+        for payload in [
+            "[]".to_string(),
+            serde_json::json!([{ "pkgbase": "../linux", "repo": "core-testing", "arch": "x86_64" }]).to_string(),
+            serde_json::json!([{ "pkgbase": "linux", "repo": "bad/repo", "arch": "x86_64" }]).to_string(),
+            serde_json::json!([{ "pkgbase": "linux", "repo": "core-testing", "arch": "" }]).to_string(),
+            serde_json::to_string(&vec![serde_json::json!({ "pkgbase": "linux", "repo": "core-testing", "arch": "x86_64" }); 101]).unwrap(),
+        ] {
+            assert!(parse_signoff_batch(&payload).is_err());
+        }
+        let target =
+            serde_json::json!({ "pkgbase": "linux", "repo": "core-testing", "arch": "x86_64" });
+        assert!(
+            parse_signoff_batch(&serde_json::json!([target.clone(), target]).to_string()).is_err()
+        );
+    }
+
+    #[test]
+    fn keeps_failed_targets_and_continues_the_batch() {
+        let targets = parse_signoff_batch(
+            r#"[
+            {"pkgbase":"linux","repo":"core-testing","arch":"x86_64"},
+            {"pkgbase":"htop","repo":"extra-testing","arch":"x86_64"}
+        ]"#,
+        )
+        .unwrap();
+        let mut calls = Vec::new();
+        let response = collect_signoffs(&targets, |spec| {
+            calls.push(spec.pkgbase.clone());
+            if spec.pkgbase == "linux" {
+                anyhow::bail!("server rejected signoff");
+            }
+            Ok(())
+        });
+        assert_eq!(calls, ["linux", "htop"]);
+        assert!(!response.results[0].success);
+        assert_eq!(response.results[0].target.repo, "core-testing");
+        assert_eq!(
+            response.results[0].error.as_deref(),
+            Some("server rejected signoff")
+        );
+        assert!(response.results[1].success);
+    }
 }

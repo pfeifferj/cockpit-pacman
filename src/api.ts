@@ -49,6 +49,8 @@ import type {
   SettingsResponse,
   SettingsSetResponse,
   SignoffActionResponse,
+  SignoffBatchResponse,
+  SignoffTarget,
   SignoffListResponse,
   StreamEvent,
   SyncPackageDetails,
@@ -189,7 +191,7 @@ export function parseErrorCode(message: string): ErrorCode {
   return "internal_error";
 }
 
-async function runBackend<T>(command: string, args: string[] = [], options?: { superuser?: "try" | "require" | "none"; stdin?: string; signal?: AbortSignal }): Promise<T> {
+async function runBackend<T>(command: string, args: string[] = [], options?: { superuser?: "try" | "require" | "none"; stdin?: string; signal?: AbortSignal; timeoutMs?: number }): Promise<T> {
   if (options?.signal?.aborted) throw new BackendError("Operation cancelled", "cancelled");
   const su = options?.superuser ?? "try";
   const spawnOpts: Record<string, unknown> = { err: "message" };
@@ -207,7 +209,8 @@ async function runBackend<T>(command: string, args: string[] = [], options?: { s
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
+  const timeoutMs = options?.timeoutMs ?? BACKEND_TIMEOUT_MS;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   // Handle abort signal by closing the spawn process
   controller.signal.addEventListener("abort", () => {
@@ -224,7 +227,7 @@ async function runBackend<T>(command: string, args: string[] = [], options?: { s
     if (options?.signal?.aborted) throw new BackendError("Operation cancelled", "cancelled");
     if (controller.signal.aborted) {
       throw new BackendError(
-        `Backend operation timed out after ${BACKEND_TIMEOUT_MS / 1000}s`,
+        `Backend operation timed out after ${timeoutMs / 1000}s`,
         "timeout"
       );
     }
@@ -958,7 +961,8 @@ export interface KeyringCredentials {
 }
 
 function encodeCredentials(credentials: KeyringCredentials): string {
-  return btoa(JSON.stringify({ username: credentials.username, password: credentials.password }));
+  const bytes = new TextEncoder().encode(JSON.stringify({ username: credentials.username, password: credentials.password }));
+  return btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""));
 }
 
 export async function getSignoffList(credentials: KeyringCredentials): Promise<SignoffListResponse> {
@@ -972,6 +976,19 @@ export async function signoffPackage(
   credentials: KeyringCredentials,
 ): Promise<SignoffActionResponse> {
   return runBackend<SignoffActionResponse>("signoff-sign", [pkgbase, repo, arch], { superuser: "none", stdin: encodeCredentials(credentials) });
+}
+
+export const SIGNOFF_BATCH_LIMIT = 100;
+
+export async function signoffPackages(targets: SignoffTarget[], credentials: KeyringCredentials): Promise<SignoffBatchResponse> {
+  if (targets.length === 0 || targets.length > SIGNOFF_BATCH_LIMIT) {
+    throw new BackendError(`Select between 1 and ${SIGNOFF_BATCH_LIMIT} packages`, "validation_error");
+  }
+  return runBackend<SignoffBatchResponse>("signoff-batch", [JSON.stringify(targets)], {
+    superuser: "none",
+    stdin: encodeCredentials(credentials),
+    timeoutMs: (targets.length + 3) * 20_000,
+  });
 }
 
 export async function revokeSignoff(

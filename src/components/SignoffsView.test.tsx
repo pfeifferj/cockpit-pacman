@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent, act, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act, cleanup, within } from "@testing-library/react";
 import { SignoffsView } from "./SignoffsView";
 import * as api from "../api";
 import { mockSyncPackageDetails } from "../test/mocks";
@@ -10,6 +10,7 @@ vi.mock("../api", async () => {
     ...actual,
     getSignoffList: vi.fn(),
     signoffPackage: vi.fn(),
+    signoffPackages: vi.fn(),
     revokeSignoff: vi.fn(),
     getPackageInfo: vi.fn(),
     getSyncPackageInfo: vi.fn(),
@@ -115,5 +116,61 @@ describe("SignoffsView", () => {
     });
     expect(mockGetPackageInfo).not.toHaveBeenCalled();
     expect(await screen.findByText("VLC media player")).toBeInTheDocument();
+  });
+});
+
+
+describe("bulk signoff", () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => cleanup());
+
+  it("uses one batch call and retains failed targets after refreshing", async () => {
+    const groups = [signoffList.signoff_groups[0], { ...signoffList.signoff_groups[0], pkgbase: "htop", pkgnames: ["htop"] }];
+    mockGetSignoffList.mockResolvedValue({ signoff_groups: groups, total: 2 });
+    const target = (pkgbase: string) => ({ pkgbase, repo: "extra-testing", arch: "x86_64" });
+    vi.mocked(api.signoffPackages).mockResolvedValue({ results: [
+      { target: target("vlc"), success: true },
+      { target: target("htop"), success: false, error: "server rejected signoff" },
+    ] });
+    render(<SignoffsView credentials={credentials} />);
+    await screen.findByRole("button", { name: "vlc" });
+    fireEvent.click(screen.getByLabelText("Select all packages"));
+    fireEvent.click(screen.getByRole("button", { name: "Sign off 2 packages" }));
+    expect(await screen.findByText("htop: server rejected signoff")).toBeInTheDocument();
+    expect(api.signoffPackages).toHaveBeenCalledExactlyOnceWith([target("vlc"), target("htop")], credentials);
+    expect(api.signoffPackage).not.toHaveBeenCalled();
+    const retry = screen.getByRole("button", { name: "Sign off 1 package" });
+    fireEvent.click(retry);
+    await waitFor(() => expect(api.signoffPackages).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.signoffPackages).mock.lastCall?.[0]).toEqual([target("htop")]);
+  });
+
+  it("stops counting and resending targets the refresh shows as signed", async () => {
+    const groups = [signoffList.signoff_groups[0], { ...signoffList.signoff_groups[0], pkgbase: "htop", pkgnames: ["htop"] }];
+    const signed = { ...groups[1], signoffs: [{ user: "alice", created: "2024-01-02T00:00:00Z", revoked: false }] };
+    mockGetSignoffList.mockResolvedValueOnce({ signoff_groups: groups, total: 2 });
+    mockGetSignoffList.mockResolvedValue({ signoff_groups: [groups[0], signed], total: 2 });
+    vi.mocked(api.signoffPackages).mockRejectedValueOnce(new Error("Connection reset"));
+    vi.mocked(api.signoffPackages).mockResolvedValue({ results: [] });
+    render(<SignoffsView credentials={credentials} />);
+    await screen.findByRole("button", { name: "vlc" });
+    fireEvent.click(screen.getByLabelText("Select all packages"));
+    fireEvent.click(screen.getByRole("button", { name: "Sign off 2 packages" }));
+    expect(await screen.findByText("Connection reset")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Sign off 1 package" }));
+    await waitFor(() => expect(api.signoffPackages).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.signoffPackages).mock.lastCall?.[0]).toEqual([{ pkgbase: "vlc", repo: "extra-testing", arch: "x86_64" }]);
+    expect(within(screen.getByRole("row", { name: /htop/ })).getByRole("checkbox")).not.toBeChecked();
+  });
+
+  it("retains every target when the batch request fails", async () => {
+    mockGetSignoffList.mockResolvedValue(signoffList);
+    vi.mocked(api.signoffPackages).mockRejectedValue(new Error("Session expired"));
+    render(<SignoffsView credentials={credentials} />);
+    await screen.findByRole("button", { name: "vlc" });
+    fireEvent.click(screen.getByLabelText("Select all packages"));
+    fireEvent.click(screen.getByRole("button", { name: "Sign off 1 package" }));
+    expect(await screen.findByText("Session expired")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign off 1 package" })).toBeEnabled();
   });
 });

@@ -39,3 +39,35 @@ test.describe("Signoffs Tab", () => {
     }
   });
 });
+
+test("bulk signoff reuses a session and keeps failed packages selected", async ({ pacman }) => {
+  await pacman.navigateToPlugin();
+  await guestCommand(pacman.frame, [FIXTURE, "secrets-enable"]);
+  await guestCommand(pacman.frame, [FIXTURE, "signoffs-partial"]);
+  const sessionCounts = async () => JSON.parse(await guestCommand(pacman.frame, [FIXTURE, "state"])) as { logins: number; logouts: number };
+  try {
+    await pacman.page.reload();
+    await pacman.frame.locator(SIGNOFFS_TAB).click();
+    const table = pacman.panel.getByRole("grid", { name: "Signoff packages" });
+    await expect(table.locator("tbody tr")).toHaveCount(2);
+    await expect.poll(async () => {
+      const counts = await sessionCounts();
+      return counts.logins - counts.logouts;
+    }).toBe(0);
+    const before = await sessionCounts();
+    await pacman.panel.getByLabel("Select all packages").check();
+    await pacman.panel.getByRole("button", { name: "Sign off 2 packages", exact: true }).click();
+    await expect(pacman.panel.getByText(/tree:.*500/)).toBeVisible();
+    await expect(pacman.panel.getByRole("button", { name: "Sign off 1 package", exact: true })).toBeEnabled();
+    await expect(table.locator("tbody tr").filter({ hasText: "htop" }).locator('[data-label="Status"]')).toHaveText("Approved");
+    await expect.poll(async () => (await sessionCounts()).logouts - before.logouts).toBe(2);
+    expect((await sessionCounts()).logins - before.logins).toBe(2);
+
+    await guestCommand(pacman.frame, [FIXTURE, "signoffs-bulk"]);
+    await pacman.panel.getByRole("button", { name: "Sign off 1 package", exact: true }).click();
+    await expect(table.locator("tbody tr").filter({ hasText: "tree" }).locator('[data-label="Status"]')).toHaveText("Approved");
+    await expect(pacman.panel.getByRole("button", { name: /Sign off \d+ packages?/ })).toHaveCount(0);
+  } finally {
+    await guestCommand(pacman.frame, [FIXTURE, "secrets-disable"]);
+  }
+});

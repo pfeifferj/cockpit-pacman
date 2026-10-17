@@ -16,6 +16,7 @@ pub struct SignoffSession {
     agent: ureq::Agent,
     base_url: String,
     csrf_token: String,
+    authenticated: std::cell::Cell<bool>,
 }
 
 impl SignoffSession {
@@ -38,8 +39,10 @@ impl SignoffSession {
             agent,
             base_url: base_url.trim_end_matches('/').to_string(),
             csrf_token: String::new(),
+            authenticated: std::cell::Cell::new(false),
         };
         session.authenticate(username, password)?;
+        session.authenticated.set(true);
         Ok(session)
     }
 
@@ -170,8 +173,17 @@ impl SignoffSession {
     }
 
     pub fn logout(&self) {
+        if !self.authenticated.replace(false) {
+            return;
+        }
         let url = format!("{}/logout/", self.base_url);
         let _ = self.post_no_redirect(&url, &[("csrfmiddlewaretoken", &self.csrf_token)]);
+    }
+}
+
+impl Drop for SignoffSession {
+    fn drop(&mut self) {
+        self.logout();
     }
 }
 
@@ -216,5 +228,90 @@ mod tests {
         assert_eq!(group.signoffs.len(), 1);
         assert_eq!(group.signoffs[0].user, "testuser");
         assert!(!group.signoffs[0].revoked);
+    }
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::SignoffSession;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpListener;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn logs_out_after_a_failed_read_and_does_not_logout_twice() {
+        for explicit_logout in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let server = std::thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                let mut requests = Vec::new();
+                for (status, cookie) in [
+                    ("200 OK", "csrftoken=test-token"),
+                    ("302 Found", "sessionid=test-session"),
+                    ("500 Internal Server Error", ""),
+                    ("200 OK", ""),
+                ] {
+                    let mut stream = loop {
+                        match listener.accept() {
+                            Ok((stream, _)) => break stream,
+                            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                                assert!(Instant::now() < deadline, "missing HTTP request");
+                                std::thread::sleep(Duration::from_millis(5));
+                            }
+                            Err(error) => panic!("accept: {error}"),
+                        }
+                    };
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                    let mut reader = BufReader::new(&mut stream);
+                    let mut first_line = String::new();
+                    assert_ne!(reader.read_line(&mut first_line).unwrap(), 0);
+                    requests.push(first_line.trim().to_string());
+                    let mut length = 0;
+                    loop {
+                        let mut header = String::new();
+                        assert_ne!(reader.read_line(&mut header).unwrap(), 0);
+                        if header == "\r\n" {
+                            break;
+                        }
+                        if let Some(value) =
+                            header.to_ascii_lowercase().strip_prefix("content-length:")
+                        {
+                            length = value.trim().parse().unwrap();
+                        }
+                    }
+                    reader.read_exact(&mut vec![0; length]).unwrap();
+                    let header = if cookie.is_empty() {
+                        String::new()
+                    } else {
+                        format!("Set-Cookie: {cookie}; Path=/\r\n")
+                    };
+                    write!(stream, "HTTP/1.1 {status}\r\n{header}Content-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+                }
+                requests
+            });
+            {
+                let session =
+                    SignoffSession::login("tester", "password", &url, ureq::config::IpFamily::Any)
+                        .unwrap();
+                assert!(session.get_signoffs().is_err());
+                if explicit_logout {
+                    session.logout();
+                    session.logout();
+                }
+            }
+            assert_eq!(
+                server.join().unwrap(),
+                [
+                    "GET /login/ HTTP/1.1",
+                    "POST /login/ HTTP/1.1",
+                    "GET /packages/signoffs/json/ HTTP/1.1",
+                    "POST /logout/ HTTP/1.1",
+                ]
+            );
+        }
     }
 }
