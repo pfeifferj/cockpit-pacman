@@ -217,7 +217,7 @@ Commands:
                          depth: 1-5 (default: 3)
                          direction: forward|reverse|both (default: forward)
                          optional_depth: 0-5 from root (default: 0, excludes optional)
-  fetch-news [days]      Fetch recent Arch Linux news items
+  fetch-news [days] [force]  Fetch recent Arch Linux news items
                          days: lookback period (default: 30)
   news-read-state        Get read state of news items
   news-mark-read LINK    Mark a news item as read
@@ -692,7 +692,8 @@ fn main() {
         }
         "fetch-news" => {
             let days = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(30u32);
-            fetch_news(days)
+            let force = args.get(3).is_some_and(|value| value == "true");
+            fetch_news(days, force)
         }
         "news-read-state" => read_news_state(),
         "news-mark-read" => {

@@ -90,7 +90,7 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
   const [bulkInProgress, setBulkInProgress] = useState(false);
   const [repoFilter, setRepoFilter] = useState("all");
   const [repoSelectOpen, setRepoSelectOpen] = useState(false);
-  const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
+  const { selectedPackage, detailsLoading, detailsError, detailsErrorCode, detailsErrorContext, fetchDetails, clearDetails } = usePackageDetails();
   const { page, perPage, onSetPage, onPerPageSelect, resetPage } = usePagination({ defaultPerPage: 20 });
 
   // Column indices: 0=checkbox, 1=package, 2=version, 3=local, 4=signoffs, 5=status, 6=actions
@@ -568,6 +568,8 @@ export const SignoffsView: React.FC<SignoffsViewProps> = ({ credentials }) => {
         isLoading={detailsLoading}
         onClose={clearDetails}
         error={detailsError}
+        errorCode={detailsErrorCode}
+        errorDetails={detailsErrorContext}
       />
       </CardBody>
     </Card>

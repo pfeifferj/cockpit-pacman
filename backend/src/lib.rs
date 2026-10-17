@@ -7,6 +7,7 @@ pub mod db;
 mod endpoints;
 pub mod handlers;
 pub mod inhibit;
+mod log_cache;
 pub mod models;
 pub mod util;
 pub mod validation;

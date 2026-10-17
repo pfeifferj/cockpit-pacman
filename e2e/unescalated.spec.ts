@@ -47,10 +47,10 @@ test.describe("unescalated session", () => {
   test("explains why advisory settings need administrative access", async ({ page }) => {
     const frame = await openPluginUnescalated(page);
     const panel = frame.locator('[role="tabpanel"]:visible').first();
-    await expect(panel.getByRole("heading", { name: "Error checking for updates" })).toBeVisible();
-    await panel.getByRole("button", { name: "Dismiss", exact: true }).click();
+    await expect(panel.getByRole("button", { name: "Overview settings" })).toBeVisible();
+    await expect(panel.getByRole("heading", { name: "Error checking for updates" })).toHaveCount(0);
     await panel.getByRole("button", { name: "Overview settings" }).click();
-    const toggle = frame.getByRole("menuitem", { name: /Check security advisories/ });
+    const toggle = frame.getByRole("checkbox", { name: /Check security advisories/ });
     await expect(toggle).toBeDisabled();
     await expect(frame.getByText("Not permitted to change system settings", { exact: true })).toBeVisible();
   });

@@ -27,7 +27,7 @@ import { CompactPagination } from "./CompactPagination";
 import { ErrorAlert } from "./ErrorAlert";
 import { SearchIcon } from "@patternfly/react-icons";
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
-import { SearchResult, searchPackages, InstalledFilterType } from "../api";
+import { SearchResult, searchPackages, InstalledFilterType, BackendError, type ErrorCode } from "../api";
 import { sanitizeSearchInput } from "../utils";
 import { PackageDetailsModal } from "./PackageDetailsModal";
 import { SEARCH_DEBOUNCE_MS } from "../constants";
@@ -38,13 +38,15 @@ export const SearchView: React.FC = () => {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<ErrorCode | undefined>();
+  const [errorDetails, setErrorDetails] = useState<string | undefined>();
   const [searchInput, setSearchInput] = useState("");
   const [currentQuery, setCurrentQuery] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
   const [repoFilter, setRepoFilter] = useState("all");
   const [repoSelectOpen, setRepoSelectOpen] = useState(false);
   const [installedFilter, setInstalledFilter] = useState<InstalledFilterType>("all");
-  const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
+  const { selectedPackage, detailsLoading, detailsError, detailsErrorCode, detailsErrorContext, fetchDetails, clearDetails } = usePackageDetails();
   const { page, perPage, total, setPage, setPerPage, setTotal } = usePagination();
   const [totalInstalled, setTotalInstalled] = useState(0);
   const [totalNotInstalled, setTotalNotInstalled] = useState(0);
@@ -110,8 +112,11 @@ export const SearchView: React.FC = () => {
         setActiveSortIndex(null);
         setLoading(true);
         setError(null);
+        setErrorCode(undefined);
+        setErrorDetails(undefined);
         try {
           const response = await searchPackages({
+            signal: currentController.signal,
             query,
             offset: 0,
             limit: perPageRef.current,
@@ -126,6 +131,8 @@ export const SearchView: React.FC = () => {
         } catch (ex) {
           if (currentController.signal.aborted) return;
           setError(ex instanceof Error ? ex.message : String(ex));
+          setErrorCode(ex instanceof BackendError ? ex.code : undefined);
+          setErrorDetails(ex instanceof BackendError ? ex.details : undefined);
           setResults([]);
           setTotal(0);
           setTotalInstalled(0);
@@ -168,9 +175,12 @@ export const SearchView: React.FC = () => {
     const currentController = abortControllerRef.current;
     setLoading(true);
     setError(null);
+    setErrorCode(undefined);
+    setErrorDetails(undefined);
     try {
       const offset = (pageNum - 1) * pageSize;
       const response = await searchPackages({
+        signal: currentController.signal,
         query,
         offset,
         limit: pageSize,
@@ -189,6 +199,8 @@ export const SearchView: React.FC = () => {
     } catch (ex) {
       if (currentController.signal.aborted) return;
       setError(ex instanceof Error ? ex.message : String(ex));
+      setErrorCode(ex instanceof BackendError ? ex.code : undefined);
+      setErrorDetails(ex instanceof BackendError ? ex.details : undefined);
       setResults([]);
       setTotal(0);
       setTotalInstalled(0);
@@ -212,6 +224,8 @@ export const SearchView: React.FC = () => {
     const query = sanitizeSearchInput(searchInput);
     if (query.length < MIN_SEARCH_LENGTH) {
       setError(`Search query must be at least ${MIN_SEARCH_LENGTH} characters`);
+      setErrorCode("validation_error");
+      setErrorDetails(undefined);
       return;
     }
 
@@ -234,6 +248,8 @@ export const SearchView: React.FC = () => {
     setCurrentQuery("");
     setResults([]);
     setError(null);
+    setErrorCode(undefined);
+    setErrorDetails(undefined);
     setHasSearched(false);
     setRepoFilter("all");
     setInstalledFilter("all");
@@ -273,6 +289,8 @@ export const SearchView: React.FC = () => {
   const errorAlert = error ? (
     <ErrorAlert
       error={error}
+      code={errorCode}
+      details={errorDetails}
       title="Search failed"
       lockMessage="Another package manager operation is in progress. Please wait for it to complete before searching."
       className="pf-v6-u-mb-md"
@@ -463,6 +481,8 @@ export const SearchView: React.FC = () => {
           isLoading={detailsLoading}
           onClose={clearDetails}
           error={detailsError}
+          errorCode={detailsErrorCode}
+          errorDetails={detailsErrorContext}
           onPackageRemoved={() => {
             if (currentQuery) {
               fetchResults(currentQuery, page, perPage, installedFilter, true, activeSortIndex, activeSortDirection);

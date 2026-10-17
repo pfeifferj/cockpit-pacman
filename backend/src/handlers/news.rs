@@ -43,39 +43,61 @@ pub struct Dismissal {
     pub signature: Option<String>,
 }
 
-pub fn fetch_news(days: u32) -> Result<()> {
-    let days = days.min(365);
-    match fetch_news_items_from(ARCH_NEWS_URL, days) {
+const NEWS_TTL_SECS: i64 = 3600;
+
+#[derive(Serialize, Deserialize)]
+struct NewsCache {
+    #[serde(default)]
+    fetched_at: i64,
+    items: Vec<NewsItem>,
+}
+
+pub fn fetch_news(days: u32, force: bool) -> Result<()> {
+    let response = news_with_cache(ARCH_NEWS_URL, &news_cache_path()?, days.min(365), force)?;
+    emit_json(&response)
+}
+
+fn news_with_cache(url: &str, path: &Path, days: u32, force: bool) -> Result<NewsResponse> {
+    let cached = read_news_cache(path);
+    let now = Utc::now().timestamp();
+    if !force
+        && let Some(cache) = cached.as_ref()
+        && (0..NEWS_TTL_SECS).contains(&(now - cache.fetched_at))
+    {
+        return Ok(NewsResponse {
+            items: filter_items_within_days(cache.items.clone(), days),
+            stale: false,
+        });
+    }
+    match fetch_news_items_from(url, 365) {
         Ok(items) => {
-            let response = NewsResponse {
+            let cache = NewsCache {
+                fetched_at: now,
                 items,
-                stale: false,
             };
-            if let Ok(path) = news_cache_path()
-                && let Err(error) = write_json_atomic(&path, &response)
-            {
+            if let Err(error) = write_json_atomic(path, &cache) {
                 crate::util::journal_note(&format!("fetch-news: could not save cache: {error:#}"));
             }
-            emit_json(&response)
+            Ok(NewsResponse {
+                items: filter_items_within_days(cache.items, days),
+                stale: false,
+            })
         }
-        Err(e) => match news_cache_path().ok().and_then(read_news_cache) {
-            Some(items) => {
+        Err(error) => match cached {
+            Some(cache) => {
                 crate::util::journal_note(&format!(
-                    "fetch-news: using cached news after refresh failed: {e:#}"
+                    "fetch-news: using cached news after refresh failed: {error:#}"
                 ));
-                emit_json(&NewsResponse {
-                    items: filter_items_within_days(items, days),
+                Ok(NewsResponse {
+                    items: filter_items_within_days(cache.items, days),
                     stale: true,
                 })
             }
-            None => Err(e),
+            None => Err(error),
         },
     }
 }
 
-/// Keep only items published within the last `days`. The cache is written from
-/// whatever lookback the last live fetch used, so an offline response is
-/// re-filtered to honour the caller's requested window.
 pub(crate) fn filter_items_within_days(items: Vec<NewsItem>, days: u32) -> Vec<NewsItem> {
     let cutoff = Utc::now() - chrono::Duration::days(i64::from(days));
     items
@@ -92,10 +114,12 @@ fn news_cache_path() -> Result<PathBuf> {
     config_path("news-cache.json")
 }
 
-fn read_news_cache(path: PathBuf) -> Option<Vec<NewsItem>> {
-    let content = std::fs::read_to_string(&path).ok()?;
-    let cached: NewsResponse = serde_json::from_str(&content).ok()?;
-    Some(cached.items)
+fn read_news_cache(path: &Path) -> Option<NewsCache> {
+    let file = std::fs::File::open(path).ok()?;
+    if file.metadata().ok()?.len() > MAX_RSS_BYTES * 8 {
+        return None;
+    }
+    serde_json::from_reader(file.take(MAX_RSS_BYTES * 8)).ok()
 }
 
 fn fetch_news_items_from(url: &str, days: u32) -> Result<Vec<NewsItem>> {
@@ -388,6 +412,37 @@ mod fetch_tests {
             .mount(&server)
             .await;
         server
+    }
+
+    #[tokio::test]
+    async fn fresh_news_is_reused_and_force_refreshes() {
+        let server = serve(r#"<rss version="2.0"><channel><title>News</title><link>https://archlinux.org</link><description>News</description></channel></rss>"#).await;
+        let url = format!("{}/feeds/news/", server.uri());
+        let directory = std::env::temp_dir().join(format!(
+            "news-ttl-{}-{}",
+            std::process::id(),
+            super::Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("news.json");
+        assert!(!super::news_with_cache(&url, &path, 1, false).unwrap().stale);
+        assert!(
+            !super::news_with_cache(&url, &path, 365, false)
+                .unwrap()
+                .stale
+        );
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+        assert!(!super::news_with_cache(&url, &path, 30, true).unwrap().stale);
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
+        let mut cache = super::read_news_cache(&path).unwrap();
+        cache.fetched_at -= super::NEWS_TTL_SECS;
+        super::write_json_atomic(&path, &cache).unwrap();
+        assert!(
+            super::news_with_cache("http://127.0.0.1:1/", &path, 30, false)
+                .unwrap()
+                .stale
+        );
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[tokio::test]

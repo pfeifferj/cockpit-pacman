@@ -1468,7 +1468,7 @@ fn test_mark_dismissed_rejects_invalid_signatures() {
 
 #[test]
 fn test_build_update_stats_map_counts_per_package() {
-    use crate::handlers::query::build_update_stats_map;
+    use crate::log_cache::build_update_stats_map;
     use crate::models::{LogEntry, UpdateStats};
     use std::collections::HashMap;
 

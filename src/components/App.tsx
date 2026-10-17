@@ -111,6 +111,7 @@ export const App: React.FC = () => {
           </Alert>
         )}
         <Tabs
+          mountOnEnter
           activeKey={activeTab}
           onSelect={(_event, tabIndex) => setActiveTab(tabIndex)}
         >

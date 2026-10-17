@@ -1,85 +1,77 @@
 use anyhow::Result;
-use pacman_log::{Action, LogReader, Transaction};
 
+use crate::log_cache::ParsedLog;
 use crate::models::{GroupedLogResponse, LogEntry, LogGroup, LogResponse};
 use crate::util::emit_json;
 
-const TS_FMT: &str = "%Y-%m-%dT%H:%M:%S%z";
+const ENTRIES_PER_GROUP: usize = 100;
 
-struct LogStats {
-    entries: Vec<LogEntry>,
-    total_upgraded: usize,
-    total_installed: usize,
-    total_removed: usize,
-    total_other: usize,
+#[derive(Default)]
+struct Totals {
+    upgraded: usize,
+    installed: usize,
+    removed: usize,
+    downgraded: usize,
+    reinstalled: usize,
 }
 
-fn parse_filter(filter: Option<&str>) -> Option<Action> {
-    filter.and_then(|f| match f {
-        "upgraded" => Some(Action::Upgraded),
-        "installed" => Some(Action::Installed),
-        "removed" => Some(Action::Removed),
-        _ => None,
-    })
-}
-
-fn collect_log_entries(filter: Option<&str>, search: Option<&str>) -> LogStats {
-    let reader = LogReader::system();
-    let filter_action = parse_filter(filter);
-    let search_lower = search.map(|s| s.to_lowercase());
-
-    let mut entries: Vec<LogEntry> = Vec::new();
-    let mut total_upgraded = 0usize;
-    let mut total_installed = 0usize;
-    let mut total_removed = 0usize;
-    let mut total_other = 0usize;
-
-    for result in reader.reverse().into_iter() {
-        let entry = match result {
-            Ok(e) => e,
-            Err(e) => {
-                eprintln!("Warning: Failed to parse log entry: {}", e);
-                continue;
-            }
-        };
-
-        if let Some(ref needle) = search_lower
-            && !entry.package.to_lowercase().contains(needle.as_str())
-        {
-            continue;
-        }
-
-        match entry.action {
-            Action::Upgraded => total_upgraded += 1,
-            Action::Installed => total_installed += 1,
-            Action::Removed => total_removed += 1,
-            Action::Downgraded | Action::Reinstalled => total_other += 1,
-        }
-
-        let matches_filter = match filter_action {
-            Some(Action::Upgraded) => entry.action == Action::Upgraded,
-            Some(Action::Installed) => entry.action == Action::Installed,
-            Some(Action::Removed) => entry.action == Action::Removed,
-            Some(_) | None => true,
-        };
-
-        if matches_filter {
-            entries.push(LogEntry {
-                timestamp: entry.timestamp.format("%Y-%m-%dT%H:%M:%S%z").to_string(),
-                action: entry.action.to_string(),
-                package: entry.package,
-                old_version: entry.old_version,
-                new_version: entry.new_version,
-            });
+impl Totals {
+    fn add(&mut self, entry: &LogEntry) {
+        match entry.action.as_str() {
+            "upgraded" => self.upgraded += 1,
+            "installed" => self.installed += 1,
+            "removed" => self.removed += 1,
+            "downgraded" => self.downgraded += 1,
+            "reinstalled" => self.reinstalled += 1,
+            _ => {}
         }
     }
 
-    LogStats {
+    fn other(&self) -> usize {
+        self.downgraded + self.reinstalled
+    }
+}
+
+fn action_filter(filter: Option<&str>) -> Option<&str> {
+    filter.filter(|value| matches!(*value, "upgraded" | "installed" | "removed"))
+}
+
+fn matches_search(entry: &LogEntry, search: Option<&str>) -> bool {
+    search.is_none_or(|query| entry.package.to_lowercase().contains(query))
+}
+
+fn history_page(
+    parsed: &ParsedLog,
+    offset: usize,
+    limit: usize,
+    filter: Option<&str>,
+    search: Option<&str>,
+) -> LogResponse {
+    let filter = action_filter(filter);
+    let search = search.map(str::to_lowercase);
+    let mut totals = Totals::default();
+    let mut total = 0;
+    let mut entries = Vec::new();
+    for entry in parsed.entries.iter().rev() {
+        if !matches_search(entry, search.as_deref()) {
+            continue;
+        }
+        totals.add(entry);
+        if filter.is_some_and(|action| action != entry.action) {
+            continue;
+        }
+        if total >= offset && entries.len() < limit {
+            entries.push(entry.clone());
+        }
+        total += 1;
+    }
+    LogResponse {
         entries,
-        total_upgraded,
-        total_installed,
-        total_removed,
-        total_other,
+        total,
+        total_upgraded: totals.upgraded,
+        total_installed: totals.installed,
+        total_removed: totals.removed,
+        total_other: totals.other(),
     }
 }
 
@@ -89,111 +81,72 @@ pub fn get_history(
     filter: Option<&str>,
     search: Option<&str>,
 ) -> Result<()> {
-    let stats = collect_log_entries(filter, search);
-    let total = stats.entries.len();
-    let paginated: Vec<LogEntry> = stats.entries.into_iter().skip(offset).take(limit).collect();
-
-    let response = LogResponse {
-        entries: paginated,
-        total,
-        total_upgraded: stats.total_upgraded,
-        total_installed: stats.total_installed,
-        total_removed: stats.total_removed,
-        total_other: stats.total_other,
-    };
-
-    emit_json(&response)
+    emit_json(&history_page(
+        &crate::log_cache::load()?,
+        offset,
+        limit,
+        filter,
+        search,
+    ))
 }
 
-fn map_entry(op: pacman_log::LogEntry) -> LogEntry {
-    LogEntry {
-        timestamp: op.timestamp.format(TS_FMT).to_string(),
-        action: op.action.to_string(),
-        package: op.package,
-        old_version: op.old_version,
-        new_version: op.new_version,
-    }
-}
-
-struct GroupTotals {
-    upgraded: usize,
-    installed: usize,
-    removed: usize,
-    other: usize,
-}
-
-/// Build log groups from real pacman transactions. Totals count every
-/// search-matched operation regardless of the action filter; group entries are
-/// additionally narrowed to the filtered action. Empty groups are dropped.
-fn build_groups(
-    txs: impl IntoIterator<Item = Transaction>,
-    filter_action: Option<Action>,
-    search_lower: Option<&str>,
-) -> (Vec<LogGroup>, GroupTotals) {
-    let mut totals = GroupTotals {
-        upgraded: 0,
-        installed: 0,
-        removed: 0,
-        other: 0,
-    };
-    let mut groups: Vec<LogGroup> = Vec::new();
-
-    for tx in txs {
-        let mut entries: Vec<LogEntry> = Vec::new();
-        let (mut up, mut ins, mut rem, mut down, mut re) = (0, 0, 0, 0, 0);
-
-        for op in tx.operations {
-            if let Some(needle) = search_lower
-                && !op.package.to_lowercase().contains(needle)
-            {
-                continue;
+fn grouped_page(
+    parsed: &ParsedLog,
+    offset: usize,
+    limit: usize,
+    filter: Option<&str>,
+    search: Option<&str>,
+) -> GroupedLogResponse {
+    let filter = action_filter(filter);
+    let search = search.map(str::to_lowercase);
+    let mut totals = Totals::default();
+    let mut total_groups = 0;
+    let mut groups = Vec::new();
+    for (transaction_index, transaction) in parsed.transactions.iter().enumerate().rev() {
+        let entries: Vec<_> = parsed.entries[transaction.start..transaction.end]
+            .iter()
+            .rev()
+            .filter(|entry| {
+                if !matches_search(entry, search.as_deref()) {
+                    return false;
+                }
+                totals.add(entry);
+                filter.is_none_or(|action| action == entry.action)
+            })
+            .collect();
+        let parts = entries.len().div_ceil(ENTRIES_PER_GROUP);
+        for (part, entries) in entries.chunks(ENTRIES_PER_GROUP).enumerate() {
+            if total_groups >= offset && groups.len() < limit {
+                let mut counts = Totals::default();
+                for entry in entries {
+                    counts.add(entry);
+                }
+                groups.push(LogGroup {
+                    id: format!("group-{transaction_index}-{part}"),
+                    command: transaction.command.clone(),
+                    start_time: transaction.start_time.clone(),
+                    end_time: transaction.end_time.clone(),
+                    entries: entries.iter().map(|entry| (*entry).clone()).collect(),
+                    upgraded_count: counts.upgraded,
+                    installed_count: counts.installed,
+                    removed_count: counts.removed,
+                    downgraded_count: counts.downgraded,
+                    reinstalled_count: counts.reinstalled,
+                    part: (parts > 1).then_some(part + 1),
+                    parts: (parts > 1).then_some(parts),
+                });
             }
-
-            match op.action {
-                Action::Upgraded => totals.upgraded += 1,
-                Action::Installed => totals.installed += 1,
-                Action::Removed => totals.removed += 1,
-                Action::Downgraded | Action::Reinstalled => totals.other += 1,
-            }
-
-            if filter_action.is_some_and(|a| a != op.action) {
-                continue;
-            }
-
-            match op.action {
-                Action::Upgraded => up += 1,
-                Action::Installed => ins += 1,
-                Action::Removed => rem += 1,
-                Action::Downgraded => down += 1,
-                Action::Reinstalled => re += 1,
-            }
-            entries.push(map_entry(op));
+            total_groups += 1;
         }
-
-        if entries.is_empty() {
-            continue;
-        }
-        entries.reverse();
-
-        groups.push(LogGroup {
-            id: String::new(),
-            command: tx.command,
-            start_time: tx.started.format(TS_FMT).to_string(),
-            end_time: tx
-                .completed
-                .unwrap_or(tx.started)
-                .format(TS_FMT)
-                .to_string(),
-            entries,
-            upgraded_count: up,
-            installed_count: ins,
-            removed_count: rem,
-            downgraded_count: down,
-            reinstalled_count: re,
-        });
     }
-
-    (groups, totals)
+    GroupedLogResponse {
+        groups,
+        total_groups,
+        total_upgraded: totals.upgraded,
+        total_installed: totals.installed,
+        total_removed: totals.removed,
+        total_other: totals.other(),
+    }
 }
 
 pub fn get_grouped_history(
@@ -202,115 +155,124 @@ pub fn get_grouped_history(
     filter: Option<&str>,
     search: Option<&str>,
 ) -> Result<()> {
-    let filter_action = parse_filter(filter);
-    let search_lower = search.map(|s| s.to_lowercase());
-
-    let txs = LogReader::system().transactions().filter_map(|r| match r {
-        Ok(tx) => Some(tx),
-        Err(e) => {
-            eprintln!("Warning: Failed to parse transaction: {}", e);
-            None
-        }
-    });
-
-    let (mut groups, totals) = build_groups(txs, filter_action, search_lower.as_deref());
-
-    groups.reverse();
-    for (i, group) in groups.iter_mut().enumerate() {
-        group.id = format!("group-{}", i);
-    }
-
-    let total_groups = groups.len();
-    let paginated_groups: Vec<LogGroup> = groups.into_iter().skip(offset).take(limit).collect();
-
-    let response = GroupedLogResponse {
-        groups: paginated_groups,
-        total_groups,
-        total_upgraded: totals.upgraded,
-        total_installed: totals.installed,
-        total_removed: totals.removed,
-        total_other: totals.other,
-    };
-
-    emit_json(&response)
+    emit_json(&grouped_page(
+        &crate::log_cache::load()?,
+        offset,
+        limit,
+        filter,
+        search,
+    ))
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use chrono::DateTime;
+    use crate::log_cache::LogTransaction;
 
-    fn ts(s: &str) -> DateTime<chrono::FixedOffset> {
-        DateTime::parse_from_str(s, TS_FMT).unwrap()
-    }
-
-    fn op(action: Action, pkg: &str) -> pacman_log::LogEntry {
-        pacman_log::LogEntry {
-            timestamp: ts("2026-01-21T10:00:00+0000"),
-            action,
-            package: pkg.to_string(),
-            old_version: None,
-            new_version: None,
+    fn log(actions: &[(&str, &str)]) -> ParsedLog {
+        ParsedLog {
+            entries: actions
+                .iter()
+                .map(|(action, package)| LogEntry {
+                    timestamp: "2026-01-21T10:00:00+0000".to_string(),
+                    action: action.to_string(),
+                    package: package.to_string(),
+                    old_version: None,
+                    new_version: None,
+                })
+                .collect(),
+            transactions: vec![LogTransaction {
+                command: Some("pacman -Syu".to_string()),
+                start_time: "2026-01-21T10:00:00+0000".to_string(),
+                end_time: "2026-01-21T10:00:05+0000".to_string(),
+                start: 0,
+                end: actions.len(),
+            }],
         }
     }
 
     #[test]
-    fn build_groups_tallies_and_labels() {
-        let tx = Transaction {
-            command: Some("pacman -Syu".to_string()),
-            started: ts("2026-01-21T10:00:00+0000"),
-            completed: Some(ts("2026-01-21T10:00:05+0000")),
-            operations: vec![
-                op(Action::Upgraded, "pkg1"),
-                op(Action::Installed, "pkg2"),
-                op(Action::Removed, "pkg3"),
-            ],
-        };
-
-        let (groups, totals) = build_groups(vec![tx], None, None);
-        assert_eq!(groups.len(), 1);
-        let g = &groups[0];
-        assert_eq!(g.command.as_deref(), Some("pacman -Syu"));
-        assert_eq!(g.start_time, "2026-01-21T10:00:00+0000");
-        assert_eq!(g.end_time, "2026-01-21T10:00:05+0000");
+    fn history_and_groups_keep_search_totals_across_action_filters() {
+        let parsed = log(&[
+            ("upgraded", "abc"),
+            ("installed", "abcd"),
+            ("removed", "other"),
+        ]);
+        let grouped = grouped_page(&parsed, 0, 10, Some("installed"), Some("ABC"));
+        assert_eq!(grouped.total_groups, 1);
+        assert_eq!(grouped.groups[0].entries[0].package, "abcd");
+        assert_eq!(grouped.groups[0].command.as_deref(), Some("pacman -Syu"));
         assert_eq!(
-            (g.upgraded_count, g.installed_count, g.removed_count),
-            (1, 1, 1)
+            (
+                grouped.total_upgraded,
+                grouped.total_installed,
+                grouped.total_removed
+            ),
+            (1, 1, 0)
         );
         assert_eq!(
-            (totals.upgraded, totals.installed, totals.removed),
-            (1, 1, 1)
+            (
+                grouped.groups[0].upgraded_count,
+                grouped.groups[0].installed_count
+            ),
+            (0, 1)
+        );
+        let flat = history_page(&parsed, 0, 10, Some("installed"), Some("ABC"));
+        assert_eq!(flat.total, 1);
+        assert_eq!(
+            (
+                flat.total_upgraded,
+                flat.total_installed,
+                flat.total_removed
+            ),
+            (1, 1, 0)
         );
     }
 
     #[test]
-    fn build_groups_action_filter_keeps_totals() {
-        let tx = Transaction {
-            command: None,
-            started: ts("2026-01-21T10:00:00+0000"),
-            completed: Some(ts("2026-01-21T10:00:05+0000")),
-            operations: vec![op(Action::Upgraded, "a"), op(Action::Installed, "b")],
-        };
-
-        let (groups, totals) = build_groups(vec![tx], Some(Action::Installed), None);
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].entries.len(), 1);
-        assert_eq!(groups[0].installed_count, 1);
-        assert_eq!(groups[0].upgraded_count, 0);
-        assert_eq!(totals.upgraded, 1);
-        assert_eq!(totals.installed, 1);
+    fn large_transactions_page_without_losing_or_repeating_entries() {
+        let names: Vec<_> = (0..251).map(|index| format!("pkg{index}")).collect();
+        let actions: Vec<_> = names
+            .iter()
+            .map(|name| ("upgraded", name.as_str()))
+            .collect();
+        let parsed = log(&actions);
+        let mut packages = Vec::new();
+        for offset in 0..3 {
+            let page = grouped_page(&parsed, offset, 1, None, None);
+            assert_eq!(page.total_groups, 3);
+            assert_eq!(page.total_upgraded, 251);
+            assert_eq!(page.groups.len(), 1);
+            let group = &page.groups[0];
+            assert_eq!(group.part, Some(offset + 1));
+            assert_eq!(group.parts, Some(3));
+            assert!(group.entries.len() <= ENTRIES_PER_GROUP);
+            assert_eq!(group.upgraded_count, group.entries.len());
+            packages.extend(group.entries.iter().map(|entry| entry.package.clone()));
+        }
+        assert_eq!(packages, names.into_iter().rev().collect::<Vec<_>>());
+        assert!(grouped_page(&parsed, 3, 1, None, None).groups.is_empty());
+        let filtered = grouped_page(&parsed, 0, 1, None, Some("pkg250"));
+        assert_eq!(filtered.groups[0].part, None);
+        assert_eq!(filtered.total_groups, 1);
     }
 
     #[test]
-    fn build_groups_search_drops_empty_group() {
-        let tx = Transaction {
-            command: None,
-            started: ts("2026-01-21T10:00:00+0000"),
-            completed: None,
-            operations: vec![op(Action::Upgraded, "firefox")],
-        };
-
-        let (groups, _) = build_groups(vec![tx], None, Some("chromium"));
-        assert!(groups.is_empty());
+    fn flat_pages_keep_requested_order_and_totals() {
+        let parsed = log(&[
+            ("upgraded", "first"),
+            ("installed", "middle"),
+            ("removed", "last"),
+        ]);
+        let page = history_page(&parsed, 1, 1, None, None);
+        assert_eq!(page.total, 3);
+        assert_eq!(page.entries.len(), 1);
+        assert_eq!(page.entries[0].package, "middle");
+        assert!(
+            grouped_page(&parsed, 0, 10, None, Some("absent"))
+                .groups
+                .is_empty()
+        );
     }
 }

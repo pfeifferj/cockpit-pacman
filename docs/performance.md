@@ -33,3 +33,31 @@ The first package-cache lookup across both sync databases took a median
 the same handle took about 0.002 ms. Search pays that parsing cost; the
 installed-package `bash` dependency query above is a different workload.
 The backend retains its existing process lifetime.
+
+## Pacman log cache
+
+A local debug-build check on 2026-10-11 used a 4,331,300-byte log containing
+60,000 package operations across 400 transactions. The initial parse and
+cache write took 1,684 ms, loading the cached history took 202 ms, and reading
+one package's cached update statistics took 0.70 ms. These measurements cover
+the internal reads, exclude process startup, and are not comparable to the
+release-build VM measurements above.
+
+Reproduce the check with:
+
+```sh
+cargo test --manifest-path backend/Cargo.toml --lib \
+  representative_log_cache_timings --locked --offline -- --ignored --nocapture
+```
+
+Both caches persist between backend processes. They are rebuilt when the log's
+device, inode, length, modification time, or change time differs. Package details
+read the smaller statistics cache without loading the full history. History
+groups contain at most 100 matching package operations; larger transactions
+retain every operation in numbered parts.
+
+Serialized cache files are limited to 64 MiB and written incrementally. An
+oversized or unreadable cache falls back to parsing the source log. History
+still loads the parsed operations into memory and filters the complete log on
+each request, so memory use remains proportional to the log's size. The cache
+avoids repeated log parsing; it is not an index for querying large logs.

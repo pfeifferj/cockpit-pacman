@@ -71,7 +71,7 @@ export const CacheView: React.FC = () => {
   const [refresh, setRefresh] = useState(0);
   const [loading, setLoading] = useState(true);
   const debouncedSearch = useDebouncedValue(searchFilter, SEARCH_DEBOUNCE_MS);
-  const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
+  const { selectedPackage, detailsLoading, detailsError, detailsErrorCode, detailsErrorContext, fetchDetails, clearDetails } = usePackageDetails();
   const { page, perPage, setPage, onSetPage, onPerPageSelect, resetPage } = usePagination();
   const cancelRef = useRef<(() => void) | null>(null);
   const cancellingRef = useRef(false);
@@ -522,6 +522,8 @@ export const CacheView: React.FC = () => {
         isLoading={detailsLoading}
         onClose={clearDetails}
         error={detailsError}
+        errorCode={detailsErrorCode}
+        errorDetails={detailsErrorContext}
       />
     </Card>
   );

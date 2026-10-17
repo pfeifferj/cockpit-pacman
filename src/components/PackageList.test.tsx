@@ -72,13 +72,31 @@ describe("PackageList", () => {
   });
 
   it("displays error message on API failure", async () => {
-    mockListInstalled.mockRejectedValue(new Error("Network error"));
+    mockListInstalled.mockRejectedValue(new api.BackendError("Cannot read installed packages", "internal_error", "The local database has an invalid entry"));
 
     render(<PackageList />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Network error/)).toBeInTheDocument();
+      expect(screen.getByText("Cannot read installed packages")).toBeInTheDocument();
     });
+    expect(screen.getByText("The local database has an invalid entry")).toBeInTheDocument();
+  });
+
+  it("shows refresh diagnostics while retaining the loaded packages", async () => {
+    render(<PackageList />);
+    await screen.findByText("linux");
+    mockListInstalled.mockRejectedValueOnce(new api.BackendError("Cannot read installed packages", "internal_error", "The local database is unavailable"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Explicit/i })); });
+    expect(screen.getByText("The local database is unavailable")).toBeInTheDocument();
+    expect(screen.getByText("linux")).toBeInTheDocument();
+  });
+
+  it("passes package lookup diagnostics into the details modal", async () => {
+    mockGetPackageInfo.mockRejectedValue(new api.BackendError("Cannot read package", "internal_error", "The package metadata is damaged"));
+    render(<PackageList />);
+    fireEvent.click(await screen.findByText("linux"));
+    expect(await screen.findByText("The package metadata is damaged")).toBeInTheDocument();
+    expect(screen.getByText("Could not load package details")).toBeInTheDocument();
   });
 
   it("shows package count badges", async () => {

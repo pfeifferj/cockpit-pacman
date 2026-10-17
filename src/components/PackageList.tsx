@@ -36,6 +36,8 @@ import {
   FilterType,
   listInstalled,
   formatSize,
+  BackendError,
+  type ErrorCode,
 } from "../api";
 import { sanitizeSearchInput } from "../utils";
 import { PackageDetailsModal } from "./PackageDetailsModal";
@@ -53,10 +55,12 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, initialF
   const [packages, setPackages] = useState<Package[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<ErrorCode | undefined>();
+  const [errorDetails, setErrorDetails] = useState<string | undefined>();
   const [searchValue, setSearchValue] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [filter, setFilter] = useState<FilterType>("all");
-  const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
+  const { selectedPackage, detailsLoading, detailsError, detailsErrorCode, detailsErrorContext, fetchDetails, clearDetails } = usePackageDetails();
 
   const { page, perPage, total, setPage, setTotal, onSetPage, onPerPageSelect } = usePagination();
   const [totalExplicit, setTotalExplicit] = useState(0);
@@ -127,6 +131,8 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, initialF
     }
     setLoading(true);
     setError(null);
+    setErrorCode(undefined);
+    setErrorDetails(undefined);
     try {
       const offset = (page - 1) * perPage;
       const response: PackageListResponse = await listInstalled({
@@ -147,6 +153,8 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, initialF
     } catch (ex) {
       if (!isMountedRef.current) return;
       setError(ex instanceof Error ? ex.message : String(ex));
+      setErrorCode(ex instanceof BackendError ? ex.code : undefined);
+      setErrorDetails(ex instanceof BackendError ? ex.details : undefined);
     } finally {
       if (isMountedRef.current) {
         setLoading(false);
@@ -181,15 +189,21 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, initialF
     fetchDetails(pkgName);
   };
 
-  if (error && packages.length === 0 && filter !== "orphan") {
+  const errorAlert = error && filter !== "orphan" && filter !== "graph" ? (
+    <ErrorAlert
+      error={error}
+      code={errorCode}
+      details={errorDetails}
+      title="Error loading packages"
+      lockMessage="Another package manager operation is in progress. This could be a system upgrade, package installation, or database sync. Please wait for it to complete."
+    />
+  ) : null;
+
+  if (errorAlert && packages.length === 0) {
     return (
       <Card>
         <CardBody>
-          <ErrorAlert
-            error={error}
-            title="Error loading packages"
-            lockMessage="Another package manager operation is in progress. This could be a system upgrade, package installation, or database sync. Please wait for it to complete."
-          />
+          {errorAlert}
         </CardBody>
       </Card>
     );
@@ -258,6 +272,7 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, initialF
   return (
     <Card>
       <CardBody>
+        {errorAlert}
         <Toolbar>
           <ToolbarContent>
             {filter !== "graph" && filter !== "orphan" && (
@@ -381,6 +396,8 @@ export const PackageList: React.FC<PackageListProps> = ({ graphPackage, initialF
           isLoading={detailsLoading}
           onClose={clearDetails}
           error={detailsError}
+          errorCode={detailsErrorCode}
+          errorDetails={detailsErrorContext}
           onViewDependencies={(packageName) => {
             onGraphPackageChange?.(packageName);
             setFilter("graph");

@@ -12,7 +12,7 @@ pub struct Signoff {
     pub revoked: bool,
 }
 
-#[derive(Serialize, Deserialize, TS)]
+#[derive(Serialize, Deserialize, Clone, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct NewsItem {
     pub title: String,
@@ -435,6 +435,12 @@ pub struct LogGroup {
     pub removed_count: usize,
     pub downgraded_count: usize,
     pub reinstalled_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub part: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub parts: Option<usize>,
 }
 
 #[derive(Serialize, Deserialize, TS)]

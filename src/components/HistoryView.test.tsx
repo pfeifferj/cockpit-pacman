@@ -48,6 +48,15 @@ describe("HistoryView", () => {
     expect(screen.getByText("Removed")).toBeInTheDocument();
   });
 
+  it("labels separate parts of a large transaction", async () => {
+    mockGetGroupedHistory.mockResolvedValue({
+      ...mockGroupedLogResponse,
+      groups: [{ ...mockGroupedLogResponse.groups[0], part: 2, parts: 3 }],
+    });
+    render(<HistoryView />);
+    expect(await screen.findByText("Part 2 of 3")).toBeInTheDocument();
+  });
+
   it("shows error state on API failure", async () => {
     mockGetGroupedHistory.mockRejectedValue(new Error("Failed to read log"));
     render(<HistoryView />);

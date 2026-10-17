@@ -8,7 +8,9 @@ export function useArchNews(): {
   stale: boolean;
   dismiss: (link: string) => void;
   clearError: () => void;
+  refresh: () => void;
 } {
+  const [refreshCount, setRefreshCount] = useState(0);
   const [items, setItems] = useState<NewsItem[]>([]);
   const [error, setError] = useState(false);
   const [stale, setStale] = useState(false);
@@ -23,7 +25,12 @@ export function useArchNews(): {
         }
       })
       .catch(() => { /* ignore: persistence unavailable */ });
-    fetchNews(NEWS_LOOKBACK_DAYS)
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchNews(NEWS_LOOKBACK_DAYS, refreshCount > 0)
       .then((r) => {
         if (cancelled) return;
         setError(false);
@@ -37,7 +44,7 @@ export function useArchNews(): {
         setItems([]);
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [refreshCount]);
 
   const visible = useMemo(
     () => items.filter((item) => !dismissed.has(item.link)),
@@ -55,5 +62,7 @@ export function useArchNews(): {
 
   const clearError = useCallback(() => setError(false), []);
 
-  return { items: visible, error, stale, dismiss, clearError };
+  const refresh = useCallback(() => setRefreshCount(count => count + 1), []);
+
+  return { items: visible, error, stale, dismiss, clearError, refresh };
 }

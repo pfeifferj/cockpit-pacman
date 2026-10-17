@@ -184,7 +184,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     setErrorEpoch((e) => e + 1);
     setState("error");
   }, []);
-  const { selectedPackage, detailsLoading: packageLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
+  const { selectedPackage, detailsLoading: packageLoading, detailsError, detailsErrorCode, detailsErrorContext, fetchDetails, clearDetails } = usePackageDetails();
   const [searchFilter, setSearchFilter] = useState("");
   const [repoFilter, setRepoFilter] = useState("all");
   const [securityFilterActive, setSecurityFilterActive] = useState(false);
@@ -270,7 +270,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     load: loadSecurityData,
     setEnabled: handleSetSecurityEnabled,
   } = useSecurityAdvisories();
-  const { items: visibleNews, error: newsError, stale: newsStale, dismiss: dismissNewsItem, clearError: clearNewsError } = useArchNews();
+  const { items: visibleNews, error: newsError, stale: newsStale, dismiss: dismissNewsItem, clearError: clearNewsError, refresh: refreshNews } = useArchNews();
 
   const { activeSortKey, activeSortDirection, getSortParams } = useSortableTable({
     columns: { name: 1, repo: 2, download: 4, installed: 5, net: 6 },
@@ -472,16 +472,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   }, [state, updates.length, scheduledUnacked, latestScheduledRun]);
 
   useEffect(() => {
-    const { cancel } = syncDatabase({
-      onData: appendLog,
-      onComplete: () => loadUpdates(),
-      onError: (err, code, details) => {
-        void loadSecurityData();
-        failWith("sync", err, code, details);
-      },
-    });
-    return () => cancel();
-  }, [loadUpdates, loadSecurityData, failWith, appendLog]);
+    let disposed = false;
+    Promise.resolve().then(() => { if (!disposed) void loadUpdates(); });
+    return () => { disposed = true; };
+  }, [loadUpdates]);
 
   const loadRebootStatus = useCallback(async () => {
     try {
@@ -600,6 +594,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
 
   const handleRefresh = async () => {
     if (cancelRef.current) return;
+    refreshNews();
     setState("checking");
     resetLog();
     setLockRetryExhausted(false);
@@ -1697,6 +1692,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
         isLoading={packageLoading}
         onClose={clearDetails}
         error={detailsError}
+        errorCode={detailsErrorCode}
+        errorDetails={detailsErrorContext}
         onViewDependencies={onViewDependencies}
         onViewHistory={onViewHistory}
         onPackageRemoved={loadUpdates}

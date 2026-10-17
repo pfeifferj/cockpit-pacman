@@ -139,7 +139,8 @@ describe("usePackageDetails", () => {
       await result.current.fetchDetails("linux", { strategy: "local-then-sync" });
     });
 
-    expect(result.current.detailsError).toContain("not found");
+    expect(result.current.detailsError).toContain("Could not load package");
+    expect(result.current.detailsErrorContext).toBe("Local database: not found\nSync databases: not found");
     expect(onError).toHaveBeenCalled();
   });
 
@@ -154,7 +155,7 @@ describe("usePackageDetails", () => {
     });
 
     expect(result.current.detailsError).toBe("Network error");
-    expect(onError).toHaveBeenCalledWith("Network error");
+    expect(onError).toHaveBeenCalledWith("Network error", undefined, undefined);
     expect(result.current.selectedPackage).toBeNull();
   });
 
@@ -171,6 +172,33 @@ describe("usePackageDetails", () => {
     act(() => { result.current.clearDetails(); });
     expect(result.current.selectedPackage).toBeNull();
     expect(result.current.detailsError).toBeNull();
+  });
+
+  it("retains structured errors in state and the callback and clears them on retry", async () => {
+    mockGetPackageInfo.mockRejectedValueOnce(new api.BackendError("Cannot read package", "permission_denied", "The local database cannot be opened"));
+    mockGetPackageInfo.mockResolvedValue(localDetails);
+    const onError = vi.fn();
+    const { result } = renderHook(() => usePackageDetails(onError));
+    await act(async () => { await result.current.fetchDetails("linux"); });
+    expect(result.current.detailsErrorCode).toBe("permission_denied");
+    expect(result.current.detailsErrorContext).toBe("The local database cannot be opened");
+    expect(onError).toHaveBeenCalledWith("Cannot read package", "permission_denied", "The local database cannot be opened");
+    await act(async () => { await result.current.fetchDetails("linux"); });
+    expect(result.current.detailsError).toBeNull();
+    expect(result.current.detailsErrorCode).toBeUndefined();
+    expect(result.current.detailsErrorContext).toBeUndefined();
+  });
+
+  it("retains both backend causes when local and sync lookups fail", async () => {
+    mockGetPackageInfo.mockRejectedValue(new api.BackendError("Cannot read local package", "internal_error", "The local entry is damaged"));
+    mockGetSyncPackageInfo.mockRejectedValue(new api.BackendError("Cannot read sync package", "permission_denied", "The sync directory is not readable"));
+    const { result } = renderHook(() => usePackageDetails());
+    await act(async () => { await result.current.fetchDetails("linux", { strategy: "local-then-sync" }); });
+    expect(result.current.detailsErrorContext).toBe("Local database: Cannot read local package\nThe local entry is damaged\nSync databases: Cannot read sync package\nThe sync directory is not readable");
+    expect(result.current.detailsErrorCode).toBe("permission_denied");
+    act(() => { result.current.clearDetails(); });
+    expect(result.current.detailsErrorContext).toBeUndefined();
+    expect(result.current.detailsErrorCode).toBeUndefined();
   });
 
   it("shows loading state during fetch", async () => {

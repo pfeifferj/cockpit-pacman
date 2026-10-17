@@ -81,6 +81,7 @@ export interface SearchParams {
   installed?: InstalledFilterType;
   sortBy?: string;
   sortDir?: SortDirection;
+  signal?: AbortSignal;
 }
 
 export type ErrorCode =
@@ -188,7 +189,8 @@ export function parseErrorCode(message: string): ErrorCode {
   return "internal_error";
 }
 
-async function runBackend<T>(command: string, args: string[] = [], options?: { superuser?: "try" | "require" | "none"; stdin?: string }): Promise<T> {
+async function runBackend<T>(command: string, args: string[] = [], options?: { superuser?: "try" | "require" | "none"; stdin?: string; signal?: AbortSignal }): Promise<T> {
+  if (options?.signal?.aborted) throw new BackendError("Operation cancelled", "cancelled");
   const su = options?.superuser ?? "try";
   const spawnOpts: Record<string, unknown> = { err: "message" };
   if (su !== "none") {
@@ -212,10 +214,14 @@ async function runBackend<T>(command: string, args: string[] = [], options?: { s
     spawnPromise.close("timeout");
   });
 
+  const cancel = () => spawnPromise.close("cancelled");
+  options?.signal?.addEventListener("abort", cancel, { once: true });
+
   let output: string;
   try {
     output = await spawnPromise;
   } catch (ex) {
+    if (options?.signal?.aborted) throw new BackendError("Operation cancelled", "cancelled");
     if (controller.signal.aborted) {
       throw new BackendError(
         `Backend operation timed out after ${BACKEND_TIMEOUT_MS / 1000}s`,
@@ -230,6 +236,7 @@ async function runBackend<T>(command: string, args: string[] = [], options?: { s
     throw new BackendError(`Backend command '${command}' failed: ${message}`, code);
   } finally {
     clearTimeout(timeoutId);
+    options?.signal?.removeEventListener("abort", cancel);
   }
 
   if (!output || output.trim() === "") {
@@ -315,7 +322,7 @@ export async function getPackageInfo(name: string): Promise<PackageDetails> {
 
 export async function searchPackages(params: SearchParams): Promise<SearchResponse> {
   const { query, offset = 0, limit = 100, installed = "all", sortBy = "", sortDir = "" } = params;
-  return runBackend<SearchResponse>("search", [sanitizeSearchInput(query), String(offset), String(limit), installed, sortBy, sortDir], { superuser: "none" });
+  return runBackend<SearchResponse>("search", [sanitizeSearchInput(query), String(offset), String(limit), installed, sortBy, sortDir], { superuser: "none", signal: params.signal });
 }
 
 export async function getSyncPackageInfo(name: string, repo?: string): Promise<SyncPackageDetails> {
@@ -895,8 +902,8 @@ export async function deleteMirrorBackup(timestamp: number): Promise<RestoreMirr
   return runBackend<RestoreMirrorBackupResponse>("delete-mirror-backup", [String(timestamp)], { superuser: "require" });
 }
 
-export async function fetchNews(days: number = 30): Promise<NewsResponse> {
-  return runBackend<NewsResponse>("fetch-news", [String(days)], { superuser: "none" });
+export async function fetchNews(days: number = 30, force = false): Promise<NewsResponse> {
+  return runBackend<NewsResponse>("fetch-news", force ? [String(days), "true"] : [String(days)], { superuser: "none" });
 }
 
 export async function getNewsReadState(): Promise<NewsReadState> {

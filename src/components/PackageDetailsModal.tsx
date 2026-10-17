@@ -21,13 +21,14 @@ import {
 	EmptyStateBody,
 } from '@patternfly/react-core';
 import { OutlinedQuestionCircleIcon, ArrowDownIcon, ExclamationCircleIcon, TopologyIcon, TrashIcon, PlusCircleIcon, HistoryIcon, BanIcon } from "@patternfly/react-icons";
-import { PackageDetails, SyncPackageDetails, SecurityInfoResponse, formatSize, addIgnoredPackage, removeIgnoredPackage, getSecurityInfo } from "../api";
+import { PackageDetails, SyncPackageDetails, SecurityInfoResponse, formatSize, addIgnoredPackage, removeIgnoredPackage, getSecurityInfo, type ErrorCode } from "../api";
 import { severityColor } from "../severity";
 import { TimeAgo } from "./TimeAgo";
 import { sanitizeUrl, sanitizeErrorMessage } from "../utils";
 import { DowngradeModal } from "./DowngradeModal";
 import { PackageActionModal, installConfig, uninstallConfig } from "./PackageActionModal";
 import { useNavigation } from "../contexts/NavigationContext";
+import { ErrorDetails } from "./ErrorDetails";
 
 type PackageInfo = PackageDetails | SyncPackageDetails;
 
@@ -103,6 +104,8 @@ interface PackageDetailsModalProps {
   isLoading: boolean;
   onClose: () => void;
   error?: string | null;
+  errorCode?: ErrorCode;
+  errorDetails?: string;
   onViewDependencies?: (packageName: string) => void;
   onViewHistory?: (packageName: string) => void;
   onPackageRemoved?: () => void;
@@ -116,6 +119,8 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
   isLoading,
   onClose,
   error,
+  errorCode,
+  errorDetails,
   onViewDependencies: onViewDependenciesProp,
   onViewHistory: onViewHistoryProp,
   onPackageRemoved,
@@ -194,9 +199,10 @@ export const PackageDetailsModal: React.FC<PackageDetailsModalProps> = ({
         {isLoading ? (
           <Spinner />
         ) : error ? (
-          <EmptyState headingLevel="h4" icon={ExclamationCircleIcon} titleText="Package not found">
+          <EmptyState headingLevel="h4" icon={ExclamationCircleIcon} titleText={errorCode === "not_found" ? "Package not found" : "Could not load package details"}>
             <EmptyStateBody>
               {sanitizeErrorMessage(error)}
+              <ErrorDetails details={errorDetails} />
             </EmptyStateBody>
           </EmptyState>
         ) : packageDetails ? (

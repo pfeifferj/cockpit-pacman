@@ -154,7 +154,7 @@ describe("SearchView", () => {
   });
 
   it("displays error message on API failure", async () => {
-    mockSearchPackages.mockRejectedValue(new Error("Network error"));
+    mockSearchPackages.mockRejectedValue(new api.BackendError("Cannot read repositories", "internal_error", "The extra database is damaged"));
 
     render(<SearchView />);
 
@@ -171,6 +171,26 @@ describe("SearchView", () => {
     await waitFor(() => {
       expect(screen.getByText(/Search failed/i)).toBeInTheDocument();
     });
+    expect(screen.getByText("The extra database is damaged")).toBeInTheDocument();
+  });
+
+  it("preserves debounced search diagnostics and clears them after a successful search", async () => {
+    mockSearchPackages.mockRejectedValueOnce(new api.BackendError("Cannot read repositories", "internal_error", "The core database is damaged"));
+    render(<SearchView />);
+    const input = screen.getByPlaceholderText(/Search Arch repositories/i);
+    fireEvent.change(input, { target: { value: "linux" } });
+    expect(await screen.findByText("The core database is damaged")).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "glibc" } });
+    expect(await screen.findByText("linux")).toBeInTheDocument();
+    expect(screen.queryByText("The core database is damaged")).not.toBeInTheDocument();
+  });
+
+  it("passes sync package lookup diagnostics into the details modal", async () => {
+    vi.mocked(api.getSyncPackageInfo).mockRejectedValue(new api.BackendError("Cannot read package", "internal_error", "The repository entry is damaged"));
+    render(<SearchView />);
+    fireEvent.change(screen.getByPlaceholderText(/Search Arch repositories/i), { target: { value: "linux" } });
+    fireEvent.click(await screen.findByText("linux-lts"));
+    expect(await screen.findByText("The repository entry is damaged")).toBeInTheDocument();
   });
 
   it("shows database locked warning", async () => {
@@ -595,5 +615,28 @@ describe("SearchView", () => {
         })
       );
     });
+  });
+});
+
+
+describe("SearchView abort signals", () => {
+  afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+  it("aborts superseded requests and the last request on unmount", async () => {
+    mockSearchPackages.mockImplementation(() => new Promise(() => {}));
+    const { unmount } = render(<SearchView />);
+    const input = screen.getByPlaceholderText(/Search Arch repositories/);
+    fireEvent.change(input, { target: { value: "linux" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() => expect(mockSearchPackages).toHaveBeenCalled());
+    const firstSignal = mockSearchPackages.mock.lastCall![0].signal!;
+    expect(firstSignal.aborted).toBe(false);
+    fireEvent.change(input, { target: { value: "bash" } });
+    expect(firstSignal.aborted).toBe(true);
+    await waitFor(() => expect(mockSearchPackages.mock.lastCall![0].query).toBe("bash"));
+    const lastSignal = mockSearchPackages.mock.lastCall![0].signal!;
+    expect(lastSignal.aborted).toBe(false);
+    unmount();
+    expect(lastSignal.aborted).toBe(true);
   });
 });

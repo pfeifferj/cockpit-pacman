@@ -1095,3 +1095,29 @@ describe("stream settlement", () => {
     expect(callbacks.onError).toHaveBeenCalledExactlyOnceWith("Cancelled before commit", "cancelled", undefined);
   });
 });
+
+describe("read cancellation", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("does not spawn an already cancelled search", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(searchPackages({ query: "linux", signal: controller.signal })).rejects.toMatchObject({ code: "cancelled" });
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  it("closes a superseded search and removes its listener", async () => {
+    let reject!: (error: Error) => void;
+    const process = new Promise<string>((_resolve, rejectPromise) => { reject = rejectPromise; });
+    const close = vi.fn(() => reject(new Error("Channel closed")));
+    Object.assign(process, { close });
+    mockSpawn.mockReturnValue(process);
+    const controller = new AbortController();
+    const removeListener = vi.spyOn(controller.signal, "removeEventListener");
+    const result = searchPackages({ query: "linux", signal: controller.signal });
+    controller.abort();
+    await expect(result).rejects.toMatchObject({ code: "cancelled" });
+    expect(close).toHaveBeenCalledExactlyOnceWith("cancelled");
+    expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function));
+  });
+});

@@ -90,7 +90,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const expandAllRef = useRef(false);
-  const { selectedPackage, detailsLoading, detailsError, fetchDetails, clearDetails } = usePackageDetails();
+  const { selectedPackage, detailsLoading, detailsError, detailsErrorCode, detailsErrorContext, fetchDetails, clearDetails } = usePackageDetails();
 
   useEffect(() => {
     if (!initialSearch) return;
@@ -502,6 +502,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
                     >
                       <FlexItem>
                         <span style={{ fontWeight: 500 }}><TimeAgo timestamp={group.start_time} /></span>
+                        {group.part && group.parts && (
+                          <Label isCompact className="pf-v6-u-ml-sm">Part {group.part} of {group.parts}</Label>
+                        )}
                         {group.entries.length > 1 && (
                           <span style={{ color: "var(--pf-t--global--text--color--subtle)", marginLeft: "0.5rem" }}>
                             ({group.entries.length} packages)
@@ -551,6 +554,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
           isLoading={detailsLoading}
           onClose={clearDetails}
           error={detailsError}
+          errorCode={detailsErrorCode}
+          errorDetails={detailsErrorContext}
         />
       </CardBody>
     </Card>

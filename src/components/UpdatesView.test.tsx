@@ -165,6 +165,7 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(mockCheckUpdates).toHaveBeenCalled();
       });
+      expect(mockSyncDatabase).not.toHaveBeenCalled();
     });
 
     it("displays available updates after loading", async () => {
@@ -322,11 +323,15 @@ describe("UpdatesView", () => {
   });
 
   describe("Refresh Button", () => {
-    it("triggers database sync when clicking refresh", async () => {
+    it("syncs databases and refreshes news only on explicit refresh", async () => {
       render(<UpdatesView />);
       await waitFor(() => {
         expect(screen.getByText("linux")).toBeInTheDocument();
       });
+
+      expect(mockSyncDatabase).not.toHaveBeenCalled();
+      expect(mockFetchNews).toHaveBeenCalledOnce();
+      expect(mockFetchNews).toHaveBeenCalledWith(30, false);
 
       const refreshButton = screen.getByRole("button", { name: /Refresh/i });
       await act(async () => {
@@ -334,6 +339,7 @@ describe("UpdatesView", () => {
       });
 
       expect(mockSyncDatabase).toHaveBeenCalled();
+      expect(mockFetchNews).toHaveBeenLastCalledWith(30, true);
     });
   });
 
@@ -1145,6 +1151,7 @@ describe("UpdatesView", () => {
       });
 
       render(<UpdatesView />);
+      fireEvent.click(await screen.findByRole("button", { name: /^Refresh$/ }));
 
       const removeButton = await screen.findByRole("button", { name: /Remove stale lock/ });
       await act(async () => {
@@ -1201,7 +1208,7 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(mockPreflightUpgrade).toHaveBeenCalledTimes(2);
       });
-      expect(mockSyncDatabase).toHaveBeenCalledTimes(2);
+      expect(mockSyncDatabase).toHaveBeenCalledTimes(1);
     });
 
     it("stops auto-resuming when the failure is not a lock", async () => {
@@ -2110,6 +2117,7 @@ describe("UpdatesView", () => {
       mockCheckSecurity.mockResolvedValue({ advisories: [], disabled: true });
 
       render(<UpdatesView />);
+      if (operation === "sync") fireEvent.click(await screen.findByRole("button", { name: /^Refresh$/ }));
       fireEvent.click(await screen.findByRole("button", { name: /^Dismiss$/ }));
       fireEvent.click(await screen.findByRole("button", { name: "Overview settings" }));
       const toggle = await screen.findByRole("checkbox", { name: /Check security advisories/ });
@@ -2117,7 +2125,7 @@ describe("UpdatesView", () => {
       expect(toggle).toBeDisabled();
       expect(screen.getByText("Not permitted to change system settings")).toBeInTheDocument();
       expect(screen.queryByText("Loading saved advisory setting")).not.toBeInTheDocument();
-      expect(mockGetSettings).toHaveBeenCalledTimes(1);
+      expect(mockGetSettings).toHaveBeenCalledTimes(operation === "sync" ? 2 : 1);
     });
 
     it("reverts the toggle when the setting cannot be written", async () => {
@@ -2240,6 +2248,7 @@ describe("UpdatesView", () => {
       });
 
       render(<UpdatesView />);
+      fireEvent.click(await screen.findByRole("button", { name: /^Refresh$/ }));
 
       await waitFor(() => {
         expect(screen.getByText(/conflicting files in \/usr\/bin/)).toBeInTheDocument();
@@ -2253,6 +2262,7 @@ describe("UpdatesView", () => {
       });
 
       render(<UpdatesView />);
+      fireEvent.click(await screen.findByRole("button", { name: /^Refresh$/ }));
 
       await waitFor(() => {
         expect(screen.getAllByText(/Failed to prepare transaction/).length).toBeGreaterThan(0);

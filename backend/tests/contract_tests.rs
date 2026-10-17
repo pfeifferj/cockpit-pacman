@@ -1062,6 +1062,8 @@ fn log_entry_old_new_version_nullable() {
 #[test]
 fn log_group_all_count_fields_present() {
     let group = LogGroup {
+        part: None,
+        parts: None,
         id: "group-0".into(),
         command: Some("pacman -Syu".into()),
         start_time: "2024-01-01T10:00:00+0000".into(),
