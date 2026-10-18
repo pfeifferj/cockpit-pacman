@@ -11,8 +11,9 @@ use crate::check_cancel_early;
 use crate::db::invalidate_repo_map_cache;
 use crate::inhibit::ShutdownInhibitor;
 use crate::models::{
-    ConflictInfo, KeyInfo, PreflightResponse, PreflightState, PreflightWarning, ProviderChoice,
-    ReplacementInfo, StreamEvent, WarningSeverity,
+    AddReason, ConflictInfo, KeyInfo, PreflightResponse, PreflightState, PreflightWarning,
+    PreviewAdd, PreviewRemove, ProviderChoice, RemoveReason, ReplacementInfo, StreamEvent,
+    WarningSeverity, preview_totals,
 };
 use crate::util::{
     CheckResult, DEFAULT_MUTATION_TIMEOUT_SECS, TimeoutGuard, check_cancel,
@@ -306,20 +307,9 @@ fn effective_ignored_packages(selected: &[String]) -> Result<Vec<String>> {
     Ok(ignored)
 }
 
-pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
-    // Before the lock: a timeout SIGTERM must set the flag, not kill the
-    // process with db.lck held.
-    setup_signal_handler()?;
-
-    let mut handle = get_handle()?;
-
-    for pkg_name in effective_ignored_packages(ignore_pkgs)? {
-        handle.add_ignorepkg(pkg_name.as_str())?;
-    }
-
-    let state = Rc::new(RefCell::new(PreflightState::default()));
-    let state_cb = Rc::clone(&state);
-
+/// Collects decisions needed to preview a transaction without committing.
+pub(crate) fn record_questions(handle: &mut Alpm, state: &Rc<RefCell<PreflightState>>) {
+    let state_cb = Rc::clone(state);
     handle.set_question_cb(
         (),
         move |mut question: AnyQuestion, _: &mut ()| match question.question() {
@@ -333,7 +323,9 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
             Question::Corrupted(_) => {
                 question.set_answer(false);
             }
-            Question::RemovePkgs(_) => {
+            Question::RemovePkgs(q) => {
+                let pkgs: Vec<String> = q.packages().iter().map(|p| p.name().to_string()).collect();
+                state_cb.borrow_mut().declined_removals.extend(pkgs);
                 question.set_answer(false);
             }
             Question::Replace(q) => {
@@ -360,10 +352,25 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
                     fingerprint: q.fingerprint().to_string(),
                     uid: q.uid().to_string(),
                 });
-                question.set_answer(true);
+                question.set_answer(false);
             }
         },
     );
+}
+
+pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
+    // Before the lock: a timeout SIGTERM must set the flag, not kill the
+    // process with db.lck held.
+    setup_signal_handler()?;
+
+    let mut handle = get_handle()?;
+
+    for pkg_name in effective_ignored_packages(ignore_pkgs)? {
+        handle.add_ignorepkg(pkg_name.as_str())?;
+    }
+
+    let state = Rc::new(RefCell::new(PreflightState::default()));
+    record_questions(&mut handle, &state);
 
     if is_cancelled() {
         anyhow::bail!("Operation cancelled");
@@ -454,8 +461,20 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
                 compatibility before rebooting."
                 .to_string(),
             packages: firmware_pkgs,
+            blocking: false,
+            disk: None,
         });
     }
+
+    // is pulled in, so the confirm can show what goes beyond the selection.
+    let targets: Vec<String> = upgrade_names
+        .iter()
+        .filter(|name| tx.localdb().pkg(name.as_str()).is_ok())
+        .cloned()
+        .collect();
+    let (add, remove) = preview_items(&tx, &targets, false);
+    let (_, net_installed_size) = preview_totals(&add, &remove);
+    warnings.extend(crate::space::check(total_download_size, net_installed_size));
 
     let s = state.borrow();
     let response = PreflightResponse {
@@ -469,6 +488,9 @@ pub fn preflight_upgrade(ignore_pkgs: &[String]) -> Result<()> {
         warnings,
         packages_to_upgrade,
         total_download_size,
+        add,
+        remove,
+        net_installed_size,
     };
     emit_json(&response)
 }
@@ -760,9 +782,248 @@ pub fn remove_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
     )
 }
 
+/// What a prepared transaction adds and removes, with each package's reason.
+/// `removing` marks a removal transaction: its non-target removals are
+/// dependencies; in an install or upgrade, removals come from conflicts.
+fn preview_items(
+    tx: &TransactionGuard,
+    targets: &[String],
+    removing: bool,
+) -> (Vec<PreviewAdd>, Vec<PreviewRemove>) {
+    let add = tx
+        .add()
+        .iter()
+        .map(|p| {
+            let old = tx.localdb().pkg(p.name()).ok();
+            PreviewAdd {
+                name: p.name().to_string(),
+                version: p.version().to_string(),
+                repo: p.db().map(|db| db.name().to_string()),
+                download_size: p.download_size(),
+                installed_size: p.isize(),
+                old_version: old.map(|o| o.version().to_string()),
+                old_installed_size: old.map(|o| o.isize()),
+                reason: AddReason::Dependency,
+            }
+        })
+        .collect();
+    let remove = tx
+        .remove()
+        .iter()
+        .map(|p| PreviewRemove {
+            name: p.name().to_string(),
+            version: p.version().to_string(),
+            installed_size: p.isize(),
+            reason: RemoveReason::Dependency,
+        })
+        .collect();
+    assign_reasons(add, remove, targets, removing)
+}
+
+fn assign_reasons(
+    mut add: Vec<PreviewAdd>,
+    mut remove: Vec<PreviewRemove>,
+    targets: &[String],
+    removing: bool,
+) -> (Vec<PreviewAdd>, Vec<PreviewRemove>) {
+    let is_target = |name: &str| targets.iter().any(|t| t == name);
+    for p in &mut add {
+        p.reason = if is_target(&p.name) {
+            AddReason::Target
+        } else {
+            AddReason::Dependency
+        };
+    }
+    for p in &mut remove {
+        p.reason = match (removing, is_target(&p.name)) {
+            (false, _) => RemoveReason::Conflict,
+            (true, true) => RemoveReason::Target,
+            (true, false) => RemoveReason::Dependency,
+        };
+    }
+    (add, remove)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn add(name: &str, old: Option<(&str, i64)>) -> PreviewAdd {
+        PreviewAdd {
+            name: name.to_string(),
+            version: "2-1".to_string(),
+            repo: Some("core".to_string()),
+            download_size: 10,
+            installed_size: 100,
+            old_version: old.map(|(v, _)| v.to_string()),
+            old_installed_size: old.map(|(_, s)| s),
+            reason: AddReason::Dependency,
+        }
+    }
+
+    fn remove(name: &str) -> PreviewRemove {
+        PreviewRemove {
+            name: name.to_string(),
+            version: "1-1".to_string(),
+            installed_size: 50,
+            reason: RemoveReason::Dependency,
+        }
+    }
+
+    fn reasons(
+        add: &[PreviewAdd],
+        remove: &[PreviewRemove],
+    ) -> (Vec<AddReason>, Vec<RemoveReason>) {
+        (
+            add.iter().map(|p| p.reason).collect(),
+            remove.iter().map(|p| p.reason).collect(),
+        )
+    }
+
+    #[test]
+    fn assign_reasons_install_marks_conflict_removals() {
+        let (a, r) = assign_reasons(
+            vec![add("foo", None), add("libdep", None)],
+            vec![remove("foo-legacy")],
+            &names(&["foo"]),
+            false,
+        );
+        assert_eq!(
+            reasons(&a, &r),
+            (
+                vec![AddReason::Target, AddReason::Dependency],
+                vec![RemoveReason::Conflict]
+            )
+        );
+    }
+
+    #[test]
+    fn assign_reasons_removal_splits_targets_from_dependencies() {
+        let (a, r) = assign_reasons(
+            vec![],
+            vec![remove("foo"), remove("libdep")],
+            &names(&["foo"]),
+            true,
+        );
+        assert!(a.is_empty());
+        assert_eq!(
+            reasons(&a, &r).1,
+            vec![RemoveReason::Target, RemoveReason::Dependency]
+        );
+    }
+
+    #[test]
+    fn assign_reasons_keeps_every_other_field() {
+        let before = add("glibc", Some(("1-1", 80)));
+        let (a, _) = assign_reasons(vec![before.clone()], vec![], &names(&["glibc"]), false);
+        assert_eq!(
+            a,
+            vec![PreviewAdd {
+                reason: AddReason::Target,
+                ..before
+            }]
+        );
+    }
+
+    #[test]
+    fn upgrade_targets_are_upgrades_and_new_packages_are_dependencies() {
+        let adds = vec![add("glibc", Some(("1-1", 80))), add("libnew", None)];
+        let targets: Vec<String> = adds
+            .iter()
+            .filter(|p| p.old_version.is_some())
+            .map(|p| p.name.clone())
+            .collect();
+        let (a, r) = assign_reasons(adds, vec![remove("old")], &targets, false);
+        assert_eq!(
+            reasons(&a, &r),
+            (
+                vec![AddReason::Target, AddReason::Dependency],
+                vec![RemoveReason::Conflict]
+            )
+        );
+        assert_eq!(preview_totals(&a, &r), (20, 20 + 100 - 50));
+    }
+
+    #[test]
+    fn preflight_with_preview_serialises_to_fixture() {
+        let target =
+            |name: &str, version: &str, old: &str, dl: i64, size: i64, old_size: i64| PreviewAdd {
+                name: name.to_string(),
+                version: version.to_string(),
+                repo: Some("core".to_string()),
+                download_size: dl,
+                installed_size: size,
+                old_version: Some(old.to_string()),
+                old_installed_size: Some(old_size),
+                reason: AddReason::Target,
+            };
+        let add = vec![
+            target(
+                "linux",
+                "6.7.1-arch1-1",
+                "6.7.0-arch1-1",
+                150_000_000,
+                145_000_000,
+                142_000_000,
+            ),
+            target(
+                "glibc", "2.39-1", "2.38-1", 8_200_000, 45_000_000, 44_000_000,
+            ),
+            PreviewAdd {
+                name: "libxcrypt".to_string(),
+                version: "4.4.36-1".to_string(),
+                repo: Some("core".to_string()),
+                download_size: 120_000,
+                installed_size: 400_000,
+                old_version: None,
+                old_installed_size: None,
+                reason: AddReason::Dependency,
+            },
+        ];
+        let remove = vec![PreviewRemove {
+            name: "libxcrypt-legacy".to_string(),
+            version: "4.4.33-1".to_string(),
+            installed_size: 300_000,
+            reason: RemoveReason::Conflict,
+        }];
+        let (download, net) = preview_totals(&add, &remove);
+        let response = PreflightResponse {
+            success: true,
+            conflicts: vec![ConflictInfo {
+                package1: "libxcrypt".to_string(),
+                package2: "libxcrypt-legacy".to_string(),
+            }],
+            packages_to_upgrade: add.len(),
+            total_download_size: download,
+            add,
+            remove,
+            net_installed_size: net,
+            ..Default::default()
+        };
+        let fixture: Option<serde_json::Value> = serde_json::from_str(include_str!(
+            "../../../test/fixtures/preflight-upgrade-preview.json"
+        ))
+        .ok();
+        assert!(fixture.is_some());
+        assert_eq!(serde_json::to_value(&response).ok(), fixture);
+    }
+
+    #[test]
+    fn preflight_fixtures_without_preview_still_deserialise() {
+        for fixture in [
+            include_str!("../../../test/fixtures/preflight.json"),
+            include_str!("../../../test/fixtures/preflight-with-data.json"),
+        ] {
+            let response = serde_json::from_str::<PreflightResponse>(fixture)
+                .ok()
+                .map(|r| (r.success, r.add.len(), r.remove.len(), r.net_installed_size));
+            assert_eq!(response, Some((true, 0, 0, 0)));
+        }
+    }
 
     #[test]
     fn kernel_by_name_linux() {

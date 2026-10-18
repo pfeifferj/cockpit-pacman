@@ -56,6 +56,7 @@ import type {
   SignoffListResponse,
   StreamEvent,
   SyncPackageDetails,
+  TransactionPreview,
   UpdatesResponse,
 } from "./bindings";
 export type * from "./bindings";
@@ -366,6 +367,25 @@ export async function getSyncPackageInfo(name: string, repo?: string): Promise<S
 export async function preflightUpgrade(ignore?: string[]): Promise<PreflightResponse> {
   const args = ignore && ignore.length > 0 ? [ignore.map(pkg => sanitizeSearchInput(pkg)).join(",")] : [];
   return runBackend<PreflightResponse>("preflight-upgrade", args);
+}
+
+export interface PreviewTotals {
+  /** Packages the transaction installs, upgrades or removes. */
+  count: number;
+  downloadBytes: number;
+  download: string;
+  /** Signed change in installed size; "+" when it grows. */
+  net: string;
+}
+
+/** Formats package, download and installed-size totals. */
+export function previewTotals(count: number, downloadBytes: number, netBytes: number): PreviewTotals {
+  const net = formatSize(netBytes);
+  return { count, downloadBytes, download: formatSize(downloadBytes), net: netBytes > 0 ? `+${net}` : net };
+}
+
+export function formatPreviewTotals(p: TransactionPreview): PreviewTotals {
+  return previewTotals(p.add.length + p.remove.length, p.total_download_size, p.net_installed_size);
 }
 
 /**

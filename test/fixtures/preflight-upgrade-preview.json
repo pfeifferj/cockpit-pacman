@@ -1,0 +1,45 @@
+{
+  "success": true,
+  "conflicts": [
+    {"package1": "libxcrypt", "package2": "libxcrypt-legacy"}
+  ],
+  "packages_to_upgrade": 3,
+  "total_download_size": 158320000,
+  "add": [
+    {
+      "name": "linux",
+      "version": "6.7.1-arch1-1",
+      "repo": "core",
+      "download_size": 150000000,
+      "installed_size": 145000000,
+      "old_version": "6.7.0-arch1-1",
+      "reason": "target"
+    },
+    {
+      "name": "glibc",
+      "version": "2.39-1",
+      "repo": "core",
+      "download_size": 8200000,
+      "installed_size": 45000000,
+      "old_version": "2.38-1",
+      "reason": "target"
+    },
+    {
+      "name": "libxcrypt",
+      "version": "4.4.36-1",
+      "repo": "core",
+      "download_size": 120000,
+      "installed_size": 400000,
+      "reason": "dependency"
+    }
+  ],
+  "remove": [
+    {
+      "name": "libxcrypt-legacy",
+      "version": "4.4.33-1",
+      "installed_size": 300000,
+      "reason": "conflict"
+    }
+  ],
+  "net_installed_size": 4100000
+}

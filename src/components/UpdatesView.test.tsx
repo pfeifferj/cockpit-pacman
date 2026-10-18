@@ -16,10 +16,13 @@ import {
   mockServicesStatusWithServices,
 } from "../test/mocks";
 
+const systemListeners = vi.hoisted(() => new Set<() => void>());
+
 vi.mock("../api", async () => {
   const actual = await vi.importActual("../api");
   return {
     ...actual,
+    onSystemChanged: (listener: () => void) => { systemListeners.add(listener); return () => systemListeners.delete(listener); },
     checkUpdates: vi.fn(),
     preflightUpgrade: vi.fn(),
     runUpgrade: vi.fn(),
@@ -469,6 +472,21 @@ describe("UpdatesView", () => {
       expect(mockRunUpgrade.mock.calls[0][2]).toEqual([]);
     });
 
+    it("does not reopen a preview closed while its refresh was pending", async () => {
+      mockPreflightUpgrade.mockResolvedValue(mockPreflightWithConflicts);
+      render(<UpdatesView />);
+      fireEvent.click(await screen.findByRole("button", { name: /Apply 1 Update/ }));
+      const dialog = await screen.findByRole("dialog", { name: /^Upgrade / });
+      act(() => { for (const listener of systemListeners) listener(); });
+      let finish!: (value: api.PreflightResponse) => void;
+      mockPreflightUpgrade.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Refresh preview" }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      await act(async () => finish(mockPreflightWithConflicts));
+      expect(screen.queryByRole("dialog", { name: /^Upgrade / })).not.toBeInTheDocument();
+      expect(mockRunUpgrade).not.toHaveBeenCalled();
+    });
+
     it("shows confirmation modal when conflicts exist", async () => {
       mockPreflightUpgrade.mockResolvedValue(mockPreflightWithConflicts);
 
@@ -486,7 +504,7 @@ describe("UpdatesView", () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByText("Confirm Upgrade")).toBeInTheDocument();
+        expect(screen.getByRole("dialog", { name: /^Upgrade / })).toBeInTheDocument();
       });
       expect(screen.getByText(/mesa conflicts with mesa-amber/)).toBeInTheDocument();
     });
@@ -508,7 +526,7 @@ describe("UpdatesView", () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByText("Confirm Upgrade")).toBeInTheDocument();
+        expect(screen.getByRole("dialog", { name: /^Upgrade / })).toBeInTheDocument();
       });
       expect(screen.getByText(/ABCD1234/)).toBeInTheDocument();
       expect(screen.getByText(/Test Packager/)).toBeInTheDocument();
@@ -527,17 +545,17 @@ describe("UpdatesView", () => {
           fireEvent.click(screen.getByRole("button", { name: /Apply 1 Update/i }));
         });
         await waitFor(() => {
-          expect(screen.getByText("Confirm Upgrade")).toBeInTheDocument();
+          expect(screen.getByRole("dialog", { name: /^Upgrade / })).toBeInTheDocument();
         });
       };
 
       await open();
       const acknowledge = () =>
-        screen.getByRole("dialog").querySelector('input[id="acknowledge-conflicts"]') as HTMLInputElement;
+        screen.getByRole("checkbox", { name: /Resolve the conflict/ }) as HTMLInputElement;
       await act(async () => {
         fireEvent.click(acknowledge());
       });
-      expect(screen.getByRole("button", { name: /Proceed with Upgrade/i })).not.toBeDisabled();
+      expect(screen.getByRole("button", { name: /^Upgrade .*packages?(?: and remove .*|)$/i })).not.toHaveAttribute("aria-disabled", "true");
 
       await act(async () => {
         fireEvent.click(screen.getByRole("button", { name: /^Cancel$/i }));
@@ -545,7 +563,7 @@ describe("UpdatesView", () => {
       await open();
 
       expect(acknowledge().checked).toBe(false);
-      expect(screen.getByRole("button", { name: /Proceed with Upgrade/i })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /^Upgrade .*packages?(?: and remove .*|)$/i })).toHaveAttribute("aria-disabled", "true");
     });
 
     it("proceeds with upgrade after confirming modal", async () => {
@@ -571,22 +589,21 @@ describe("UpdatesView", () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByText("Confirm Upgrade")).toBeInTheDocument();
+        expect(screen.getByRole("dialog", { name: /^Upgrade / })).toBeInTheDocument();
       });
 
       // The proceed button should be disabled until acknowledgment checkbox is checked
-      const proceedButton = screen.getByRole("button", { name: /Proceed with Upgrade/i });
-      expect(proceedButton).toBeDisabled();
+      const proceedButton = screen.getByRole("button", { name: /^Upgrade .*packages?(?: and remove .*|)$/i });
+      expect(proceedButton).toHaveAttribute("aria-disabled", "true");
 
       // Check the conflicts acknowledgment checkbox within the modal
-      const modal = screen.getByRole("dialog");
-      const conflictsCheckbox = modal.querySelector('input[id="acknowledge-conflicts"]') as HTMLInputElement;
+      const conflictsCheckbox = screen.getByRole("checkbox", { name: /Resolve the conflict/ });
       await act(async () => {
         fireEvent.click(conflictsCheckbox);
       });
 
       // Now the proceed button should be enabled
-      expect(proceedButton).not.toBeDisabled();
+      expect(proceedButton).not.toHaveAttribute("aria-disabled", "true");
 
       await act(async () => {
         fireEvent.click(proceedButton);
@@ -602,10 +619,10 @@ describe("UpdatesView", () => {
       });
       render(<UpdatesView />);
       fireEvent.click(await screen.findByRole("button", { name: /Apply 1 Update/i }));
-      await screen.findByText("Confirm Upgrade");
+      await screen.findByRole("dialog", { name: /^Upgrade / });
       expect(mockRunUpgrade).not.toHaveBeenCalled();
-      fireEvent.click(screen.getByRole("checkbox", { name: /I understand.*removed/i }));
-      fireEvent.click(screen.getByRole("button", { name: /Proceed with Upgrade/i }));
+      fireEvent.click(screen.getByRole("checkbox", { name: "Remove old-driver" }));
+      fireEvent.click(screen.getByRole("button", { name: /^Upgrade .*packages?(?: and remove .*|)$/i }));
       expect(mockRunUpgrade.mock.calls[0][2]).toEqual(["old-driver"]);
     });
   });
@@ -681,7 +698,7 @@ describe("UpdatesView", () => {
         setTimeout(() => {
           callbacks.onEvent?.({
             type: "progress",
-            operation: "upgrading",
+            operation: "upgrade_start",
             package: "linux",
             percent: 50,
             current: 1,
@@ -863,7 +880,7 @@ describe("UpdatesView", () => {
 
       await act(async () => {
         upgradeCallbacks?.onEvent?.({
-          type: "progress", operation: "upgrade", package: "linux",
+          type: "progress", operation: "upgrade_start", package: "linux",
           percent: 100, current: 1, total: 1,
         });
       });
@@ -1505,7 +1522,7 @@ describe("UpdatesView", () => {
         setTimeout(() => {
           callbacks.onEvent?.({
             type: "progress",
-            operation: "upgrading",
+            operation: "upgrade_start",
             package: "glibc",
             percent: 50,
             current: 2,
@@ -1575,7 +1592,7 @@ describe("UpdatesView", () => {
         setTimeout(() => {
           callbacks.onEvent?.({
             type: "progress",
-            operation: "upgrading",
+            operation: "upgrade_start",
             package: "linux",
             percent: 50,
             current: 1,

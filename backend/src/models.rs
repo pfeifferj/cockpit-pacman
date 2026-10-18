@@ -192,6 +192,26 @@ pub struct PreflightWarning {
     pub title: String,
     pub message: String,
     pub packages: Vec<String>,
+    /// Blocks confirmation.
+    #[serde(default)]
+    pub blocking: bool,
+    /// Set on the `disk_space` warning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub disk: Option<DiskSpaceShortfall>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct DiskSpaceShortfall {
+    /// Mount point of the short filesystem.
+    pub mount: String,
+    /// Bytes to free on `mount`: to fit the transaction when blocking, else to
+    /// stay above the low-space floor afterwards.
+    #[ts(type = "number")]
+    pub deficit: u64,
+    /// The package cache is on this filesystem, so cleaning it frees space here.
+    pub holds_cache: bool,
 }
 
 #[derive(Serialize, Deserialize, Default, TS)]
@@ -216,9 +236,17 @@ pub struct PreflightResponse {
     pub packages_to_upgrade: usize,
     #[ts(type = "number")]
     pub total_download_size: i64,
+    /// Everything the upgrade installs or upgrades, pulled-in dependencies included.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub add: Vec<PreviewAdd>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remove: Vec<PreviewRemove>,
+    #[serde(default)]
+    #[ts(optional, as = "Option<f64>")]
+    pub net_installed_size: i64,
 }
 
-#[derive(Serialize, Deserialize, Clone, TS)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct ConflictInfo {
     pub package1: String,
@@ -245,6 +273,127 @@ pub struct PreflightState {
     pub replacements: Vec<ReplacementInfo>,
     pub providers: Vec<ProviderChoice>,
     pub import_keys: Vec<KeyInfo>,
+    /// Packages alpm offered to remove when the real command would decline.
+    pub declined_removals: Vec<String>,
+}
+
+/// An installed package whose dependency a transaction would break.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct BlockedBy {
+    pub target: String,
+    pub depend: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub causing: Option<String>,
+}
+
+/// Structured trans_prepare failure. Display renders alpm's errno line
+/// followed by each cause.
+#[derive(Debug, Default)]
+pub struct PrepareFailure {
+    pub message: String,
+    pub unsatisfied: Vec<BlockedBy>,
+    pub conflicting: Vec<ConflictInfo>,
+    pub invalid_arch: Vec<String>,
+}
+
+impl std::fmt::Display for PrepareFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)?;
+        for m in &self.unsatisfied {
+            write!(f, "; {} requires {}", m.target, m.depend)?;
+            if let Some(cause) = &m.causing {
+                write!(f, " (removed by {})", cause)?;
+            }
+        }
+        for c in &self.conflicting {
+            write!(f, "; {} conflicts with {}", c.package1, c.package2)?;
+        }
+        for p in &self.invalid_arch {
+            write!(f, "; {} is for another architecture", p)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+#[serde(rename_all = "lowercase")]
+pub enum AddReason {
+    Target,
+    Dependency,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+#[serde(rename_all = "lowercase")]
+pub enum RemoveReason {
+    Target,
+    Dependency,
+    Conflict,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct PreviewAdd {
+    pub name: String,
+    pub version: String,
+    pub repo: Option<String>,
+    #[ts(type = "number")]
+    pub download_size: i64,
+    #[ts(type = "number")]
+    pub installed_size: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub old_version: Option<String>,
+    /// Installed size of the version this replaces; only feeds net_installed_size.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub old_installed_size: Option<i64>,
+    pub reason: AddReason,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct PreviewRemove {
+    pub name: String,
+    pub version: String,
+    #[ts(type = "number")]
+    pub installed_size: i64,
+    pub reason: RemoveReason,
+}
+
+/// What a transaction would do, computed through trans_prepare without a commit.
+#[derive(Serialize, Deserialize, Default, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct TransactionPreview {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub error: Option<String>,
+    pub add: Vec<PreviewAdd>,
+    pub remove: Vec<PreviewRemove>,
+    pub conflicts: Vec<ConflictInfo>,
+    pub replacements: Vec<ReplacementInfo>,
+    pub providers: Vec<ProviderChoice>,
+    pub import_keys: Vec<KeyInfo>,
+    pub warnings: Vec<PreflightWarning>,
+    pub blocked_by: Vec<BlockedBy>,
+    #[ts(type = "number")]
+    pub total_download_size: i64,
+    #[ts(type = "number")]
+    pub net_installed_size: i64,
+}
+
+pub fn preview_totals(add: &[PreviewAdd], remove: &[PreviewRemove]) -> (i64, i64) {
+    let download = add.iter().map(|p| p.download_size).sum();
+    let added: i64 = add
+        .iter()
+        .map(|p| p.installed_size - p.old_installed_size.unwrap_or(0))
+        .sum();
+    let removed: i64 = remove.iter().map(|p| p.installed_size).sum();
+    (download, added - removed)
 }
 
 /// Error envelope emitted to stdout for classified failures, consumed by the

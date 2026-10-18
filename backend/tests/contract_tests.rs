@@ -525,6 +525,7 @@ fn preflight_empty_optional_collections_are_absent() {
         warnings: vec![],
         packages_to_upgrade: 3,
         total_download_size: 150_000_000,
+        ..Default::default()
     };
     let v = to_json(&response);
 
@@ -570,9 +571,12 @@ fn preflight_populated_optional_collections_are_present() {
             title: "Risk".into(),
             message: "Caution advised".into(),
             packages: vec!["mesa".into()],
+            blocking: false,
+            disk: None,
         }],
         packages_to_upgrade: 2,
         total_download_size: 200_000_000,
+        ..Default::default()
     };
     let v = to_json(&response);
 

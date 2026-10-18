@@ -74,6 +74,7 @@ import {
   runUpgrade,
   syncDatabase,
   preflightUpgrade,
+  onSystemChanged,
   formatSize,
   getRebootStatus,
   rebootSystem,
@@ -109,6 +110,9 @@ import { highestOf, partitionAdvisories } from "../security";
 import { IgnoredPackagesModal } from "./IgnoredPackagesModal";
 import { ScheduleModal } from "./ScheduleModal";
 import { PreflightConfirmModal } from "./PreflightConfirmModal";
+import { initialProgress, reduceProgress, progressPercent, progressValueText } from "../progress";
+import { needsUpgradeConfirm, removalNames } from "../transactionTotals";
+import { useActiveTransaction } from "../hooks/useMutationGate";
 import { useNavigation } from "../contexts/NavigationContext";
 
 type PageStatus = {
@@ -127,13 +131,6 @@ function effectiveBlock(svc: ServiceRestart, isLocal: boolean): ServiceRestart["
     : svc.restart_blocked;
 }
 
-interface UpgradeProgress {
-  phase: "preparing" | "downloading" | "installing" | "hooks";
-  current: number;
-  total: number;
-  currentPackage: string;
-  percent: number;
-}
 
 type ViewState =
   | "loading"
@@ -190,17 +187,22 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   const [securityFilterActive, setSecurityFilterActive] = useState(false);
   const [repoSelectOpen, setRepoSelectOpen] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
-  useBackdropClose(confirmModalOpen, () => setConfirmModalOpen(false));
+  const activeTransaction = useActiveTransaction();
+  const mutationBlocked = activeTransaction !== null && activeTransaction.command !== "upgrade" && activeTransaction.command !== "sync-database";
   const [preflightData, setPreflightData] = useState<PreflightResponse | null>(null);
   const [preflightLoading, setPreflightLoading] = useState(false);
+  const [preflightStale, setPreflightStale] = useState(false);
+  const systemRevision = useRef(0);
+  const preflightRequest = useRef(0);
+  const closePreflight = () => {
+    preflightRequest.current++;
+    setPreflightLoading(false);
+    setConfirmModalOpen(false);
+  };
+  useEffect(() => () => { preflightRequest.current++; }, []);
+  useEffect(() => onSystemChanged(() => { systemRevision.current++; }), []);
   const [selectedPackages, setSelectedPackages] = useState<Set<string>>(new Set());
-  const [upgradeProgress, setUpgradeProgress] = useState<UpgradeProgress>({
-    phase: "preparing",
-    current: 0,
-    total: 0,
-    currentPackage: "",
-    percent: 0,
-  });
+  const [upgradeProgress, setUpgradeProgress] = useState(initialProgress);
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   useBackdropClose(cancelModalOpen, () => setCancelModalOpen(false));
@@ -406,6 +408,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     () => new Set(updates.filter((u) => u.ignored).map((u) => u.name)),
     [updates]
   );
+
+  const skippedPackages = updates.filter(pkg => !selectedPackages.has(pkg.name) && !ignoredNameSet.has(pkg.name)).map(pkg => pkg.name);
 
   const loadUpdates = useCallback(async (force = false) => {
     setState("checking");
@@ -617,7 +621,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     );
   };
 
-  const handleApplyUpdates = async () => {
+  const handleApplyUpdates = async (refresh = false) => {
     // Run preflight check first. Leave the error state if we're resuming from a
     // lock error: the confirm modal and preflight indicator only render in the
     // "available" view, so staying in "error" would silently swallow the
@@ -628,8 +632,13 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
     setErrorCode(undefined);
     setErrorDetails(undefined);
     setLockRetryExhausted(false);
+    const request = ++preflightRequest.current;
+    const revision = systemRevision.current;
     try {
       const preflight = await preflightUpgrade(ignoredPackages);
+      if (request !== preflightRequest.current) return;
+      const stale = revision !== systemRevision.current;
+      setPreflightStale(stale);
       setPreflightData(preflight);
       setPreflightLoading(false);
 
@@ -639,71 +648,35 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       }
 
       // Check if there are any issues needing confirmation
-      const hasIssues =
-        (preflight.conflicts?.length ?? 0) > 0 ||
-        (preflight.replacements?.length ?? 0) > 0 ||
-        (preflight.removals?.length ?? 0) > 0 ||
-        (preflight.providers?.length ?? 0) > 0 ||
-        (preflight.import_keys?.length ?? 0) > 0 ||
-        (preflight.warnings?.some((w) => w.severity !== "info") ?? false);
+      const hasIssues = needsUpgradeConfirm(preflight, selectedPackages, skippedPackages);
 
-      if (hasIssues) {
+      if (hasIssues || refresh || stale) {
         setConfirmModalOpen(true);
         return;
       }
 
-      startUpgrade(preflight.removals ?? []);
+      startUpgrade(removalNames(preflight), preflight);
     } catch (ex) {
+      if (request !== preflightRequest.current) return;
       setPreflightLoading(false);
       failWith("preflight", ex instanceof Error ? ex.message : String(ex), ex instanceof BackendError ? ex.code : undefined, ex instanceof BackendError ? ex.details : undefined);
     }
   };
 
-  const startUpgrade = (approvedRemovals: string[]) => {
+  const startUpgrade = (approvedRemovals: string[], preview = preflightData) => {
     setConfirmModalOpen(false);
     setState("applying");
     resetLog();
     setLockRetryExhausted(false);
     setCancelling(false);
     setCancelOutcome(null);
-    setUpgradeProgress({
-      phase: "preparing",
-      current: 0,
-      total: selectedPackages.size,
-      currentPackage: "",
-      percent: 0,
-    });
-
+    setUpgradeProgress(initialProgress);
+    const plan = {
+      downloadBytes: preview?.total_download_size ?? 0,
+      packages: preview?.add?.length ?? preview?.packages_to_upgrade ?? selectedPackages.size,
+    };
     const handleEvent = (event: StreamEvent) => {
-      if (event.type === "download") {
-        setUpgradeProgress((prev) => {
-          const percent = event.downloaded && event.total
-            ? Math.round((event.downloaded / event.total) * 100)
-            : prev.percent;
-          if (prev.phase === "downloading" && prev.currentPackage === event.filename && prev.percent === percent) {
-            return prev;
-          }
-          return { ...prev, phase: "downloading", currentPackage: event.filename, percent };
-        });
-      } else if (event.type === "progress") {
-        const phase = event.operation.includes("hook") ? "hooks" : "installing";
-        setUpgradeProgress((prev) => ({
-          ...prev,
-          phase,
-          current: event.current,
-          total: event.total,
-          currentPackage: event.package,
-          percent: event.percent,
-        }));
-      } else if (event.type === "event") {
-        if (event.event.includes("hook")) {
-          setUpgradeProgress((prev) => ({
-            ...prev,
-            phase: "hooks",
-            currentPackage: event.package || "",
-          }));
-        }
-      }
+      setUpgradeProgress(previous => reduceProgress(previous, event, plan));
     };
 
     cancelRef.current = runUpgrade({
@@ -1161,20 +1134,8 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
   }
 
   if (state === "applying") {
-    const phaseLabels: Record<UpgradeProgress["phase"], string> = {
-      preparing: "Preparing upgrade",
-      downloading: "Downloading packages",
-      installing: "Upgrading packages",
-      hooks: "Running post-transaction hooks",
-    };
-
-    const progressValue = upgradeProgress.total > 0
-      ? Math.round((upgradeProgress.current / upgradeProgress.total) * 100)
-      : undefined;
-
-    const progressLabel = upgradeProgress.total > 0
-      ? `${upgradeProgress.current} of ${upgradeProgress.total}`
-      : undefined;
+    const progressValue = progressPercent(upgradeProgress);
+    const progressLabel = upgradeProgress.stepLabel;
 
     return (
       <Card>
@@ -1203,10 +1164,10 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
           )}
 
           <Content className="pf-v6-u-mt-md pf-v6-u-mb-sm">
-            <strong>{phaseLabels[upgradeProgress.phase]}</strong>
-            {upgradeProgress.currentPackage && (
+            <strong>{upgradeProgress.phaseLabel}</strong>
+            {upgradeProgress.item && (
               <span style={{ color: "var(--pf-t--global--text--color--subtle)" }}>
-                {" "}- {upgradeProgress.currentPackage}
+                {" "}- {upgradeProgress.item}
               </span>
             )}
           </Content>
@@ -1215,6 +1176,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
             value={progressValue}
             title={progressLabel}
             measureLocation={progressValue !== undefined ? ProgressMeasureLocation.outside : ProgressMeasureLocation.none}
+            valueText={progressValueText(upgradeProgress)}
             aria-label="Upgrade progress"
           />
 
@@ -1549,7 +1511,7 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
                     handleApplyUpdates();
                   }}
                   isLoading={preflightLoading}
-                  isDisabled={preflightLoading || selectedPackages.size === 0}
+                  isDisabled={mutationBlocked || preflightLoading || selectedPackages.size === 0}
                 >
                   {preflightLoading ? "Checking..." : `Apply ${(selectedPackages.size).toLocaleString()} Update${selectedPackages.size !== 1 ? "s" : ""}`}
                 </Button>
@@ -1704,8 +1666,13 @@ export const UpdatesView: React.FC<UpdatesViewProps> = ({ signoffCredentials }) 
       <PreflightConfirmModal
         isOpen={confirmModalOpen}
         preflight={preflightData}
-        onClose={() => setConfirmModalOpen(false)}
-        onProceed={() => startUpgrade(preflightData?.removals ?? [])}
+        initiallyStale={preflightStale}
+        refreshing={preflightLoading}
+        skipped={skippedPackages}
+        onRefresh={() => void handleApplyUpdates(true)}
+        packages={updates.filter(pkg => selectedPackages.has(pkg.name))}
+        onClose={closePreflight}
+        onProceed={() => startUpgrade(removalNames(preflightData))}
       />
 
       <IgnoredPackagesModal

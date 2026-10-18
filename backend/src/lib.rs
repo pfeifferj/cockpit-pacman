@@ -10,6 +10,7 @@ pub mod inhibit;
 mod log_cache;
 pub mod models;
 pub mod network;
+pub mod space;
 pub mod util;
 pub mod validation;
 
