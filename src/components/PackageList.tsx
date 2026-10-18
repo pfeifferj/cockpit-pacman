@@ -319,8 +319,17 @@ export const PackageList: React.FC<PackageListProps> = ({ routeOptions, onRouteC
     searchInputRef.current?.focus();
   };
 
+  const viewDependencies = (packageName: string) => {
+    setGraphRequest((current) => ({ name: packageName, seq: (current?.seq ?? 0) + 1 }));
+    setFilter("graph");
+  };
+
   const handleFilterChange = (newFilter: FilterType) => {
-    setFilter(newFilter);
+    if (newFilter === "graph" && filter !== "graph" && detailsTarget) {
+      viewDependencies(detailsTarget.name);
+    } else {
+      setFilter(newFilter);
+    }
     setPage(1);
   };
 
@@ -340,16 +349,11 @@ export const PackageList: React.FC<PackageListProps> = ({ routeOptions, onRouteC
     focusSearchPendingRef.current = true;
   };
 
-  const filterChip = filter !== "all" ? [FILTER_CHIP_LABELS[filter]] : [];
+  const filterChip = filter !== "all" && filter !== "graph" ? [FILTER_CHIP_LABELS[filter]] : [];
   const repoChip = repoFilter !== "all" && filter !== "orphan" && filter !== "graph" ? [repoFilter] : [];
 
   const handleRowClick = (pkgName: string) => {
     setDetailsTarget((current) => (current?.name === pkgName && !current.repo && !current.sync ? current : { name: pkgName }));
-  };
-
-  const viewDependencies = (packageName: string) => {
-    setGraphRequest((current) => ({ name: packageName, seq: (current?.seq ?? 0) + 1 }));
-    setFilter("graph");
   };
 
   const handleGraphDetails = (node: GraphNodeRef) => {

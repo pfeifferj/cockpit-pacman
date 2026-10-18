@@ -548,7 +548,7 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ request, onShowD
       <Card>
       <CardBody>
         <Toolbar>
-          <ToolbarContent>
+          <ToolbarContent alignItems="center">
             <ToolbarItem style={{ flex: "1 1 300px", minWidth: 0 }}>
               <Select
                 id="dependency-package-search"
@@ -630,34 +630,35 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ request, onShowD
             </ToolbarItem>
             <ToolbarToggleGroup ref={optionsToggleRef} toggleIcon={<FilterIcon />} breakpoint="md">
               <ToolbarItem>
-                <Flex alignItems={{ default: "alignItemsCenter" }} gap={{ default: "gapSm" }}>
-                  <span style={{ whiteSpace: "nowrap" }}>Depth: {depth}</span>
-                  <div style={{ flex: "1 1 150px", minWidth: 0 }}>
+                <Flex alignItems={{ default: "alignItemsCenter" }} gap={{ default: "gapMd" }}>
+                  <span style={{ whiteSpace: "nowrap" }}>Depth</span>
+                  <div style={{ width: "12rem", maxWidth: "100%", flexShrink: 0 }}>
                     <Slider
                       value={depth}
                       min={1}
                       max={5}
                       step={1}
                       onChange={handleDepthChange}
-                      showTicks
+                      showBoundaries={false}
+                      hasTooltipOverThumb
                       thumbAriaLabel="Depth"
                     />
                   </div>
                 </Flex>
               </ToolbarItem>
               <ToolbarItem>
-                <Flex alignItems={{ default: "alignItemsCenter" }} gap={{ default: "gapSm" }}>
-                  <span style={{ whiteSpace: "nowrap" }}>Optional depth: {optionalDepth}</span>
-                  <div style={{ flex: "1 1 150px", minWidth: 0 }}>
+                <Flex alignItems={{ default: "alignItemsCenter" }} gap={{ default: "gapMd" }}>
+                  <span style={{ whiteSpace: "nowrap" }}>Optional depth</span>
+                  <div style={{ width: "12rem", maxWidth: "100%", flexShrink: 0 }}>
                     <Slider
                       value={optionalDepth}
                       min={0}
                       max={5}
                       step={1}
                       onChange={handleOptionalDepthChange}
-                      showTicks
+                      showBoundaries={false}
+                      hasTooltipOverThumb
                       thumbAriaLabel="Optional dependency depth"
-                      aria-describedby="dependency-optional-depth-help"
                     />
                   </div>
                 </Flex>
@@ -713,11 +714,6 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ request, onShowD
           </ToolbarContent>
         </Toolbar>
 
-        <p id="dependency-optional-depth-help" style={{ fontSize: "0.875rem", color: "var(--pf-t--global--text--color--subtle)" }}>
-          Optional depth: 0 excludes optional dependencies; 1 includes immediate optional links.
-          Higher values include optional links farther from the root, within the overall depth.
-        </p>
-
         {loading ? (
           <div className="pf-v6-u-p-xl pf-v6-u-text-align-center">
             <Spinner /> Loading dependency tree…
@@ -731,15 +727,7 @@ export const DependencyView: React.FC<DependencyViewProps> = ({ request, onShowD
             onRetry={() => { void fetchDependencyTree(loadError.name, loadError.depth, loadError.direction, loadError.optionalDepth); }}
             headingLevel="h3"
           />
-        ) : !hasSearched ? (
-          <EmptyState headingLevel="h3" titleText="Explore package dependencies" icon={TopologyIcon}>
-            <EmptyStateBody>
-              Enter a package name to visualize its dependency tree. You can adjust the depth
-              and direction to explore dependencies (what it needs) or reverse dependencies
-              (what needs it).
-            </EmptyStateBody>
-          </EmptyState>
-        ) : nodes.length === 0 ? (
+        ) : !hasSearched ? null : nodes.length === 0 ? (
           <EmptyState headingLevel="h3" titleText="Package not found" icon={TopologyIcon}>
             <EmptyStateBody>
               The package was not found in the local or sync databases.

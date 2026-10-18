@@ -336,17 +336,18 @@ describe("PackageList", () => {
       expect(screen.getByRole("button", { name: "Filter by repository" })).toHaveTextContent("All repositories");
     });
 
-    it("names the graph view in a chip and keeps the search field focused when it is cleared", async () => {
+    it("shows Graph as a view without a redundant filter chip", async () => {
       mockGetDependencyTree.mockResolvedValue({ nodes: [], edges: [], root: "", max_depth_reached: false, warnings: [] });
       render(<PackageList />);
       await screen.findByText("linux");
 
       fireEvent.click(screen.getByRole("button", { name: /Graph/ }));
-      const shown = await screen.findByRole("list", { name: "Show" });
-      expect(within(shown).getByText("Graph")).toBeInTheDocument();
+      expect(within(screen.getByRole("group", { name: "Package filter" })).getByRole("button", { name: /Graph/ })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.queryByRole("list", { name: "Show" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument();
 
-      fireEvent.click(within(shown).getByRole("button", { name: "Close Graph" }));
-      await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Search installed packages" })));
+      fireEvent.click(screen.getByRole("button", { name: /^All/ }));
+      expect(await screen.findByRole("textbox", { name: "Search installed packages" })).toBeInTheDocument();
     });
   });
 
@@ -645,9 +646,9 @@ describe("PackageList", () => {
       fireEvent.click(nameButton("glibc"));
       const busy = screen.getByRole("region", { name: /^linux/ });
       expect(busy).toHaveAttribute("aria-busy", "true");
-      expect(within(busy).queryByRole("progressbar")).not.toBeInTheDocument();
+      expect(within(busy).queryByRole("progressbar", { name: "Contents" })).not.toBeInTheDocument();
       expect(within(busy).getByText("Description")).toBeInTheDocument();
-      expect(await within(busy).findByRole("progressbar", {}, { timeout: 2000 })).toBeInTheDocument();
+      expect(await within(busy).findByRole("progressbar", { name: "Contents" }, { timeout: 2000 })).toBeInTheDocument();
 
       await act(async () => resolve({ ...mockPackageDetails, name: "glibc" }));
       const replaced = await screen.findByRole("region", { name: /^glibc/ });
@@ -801,6 +802,27 @@ describe("PackageList", () => {
       const panel = await screen.findByRole("region", { name: new RegExp(`^${name}`) });
       fireEvent.click(within(panel).getByRole("button", { name: `View ${name} dependencies` }));
     };
+
+    it("opens Graph for the selected row, replacing the previous graph while details load", async () => {
+      const onRouteChange = vi.fn();
+      render(<PackageList routeOptions={{}} onRouteChange={onRouteChange} />);
+      const filters = screen.getByRole("group", { name: "Package filter" });
+      fireEvent.click(await screen.findByRole("button", { name: "linux" }));
+      await screen.findByRole("region", { name: /^linux/ });
+      fireEvent.click(within(filters).getByRole("button", { name: "Graph" }));
+      await waitFor(() => expect(mockGetDependencyTree).toHaveBeenLastCalledWith(expect.objectContaining({ name: "linux" })));
+      expect(screen.getByRole("combobox")).toHaveValue("linux");
+      await waitFor(() => expect(onRouteChange).toHaveBeenLastCalledWith({ graph: "linux", pkg: "linux" }));
+
+      fireEvent.click(within(filters).getByRole("button", { name: /^All/ }));
+      const list = await screen.findByRole("grid", { name: "Installed packages" });
+      mockGetPackageInfo.mockImplementationOnce(() => new Promise(() => {}));
+      fireEvent.click(within(list).getByRole("button", { name: "glibc" }));
+      fireEvent.click(within(filters).getByRole("button", { name: "Graph" }));
+      await waitFor(() => expect(mockGetDependencyTree).toHaveBeenLastCalledWith(expect.objectContaining({ name: "glibc" })));
+      expect(screen.getByRole("combobox")).toHaveValue("glibc");
+      await waitFor(() => expect(onRouteChange).toHaveBeenLastCalledWith({ graph: "glibc", pkg: "glibc" }));
+    });
 
     it("re-centres when View dependencies repeats the package already shown", async () => {
       render(<PackageList />);

@@ -107,9 +107,10 @@ describe("DependencyView", () => {
     cleanup();
   });
 
-  it("renders empty state initially", async () => {
+  it("shows the controls before a search", async () => {
     render(<DependencyView onShowDetails={onShowDetails} />);
-    expect(screen.getByRole("heading", { level: 3, name: "Explore package dependencies" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox")).toHaveValue("");
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument();
     sweepA11y();
   });
 
@@ -285,12 +286,12 @@ describe("DependencyView", () => {
     await triggerSearch("linux");
 
     fireEvent.click(screen.getByLabelText("Clear input"));
-    expect(screen.getByText("Explore package dependencies")).toBeInTheDocument();
+    expect(screen.getByRole("combobox")).toHaveValue("");
     await act(async () => {
       if (outcome === "resolve") pending.resolve(mockDependencyTreeResponse);
       else pending.reject(new Error("Cleared request failed"));
     });
-    expect(screen.getByText("Explore package dependencies")).toBeInTheDocument();
+    expect(screen.getByRole("combobox")).toHaveValue("");
     expect(screen.queryByText("3 nodes")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /Could not load dependencies/ })).not.toBeInTheDocument();
 
@@ -308,7 +309,6 @@ describe("DependencyView", () => {
     expect(await screen.findByRole("heading", { level: 3, name: /Could not load dependencies of nonexistent/ })).toBeInTheDocument();
     expect(screen.getByText("database unreadable")).toBeInTheDocument();
     expect(screen.getByText("caused by: EIO")).toBeInTheDocument();
-    expect(screen.queryByText("Explore package dependencies")).not.toBeInTheDocument();
   });
 
   it("reruns the same request from Try again after a failed load", async () => {
@@ -418,7 +418,8 @@ describe("DependencyView", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Explore package dependencies")).toBeInTheDocument();
+      expect(screen.getByRole("combobox")).toHaveValue("");
+      expect(screen.queryByText("3 nodes")).not.toBeInTheDocument();
     });
   });
 
