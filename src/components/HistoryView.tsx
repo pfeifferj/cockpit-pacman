@@ -8,7 +8,6 @@ import {
   AccordionToggle,
   Card,
   CardBody,
-  CardTitle,
   Button,
   EmptyState,
   EmptyStateBody,
@@ -334,7 +333,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ initialSearch }) => {
       <CardBody>
         <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
           <FlexItem>
-            <CardTitle className="pf-v6-u-m-0">Package History</CardTitle>
             <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
               <FlexItem>
                 <StatBox

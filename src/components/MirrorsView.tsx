@@ -3,7 +3,6 @@ import { useBackdropClose } from "../hooks/useBackdropClose";
 import {
   Card,
   CardBody,
-  CardTitle,
   Button,
   Alert,
   EmptyState,
@@ -770,27 +769,25 @@ export const MirrorsView: React.FC = () => {
           }
         />
       )}
+      <Card className="pf-v6-u-mb-md">
+        <CardBody>
+          <Flex spaceItems={{ default: "spaceItemsLg" }}>
+            <FlexItem>
+              <StatBox label="Total" value={(mirrors.length).toLocaleString()} />
+            </FlexItem>
+            <FlexItem>
+              <StatBox label="Enabled" value={(mirrors.filter(m => m.enabled).length).toLocaleString()} color="success" />
+            </FlexItem>
+            {mirrorData?.last_modified && (
+              <FlexItem>
+                <StatBox label="Last Modified" value={<TimeAgo timestamp={mirrorData.last_modified} />} />
+              </FlexItem>
+            )}
+          </Flex>
+        </CardBody>
+      </Card>
       <Card>
-      <CardBody>
-        <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
-          <FlexItem>
-            <CardTitle className="pf-v6-u-m-0">Pacman Mirrors</CardTitle>
-            <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md pf-v6-u-mt-sm">
-              <FlexItem>
-                <StatBox label="Total" value={(mirrors.length).toLocaleString()} />
-              </FlexItem>
-              <FlexItem>
-                <StatBox label="Enabled" value={(mirrors.filter(m => m.enabled).length).toLocaleString()} color="success" />
-              </FlexItem>
-              {mirrorData?.last_modified && (
-                <FlexItem>
-                  <StatBox label="Last Modified" value={<TimeAgo timestamp={mirrorData.last_modified} />} />
-                </FlexItem>
-              )}
-            </Flex>
-          </FlexItem>
-        </Flex>
-
+        <CardBody>
         <Toolbar>
           <ToolbarContent>
             <ToolbarItem>
@@ -859,7 +856,7 @@ export const MirrorsView: React.FC = () => {
         </Toolbar>
 
         <Table aria-label="Mirror list" variant="compact">
-          <Thead>
+          <Thead noWrap>
             <Tr>
               <Th sort={getSortParams(0)} width={10}>Enabled</Th>
               <Th sort={getSortParams(1)}>URL</Th>
@@ -1026,7 +1023,7 @@ export const MirrorsView: React.FC = () => {
               </FlexItem>
             </Flex>
             <Table aria-label="Mirrorlist backups" variant="compact">
-              <Thead>
+              <Thead noWrap>
                 <Tr>
                   <Th screenReaderText="Select">
                     <Checkbox
@@ -1257,7 +1254,7 @@ export const MirrorsView: React.FC = () => {
               </Content>
               <div style={{ maxHeight: "300px", overflow: "auto" }} className="pf-v6-u-mt-sm">
                 <Table aria-label="Preview mirrors" variant="compact">
-                  <Thead>
+                  <Thead noWrap>
                     <Tr>
                       <Th width={10}></Th>
                       <Th>URL</Th>

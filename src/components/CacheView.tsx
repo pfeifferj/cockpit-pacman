@@ -303,12 +303,45 @@ export const CacheView: React.FC = () => {
   }
 
   return (
+    <>
+    <Card className="pf-v6-u-mb-md">
+      <CardBody>
+        <Flex spaceItems={{ default: "spaceItemsLg" }}>
+          <FlexItem>
+            <StatBox
+              label="Total Size"
+              value={formatSize(cacheData.total_size)}
+            />
+          </FlexItem>
+          <FlexItem>
+            <StatBox
+              label="Cached Files"
+              value={(cacheData.package_count).toLocaleString()}
+            />
+          </FlexItem>
+          <FlexItem>
+            <StatBox
+              label="Unique Packages"
+              value={cacheData.unique_packages.toLocaleString()}
+            />
+          </FlexItem>
+          <FlexItem>
+            <StatBox
+              label="Multi-Version"
+              value={cacheData.multi_version_packages.toLocaleString()}
+              color={cacheData.multi_version_packages > 0 ? "info" : "default"}
+            />
+          </FlexItem>
+        </Flex>
+      </CardBody>
+    </Card>
     <Card>
       <CardBody>
-        <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
-          <FlexItem>
-            <CardTitle className="pf-v6-u-m-0">
-              Package Cache{" "}
+
+        <Toolbar>
+          <ToolbarContent>
+            <ToolbarItem>
+              Cache directory{" "}
               <Popover
                 headerContent="Cache directory"
                 bodyContent={cacheData.path}
@@ -317,39 +350,7 @@ export const CacheView: React.FC = () => {
                   <OutlinedQuestionCircleIcon />
                 </Icon>
               </Popover>
-            </CardTitle>
-            <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md">
-              <FlexItem>
-                <StatBox
-                  label="Total Size"
-                  value={formatSize(cacheData.total_size)}
-                />
-              </FlexItem>
-              <FlexItem>
-                <StatBox
-                  label="Cached Files"
-                  value={(cacheData.package_count).toLocaleString()}
-                />
-              </FlexItem>
-              <FlexItem>
-                <StatBox
-                  label="Unique Packages"
-                  value={cacheData.unique_packages.toLocaleString()}
-                />
-              </FlexItem>
-              <FlexItem>
-                <StatBox
-                  label="Multi-Version"
-                  value={cacheData.multi_version_packages.toLocaleString()}
-                  color={cacheData.multi_version_packages > 0 ? "info" : "default"}
-                />
-              </FlexItem>
-            </Flex>
-          </FlexItem>
-        </Flex>
-
-        <Toolbar>
-          <ToolbarContent>
+            </ToolbarItem>
             <ToolbarItem>
               <SearchInput
                 placeholder="Filter cached packages..."
@@ -526,5 +527,6 @@ export const CacheView: React.FC = () => {
         errorDetails={detailsErrorContext}
       />
     </Card>
+    </>
   );
 };

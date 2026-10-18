@@ -2,8 +2,6 @@ import React, { useState } from "react";
 import {
   Card,
   CardBody,
-  CardHeader,
-  CardTitle,
   Dropdown,
   DropdownItem,
   DropdownList,
@@ -65,10 +63,7 @@ export const SystemOverviewCard: React.FC<{
     </Dropdown>
   );
   return (
-  <Card className="pf-v6-u-mb-md">
-    <CardHeader actions={{ actions: settingsMenu, hasNoOffset: true }}>
-      <CardTitle>System Overview</CardTitle>
-    </CardHeader>
+  <Card component="section" aria-label="System overview" className="pf-v6-u-mb-md">
     <CardBody>
       <Flex spaceItems={{ default: "spaceItemsLg" }}>
         <FlexItem>
@@ -145,6 +140,9 @@ export const SystemOverviewCard: React.FC<{
             </Tooltip>
           </FlexItem>
         )}
+        <FlexItem align={{ default: "alignRight" }}>
+          {settingsMenu}
+        </FlexItem>
       </Flex>
     </CardBody>
   </Card>

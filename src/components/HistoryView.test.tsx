@@ -39,7 +39,7 @@ describe("HistoryView", () => {
     render(<HistoryView />);
 
     await waitFor(() => {
-      expect(screen.getByText("Package History")).toBeInTheDocument();
+      expect(screen.getByLabelText("Filter history by package name")).toBeInTheDocument();
     });
 
     // Stat boxes show upgraded/installed/removed counts
@@ -95,7 +95,7 @@ describe("HistoryView", () => {
     render(<HistoryView />);
 
     await waitFor(() => {
-      expect(screen.getByText("Package History")).toBeInTheDocument();
+      expect(screen.getByLabelText("Filter history by package name")).toBeInTheDocument();
     });
 
     // Click on the first group toggle (should contain "3 packages")
@@ -112,7 +112,7 @@ describe("HistoryView", () => {
     render(<HistoryView />);
 
     await waitFor(() => {
-      expect(screen.getByText("Package History")).toBeInTheDocument();
+      expect(screen.getByLabelText("Filter history by package name")).toBeInTheDocument();
     });
 
     const expandButton = screen.getByRole("button", { name: /Expand all/i });
@@ -131,7 +131,7 @@ describe("HistoryView", () => {
     render(<HistoryView />);
 
     await waitFor(() => {
-      expect(screen.getByText("Package History")).toBeInTheDocument();
+      expect(screen.getByLabelText("Filter history by package name")).toBeInTheDocument();
     });
 
     // Default filter shows "All actions"
@@ -142,7 +142,7 @@ describe("HistoryView", () => {
     render(<HistoryView />);
 
     await waitFor(() => {
-      expect(screen.getByText("Package History")).toBeInTheDocument();
+      expect(screen.getByLabelText("Filter history by package name")).toBeInTheDocument();
     });
 
     expect(screen.getByPlaceholderText("Filter by package name...")).toBeInTheDocument();
@@ -157,7 +157,7 @@ describe("HistoryView", () => {
     render(<HistoryView />);
 
     await waitFor(() => {
-      expect(screen.getByText("Package History")).toBeInTheDocument();
+      expect(screen.getByLabelText("Filter history by package name")).toBeInTheDocument();
     });
 
     const searchInput = screen.getByPlaceholderText("Filter by package name...");
@@ -174,7 +174,7 @@ describe("HistoryView", () => {
     // Resolve the pending fetch and verify the input is still there
     resolveSecondCall!(mockGroupedLogResponse);
     await waitFor(() => {
-      expect(screen.getByText("Package History")).toBeInTheDocument();
+      expect(screen.getByLabelText("Filter history by package name")).toBeInTheDocument();
     });
     expect(screen.getByPlaceholderText("Filter by package name...")).toBeInTheDocument();
   });
@@ -187,7 +187,7 @@ describe("HistoryView", () => {
     render(<HistoryView />);
 
     await waitFor(() => {
-      expect(screen.getByText("Package History")).toBeInTheDocument();
+      expect(screen.getByLabelText("Filter history by package name")).toBeInTheDocument();
     });
 
     const searchInput = screen.getByPlaceholderText("Filter by package name...");
@@ -205,7 +205,7 @@ describe("HistoryView", () => {
     render(<HistoryView />);
 
     await waitFor(() => {
-      expect(screen.getByText("Package History")).toBeInTheDocument();
+      expect(screen.getByLabelText("Filter history by package name")).toBeInTheDocument();
     });
     expect(mockGetHistory).not.toHaveBeenCalled();
 

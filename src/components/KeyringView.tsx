@@ -411,12 +411,7 @@ export const KeyringView: React.FC = () => {
 
       <Card>
         <CardBody>
-          <CardTitle className="pf-v6-u-m-0">
-            {keyringData?.total ?? 0} key{(keyringData?.total ?? 0) !== 1 ? "s" : ""} in keyring
-            {filteredKeys.length !== (keyringData?.total ?? 0) && ` (${filteredKeys.length} shown)`}
-          </CardTitle>
-
-        <Toolbar className="pf-v6-u-px-0 pf-v6-u-mt-md">
+        <Toolbar className="pf-v6-u-px-0">
           <ToolbarContent>
             <ToolbarItem>
               <SearchInput
@@ -465,11 +460,15 @@ export const KeyringView: React.FC = () => {
                 </Button>
               </Tooltip>
             </ToolbarItem>
+            <ToolbarItem align={{ default: "alignEnd" }}>
+              {keyringData?.total ?? 0} key{(keyringData?.total ?? 0) !== 1 ? "s" : ""} in keyring
+              {filteredKeys.length !== (keyringData?.total ?? 0) && ` (${filteredKeys.length} shown)`}
+            </ToolbarItem>
           </ToolbarContent>
         </Toolbar>
 
         <Table aria-label="Keyring keys" variant="compact">
-          <Thead>
+          <Thead noWrap>
             <Tr>
               <Th sort={getSortParams(0)}>Fingerprint</Th>
               <Th sort={getSortParams(1)}>User ID</Th>

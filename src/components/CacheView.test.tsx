@@ -80,7 +80,7 @@ describe("CacheView", () => {
     render(<CacheView />);
 
     await waitFor(() => {
-      expect(screen.getByText("Package Cache")).toBeInTheDocument();
+      expect(screen.getByLabelText("Filter cached packages")).toBeInTheDocument();
     });
 
     expect(screen.getByText("4.66 GiB")).toBeInTheDocument();
@@ -139,7 +139,7 @@ describe("CacheView", () => {
     render(<CacheView />);
 
     await waitFor(() => {
-      expect(screen.getByText("Package Cache")).toBeInTheDocument();
+      expect(screen.getByLabelText("Filter cached packages")).toBeInTheDocument();
     });
 
     const uniqueLabel = screen.getByText("Unique Packages");

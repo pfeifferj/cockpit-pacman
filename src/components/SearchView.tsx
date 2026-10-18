@@ -417,7 +417,7 @@ export const SearchView: React.FC = () => {
               )}
               <div style={{ opacity: loading ? 0.6 : 1, transition: "opacity 0.2s" }}>
               <Table aria-label="Search results" variant="compact">
-                <Thead>
+                <Thead noWrap>
                   <Tr>
                     <Th sort={getSortParams(0)}>Name</Th>
                     <Th>Version</Th>

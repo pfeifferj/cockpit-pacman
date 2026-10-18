@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Card,
   CardBody,
-  CardTitle,
   Button,
   Alert,
   EmptyState,
@@ -471,22 +470,20 @@ export const RepositoriesView: React.FC = () => {
       </Alert>
     )}
     <BackupWarnings warnings={operationWarnings} />
-    <Card>
+    <Card className="pf-v6-u-mb-md">
       <CardBody>
-        <Flex justifyContent={{ default: "justifyContentSpaceBetween" }} alignItems={{ default: "alignItemsFlexStart" }}>
+        <Flex spaceItems={{ default: "spaceItemsLg" }}>
           <FlexItem>
-            <CardTitle className="pf-v6-u-m-0">Pacman Repositories</CardTitle>
-            <Flex spaceItems={{ default: "spaceItemsLg" }} className="pf-v6-u-mb-md pf-v6-u-mt-sm">
-              <FlexItem>
-                <StatBox label="Total" value={(visibleRepos.length).toLocaleString()} />
-              </FlexItem>
-              <FlexItem>
-                <StatBox label="Enabled" value={(enabledCount).toLocaleString()} color="success" />
-              </FlexItem>
-            </Flex>
+            <StatBox label="Total" value={(visibleRepos.length).toLocaleString()} />
+          </FlexItem>
+          <FlexItem>
+            <StatBox label="Enabled" value={(enabledCount).toLocaleString()} color="success" />
           </FlexItem>
         </Flex>
-
+      </CardBody>
+    </Card>
+    <Card>
+      <CardBody>
         <Toolbar>
           <ToolbarContent>
             <ToolbarItem>
@@ -519,7 +516,7 @@ export const RepositoriesView: React.FC = () => {
         </Toolbar>
 
         <Table aria-label="Repository list" variant="compact">
-          <Thead>
+          <Thead noWrap>
             <Tr>
               <Th width={10}>Enabled</Th>
               <Th>Repository</Th>
@@ -648,7 +645,7 @@ export const RepositoriesView: React.FC = () => {
                   <Tr key={`${repo.name}-directives`}>
                     <Td colSpan={5}>
                       <Table aria-label={`Directives for ${repo.name}`} variant="compact" borders={false}>
-                        <Thead>
+                        <Thead noWrap>
                           <Tr>
                             <Th width={10} screenReaderText="Active" />
                             <Th width={15}>Type</Th>
@@ -768,7 +765,7 @@ export const RepositoriesView: React.FC = () => {
               </div>
             ) : (
               <Table aria-label="pacman.conf backups" variant="compact">
-                <Thead>
+                <Thead noWrap>
                   <Tr>
                     <Th>Created</Th>
                     <Th width={20}>Repositories</Th>

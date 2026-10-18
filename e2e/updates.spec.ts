@@ -29,7 +29,7 @@ test.describe("Updates Tab", () => {
   test("shows the system overview counters", async ({ pacman }) => {
     await pacman.waitForLoading();
 
-    const overview = pacman.panel.locator('text="System Overview"');
+    const overview = pacman.panel.getByRole("region", { name: "System overview" });
     await expect(overview).toBeVisible({ timeout: 30000 });
   });
 });
