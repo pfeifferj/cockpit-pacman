@@ -369,6 +369,16 @@ export async function preflightUpgrade(ignore?: string[]): Promise<PreflightResp
   return runBackend<PreflightResponse>("preflight-upgrade", args);
 }
 
+/** Resolves `install-package NAME` without committing. Takes the database lock. */
+export async function previewInstall(name: string): Promise<TransactionPreview> {
+  return runBackend<TransactionPreview>("preflight-install", [sanitizeSearchInput(name)]);
+}
+
+/** Resolves `remove-package NAME` (with unneeded dependencies) without committing. */
+export async function previewRemove(name: string): Promise<TransactionPreview> {
+  return runBackend<TransactionPreview>("preflight-remove", [sanitizeSearchInput(name)]);
+}
+
 export interface PreviewTotals {
   /** Packages the transaction installs, upgrades or removes. */
   count: number;
@@ -932,23 +942,22 @@ export async function listOrphans(): Promise<OrphanResponse> {
 
 export function installPackage(
   callbacks: UpgradeCallbacks,
-  name: string
+  name: string,
+  approvedRemovals: string[] = [],
 ): StreamingHandle {
   const args = [sanitizeSearchInput(name)];
-  if (callbacks.timeout !== undefined) {
-    args.push(String(callbacks.timeout));
-  }
+  args.push(callbacks.timeout === undefined ? "" : String(callbacks.timeout));
+  args.push(approvedRemovals.map(pkg => sanitizeSearchInput(pkg)).join(","));
   return runStreamingBackend("install-package", args, callbacks, { gracefulCancel: true });
 }
 
 export function removePackage(
   callbacks: UpgradeCallbacks,
-  name: string
+  name: string,
+  approvedRemovals: string[] = [],
 ): StreamingHandle {
-  const args = [sanitizeSearchInput(name)];
-  if (callbacks.timeout !== undefined) {
-    args.push(String(callbacks.timeout));
-  }
+  const args = [sanitizeSearchInput(name), callbacks.timeout === undefined ? "" : String(callbacks.timeout),
+    approvedRemovals.map(pkg => sanitizeSearchInput(pkg)).join(",")];
   return runStreamingBackend("remove-package", args, callbacks, { gracefulCancel: true });
 }
 

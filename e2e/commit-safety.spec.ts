@@ -251,4 +251,176 @@ test.describe("package transaction boundaries", () => {
       signing: { fingerprint: before.signing!.fingerprint, keyring_fingerprints: [] },
     });
   });
+  for (const operation of ["install"] as const) {
+    test(`${operation} rejects a changed removal plan and accepts renewed consent`, async ({ pacman }) => {
+      await fixture(pacman, "setup", "--removal", "--phase", "pre");
+      if (operation === "install") {
+        await fixture(pacman, "uninstall-target");
+        await fixture(pacman, "publish-conflict");
+        await guestCommand(pacman.frame, [BACKEND, "sync-database"]);
+      } else {
+        await fixture(pacman, "cached-conflict");
+      }
+      const previewArgs = operation === "install" ? ["preflight-install", PACKAGE] : ["preflight-downgrade", PACKAGE, "0-1"];
+      const commandArgs = operation === "install" ? ["install-package", PACKAGE, ""] : ["downgrade", PACKAGE, "0-1", ""];
+      const preview = JSON.parse(await guestCommand(pacman.frame, [BACKEND, ...previewArgs]));
+      expect(preview.success).toBe(true);
+      expect(preview.remove.map((pkg: { name: string }) => pkg.name)).toEqual([`${PACKAGE}-old`]);
+      await fixture(pacman, "install-extra");
+      await start(pacman, [...commandArgs, `${PACKAGE}-old`]);
+      await expect.poll(async () => (await result(pacman)).done).toBe(true);
+      expect((await result(pacman)).output).toContain(`removal of ${PACKAGE}-other was not approved`);
+      expect(await state(pacman)).toMatchObject({
+        version: operation === "install" ? null : "1-1", victim_version: "1-1", extra_version: "1-1",
+        pre: false, post: false, pids: [], locked: false,
+      });
+      const refreshed = JSON.parse(await guestCommand(pacman.frame, [BACKEND, ...previewArgs]));
+      const approved = refreshed.remove.map((pkg: { name: string }) => pkg.name).sort();
+      expect(approved).toEqual([`${PACKAGE}-old`, `${PACKAGE}-other`]);
+      await start(pacman, [...commandArgs, approved.join(",")]);
+      await waitForBarrier(pacman, "pre");
+      await fixture(pacman, "release");
+      await expect.poll(async () => (await result(pacman)).done).toBe(true);
+      const version = operation === "install" ? "3-1" : "0-1";
+      expect(await state(pacman)).toMatchObject({ version, payload: version, victim_version: null, extra_version: null,
+        post: true, pids: [], locked: false });
+    });
+  }
+
+  test("refuses a recursive removal added after the preview", async ({ pacman }) => {
+    await fixture(pacman, "setup", "--phase", "pre");
+    await fixture(pacman, "removal-graph");
+    const preview = JSON.parse(await guestCommand(pacman.frame, [BACKEND, "preflight-remove", PACKAGE]));
+    expect(preview.remove.map((pkg: { name: string }) => pkg.name)).toEqual([PACKAGE]);
+    await guestCommand(pacman.frame, ["pacman", "-R", "--noconfirm", `${PACKAGE}-consumer`]);
+    await start(pacman, ["remove-package", PACKAGE, "", PACKAGE]);
+    await expect.poll(async () => (await result(pacman)).done).toBe(true);
+    expect((await result(pacman)).output).toContain(`removal of ${PACKAGE}-dep was not approved`);
+    expect(await state(pacman)).toMatchObject({ version: "4-1", dependency_version: "1-1", pre: false, post: false, locked: false });
+    const refreshed = JSON.parse(await guestCommand(pacman.frame, [BACKEND, "preflight-remove", PACKAGE]));
+    expect(refreshed.remove.map((pkg: { name: string }) => pkg.name).sort()).toEqual([PACKAGE, `${PACKAGE}-dep`]);
+    await start(pacman, ["remove-package", PACKAGE, "", `${PACKAGE},${PACKAGE}-dep`]);
+    await waitForBarrier(pacman, "pre");
+    await fixture(pacman, "release");
+    await expect.poll(async () => (await result(pacman)).done).toBe(true);
+    expect(await state(pacman)).toMatchObject({ version: null, dependency_version: null, post: true, pids: [], locked: false });
+  });
+
+
+
+  async function openInstall(pacman: PackmanPage) {
+    await pacman.switchTab("Search Packages");
+    await pacman.panel.getByPlaceholder(/Search/).first().fill(PACKAGE);
+    await pacman.panel.getByRole("button", { name: PACKAGE, exact: true }).click();
+    await pacman.frame.getByRole("dialog").getByRole("button", { name: "Install", exact: true }).click();
+    const dialog = pacman.frame.getByRole("dialog", { name: `Install ${PACKAGE}` });
+    await expect(dialog.getByRole("button", { name: `Install ${PACKAGE}`, exact: true })).toBeVisible();
+    return dialog;
+  }
+
+  for (const fail of [false, true]) {
+    test(`keeps the install dialog busy through cancelled commit${fail ? " failure" : " and post hooks"}`, async ({ pacman }) => {
+      await fixture(pacman, "setup", "--phase", "pre", ...(fail ? ["--fail"] : []));
+      await fixture(pacman, "uninstall-target");
+      const dialog = await openInstall(pacman);
+      await dialog.getByRole("button", { name: `Install ${PACKAGE}`, exact: true }).click();
+      await waitForBarrier(pacman, "pre");
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      await dialog.getByRole("button", { name: `Stop installing ${PACKAGE}`, exact: true }).click();
+      await expect(dialog.getByRole("button", { name: /Cancelling/ })).toHaveAttribute("aria-disabled", "true");
+      await pacman.page.keyboard.press("Escape");
+      await pacman.frame.locator(".pf-v6-c-backdrop").click({ position: { x: 1, y: 1 } });
+      await expect(dialog).toBeVisible();
+      expect((await state(pacman)).post).toBe(false);
+      await fixture(pacman, "release");
+      await expect.poll(async () => (await state(pacman)).pids).toEqual([]);
+      await expect(dialog.getByRole("button", { name: /Cancelling/ })).toHaveCount(0);
+      if (fail) {
+        await expect(dialog).toContainText(/failed to run transaction hooks/);
+        expect(await state(pacman)).toMatchObject({ version: null, post: false, locked: false });
+      } else {
+        await expect(dialog).toContainText(`${PACKAGE} has been installed.`);
+        await expect(dialog).toContainText(/finished before it could be stopped/);
+        expect(await state(pacman)).toMatchObject({ version: "2-1", payload: "2-1", post: true, locked: false });
+      }
+    });
+  }
+
+  test("keeps a background install attached to its original process", async ({ pacman }) => {
+    await fixture(pacman, "setup", "--phase", "pre");
+    await fixture(pacman, "uninstall-target");
+    const dialog = await openInstall(pacman);
+    await dialog.getByRole("button", { name: `Install ${PACKAGE}`, exact: true }).click();
+    await waitForBarrier(pacman, "pre");
+    const pids = (await state(pacman)).pids;
+    await dialog.getByRole("button", { name: "Run in background", exact: true }).click();
+    await pacman.switchTab("Installed Packages");
+    await expect(pacman.frame.getByRole("heading", { name: new RegExp(`Installing ${PACKAGE} is running`) })).toBeVisible();
+    await pacman.frame.getByRole("button", { name: "View progress", exact: true }).click();
+    await expect(dialog.getByRole("log")).not.toBeEmpty();
+    expect((await state(pacman)).pids).toEqual(pids);
+    await dialog.getByRole("button", { name: "Run in background", exact: true }).click();
+    await expectCommitted(pacman);
+    await expect(pacman.frame.getByRole("heading", { name: new RegExp(`Install ${PACKAGE} finished`) })).toHaveCount(1);
+    await pacman.frame.getByRole("button", { name: "View result", exact: true }).click();
+    await expect(dialog).toContainText("Package installed");
+  });
+
+  test("requires removal consent in the install preview", async ({ pacman }) => {
+    await fixture(pacman, "setup", "--removal", "--phase", "pre");
+    await fixture(pacman, "uninstall-target");
+    await fixture(pacman, "publish-conflict");
+    await guestCommand(pacman.frame, [BACKEND, "sync-database"]);
+    const dialog = await openInstall(pacman);
+    const commit = dialog.getByRole("button", { name: `Install ${PACKAGE}`, exact: true });
+    await expect(commit).toHaveAttribute("aria-disabled", "true");
+    expect((await state(pacman)).pids).toEqual([]);
+    await dialog.getByRole("checkbox", { name: `Remove ${PACKAGE}-old`, exact: true }).check();
+    await expect(commit).not.toHaveAttribute("aria-disabled", "true");
+    await commit.click();
+    await waitForBarrier(pacman, "pre");
+    await fixture(pacman, "release");
+    await expect(dialog).toContainText("Package installed");
+    expect(await state(pacman)).toMatchObject({ version: "3-1", victim_version: null, post: true, locked: false });
+  });
+
+
+
+  test("requires a refreshed install preview after an outside package change", async ({ pacman }) => {
+    await fixture(pacman, "setup", "--removal", "--phase", "pre");
+    await fixture(pacman, "uninstall-target");
+    await fixture(pacman, "publish-conflict");
+    await guestCommand(pacman.frame, [BACKEND, "sync-database"]);
+    const dialog = await openInstall(pacman);
+    await dialog.getByRole("checkbox", { name: `Remove ${PACKAGE}-old`, exact: true }).check();
+    const commit = dialog.getByRole("button", { name: `Install ${PACKAGE}`, exact: true });
+    await expect(commit).not.toHaveAttribute("aria-disabled", "true");
+    await fixture(pacman, "install-extra");
+    await expect(commit).toHaveAttribute("aria-disabled", "true");
+    await dialog.getByRole("button", { name: "Refresh preview", exact: true }).click();
+    const removal = dialog.getByRole("checkbox", { name: new RegExp(`Remove .*${PACKAGE}-`) });
+    await expect(removal).not.toBeChecked();
+    await expect(commit).toHaveAttribute("aria-disabled", "true");
+    await removal.check();
+    await commit.click();
+    await waitForBarrier(pacman, "pre");
+    await fixture(pacman, "release");
+    await expect(dialog).toContainText("Package installed");
+    expect(await state(pacman)).toMatchObject({ version: "3-1", victim_version: null, extra_version: null, post: true, locked: false });
+  });
+
+  test("refuses an unknown signing key when an install reaches commit", async ({ pacman }) => {
+    await fixture(pacman, "setup", "--phase", "pre");
+    await fixture(pacman, "uninstall-target");
+    await fixture(pacman, "unknown-signer");
+    await guestCommand(pacman.frame, [BACKEND, "sync-database"]);
+    const before = await state(pacman);
+    const dialog = await openInstall(pacman);
+    await dialog.getByRole("button", { name: `Install ${PACKAGE}`, exact: true }).click();
+    await expect(dialog).toContainText("needs verification");
+    await expect(dialog).toContainText(before.signing!.fingerprint.slice(-16));
+    expect(await state(pacman)).toMatchObject({ version: null, pre: false, post: false, locked: false,
+      signing: { fingerprint: before.signing!.fingerprint, keyring_fingerprints: [] } });
+  });
+
 });

@@ -3,6 +3,7 @@ mod sysupgrade;
 mod transaction;
 
 pub use callbacks::{Verbosity, setup_dl_cb, setup_log_cb};
+pub(crate) use sysupgrade::check_approved_removals;
 pub use sysupgrade::{InterventionFlags, SysupgradeOutcome, run_sysupgrade};
 pub use transaction::TransactionGuard;
 

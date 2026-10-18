@@ -1,3 +1,4 @@
+use cockpit_pacman_backend::handlers::mutation::{preflight_install, preflight_remove};
 use std::env;
 use std::time::Duration;
 
@@ -34,6 +35,8 @@ const COMMANDS: &[&str] = &[
     "list-installed",
     "check-updates",
     "preflight-upgrade",
+    "preflight-install",
+    "preflight-remove",
     "sync-database",
     "upgrade",
     "local-package-info",
@@ -112,6 +115,11 @@ Commands:
                          Check what the upgrade will do (requires root)
                          ignore: comma-separated list of packages to skip
                          Returns conflicts, replacements, keys to import
+  preflight-install NAME Preview installing a package without committing
+                         (requires root for the database lock)
+  preflight-remove NAME  Preview removing a package and its unneeded
+                         dependencies without committing (requires root)
+                         Returns blocked_by for packages that still need NAME
   sync-database [force] [timeout]
                          Sync package databases (requires root)
                          force: true|false (default: true)
@@ -137,7 +145,7 @@ Commands:
   remove-orphans [timeout]
                          Remove all orphan packages (requires root)
                          timeout: seconds (default: 300)
-  install-package NAME [timeout]
+  install-package NAME [timeout] [approved-removals]
                          Install a package from repositories (requires root)
                          timeout: seconds (default: 300)
   remove-package NAME [timeout]
@@ -267,6 +275,21 @@ fn arg_opt_not_all(args: &[String], i: usize) -> Option<String> {
         .map(|s| s.as_str())
         .filter(|s| !s.is_empty() && *s != "all")
         .map(|s| s.to_string())
+}
+
+fn arg_list(args: &[String], i: usize) -> Vec<String> {
+    args.get(i)
+        .map(|s| {
+            s.split(',')
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn validate_names(names: &[String]) -> anyhow::Result<()> {
+    names.iter().try_for_each(|n| validate_package_name(n))
 }
 
 fn arg_usize(args: &[String], i: usize, default: usize) -> usize {
@@ -452,13 +475,31 @@ fn main() {
             let timeout = args.get(2).and_then(|s| s.parse().ok());
             remove_orphans(timeout)
         }
+        "preflight-install" => {
+            if args.len() < 3 {
+                eprintln!("Error: preflight-install requires a package name");
+                std::process::exit(1);
+            }
+            validate_package_name(&args[2]).and_then(|_| preflight_install(&args[2]))
+        }
+        "preflight-remove" => {
+            if args.len() < 3 {
+                eprintln!("Error: preflight-remove requires a package name");
+                std::process::exit(1);
+            }
+            validate_package_name(&args[2]).and_then(|_| preflight_remove(&args[2]))
+        }
         "install-package" => {
             if args.len() < 3 {
                 eprintln!("Error: install-package requires a package name");
                 std::process::exit(1);
             }
             let timeout = args.get(3).and_then(|s| s.parse().ok());
-            validate_package_name(&args[2]).and_then(|_| install_package(&args[2], timeout))
+            validate_package_name(&args[2]).and_then(|_| {
+                let approved = arg_list(&args, 4);
+                validate_names(&approved)?;
+                install_package(&args[2], timeout, &approved)
+            })
         }
         "remove-package" => {
             if args.len() < 3 {
@@ -466,7 +507,11 @@ fn main() {
                 std::process::exit(1);
             }
             let timeout = args.get(3).and_then(|s| s.parse().ok());
-            validate_package_name(&args[2]).and_then(|_| remove_package(&args[2], timeout))
+            validate_package_name(&args[2]).and_then(|_| {
+                let approved = arg_list(&args, 4);
+                validate_names(&approved)?;
+                remove_package(&args[2], timeout, &approved)
+            })
         }
         "list-ignored" => list_ignored(),
         "get-settings" => get_settings(),

@@ -1,5 +1,8 @@
 use alpm::{Alpm, TransFlag};
 use anyhow::Result;
+
+use crate::models::{BlockedBy, ConflictInfo, PrepareFailure};
+
 pub struct TransactionGuard<'a> {
     handle: &'a mut Alpm,
 }
@@ -16,37 +19,44 @@ impl<'a> TransactionGuard<'a> {
         self.handle.sync_sysupgrade(enable_downgrade)
     }
 
+    pub fn prepare(&mut self) -> Result<(), String> {
+        self.prepare_detailed().map_err(|f| f.to_string())
+    }
+
     /// PrepareError's Display is only alpm's errno line ("could not satisfy
     /// dependencies"); the packages that caused it are in the error data.
-    pub fn prepare(&mut self) -> Result<(), String> {
+    pub fn prepare_detailed(&mut self) -> Result<(), PrepareFailure> {
         self.handle.trans_prepare().map_err(|e| {
-            let mut msg = e.to_string();
+            let mut failure = PrepareFailure {
+                message: e.to_string(),
+                ..Default::default()
+            };
             match e.data() {
                 Some(alpm::PrepareData::UnsatisfiedDeps(list)) => {
-                    for m in list {
-                        msg.push_str(&format!("; {} requires {}", m.target(), m.depend()));
-                        if let Some(cause) = m.causing_pkg() {
-                            msg.push_str(&format!(" (removed by {})", cause));
-                        }
-                    }
+                    failure.unsatisfied = list
+                        .iter()
+                        .map(|m| BlockedBy {
+                            target: m.target().to_string(),
+                            depend: m.depend().to_string(),
+                            causing: m.causing_pkg().map(|c| c.to_string()),
+                        })
+                        .collect();
                 }
                 Some(alpm::PrepareData::ConflictingDeps(list)) => {
-                    for c in list {
-                        msg.push_str(&format!(
-                            "; {} conflicts with {}",
-                            c.package1().name(),
-                            c.package2().name()
-                        ));
-                    }
+                    failure.conflicting = list
+                        .iter()
+                        .map(|c| ConflictInfo {
+                            package1: c.package1().name().to_string(),
+                            package2: c.package2().name().to_string(),
+                        })
+                        .collect();
                 }
                 Some(alpm::PrepareData::PkgInvalidArch(list)) => {
-                    for p in list {
-                        msg.push_str(&format!("; {} is for another architecture", p.name()));
-                    }
+                    failure.invalid_arch = list.iter().map(|p| p.name().to_string()).collect();
                 }
                 None => {}
             }
-            msg
+            failure
         })
     }
 

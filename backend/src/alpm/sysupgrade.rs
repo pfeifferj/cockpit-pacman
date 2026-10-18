@@ -140,7 +140,7 @@ pub fn run_sysupgrade(
     }
 }
 
-fn check_approved_removals<'a>(
+pub(crate) fn check_approved_removals<'a>(
     removals: impl Iterator<Item = &'a str>,
     approved: &[String],
 ) -> Result<(), String> {
@@ -152,7 +152,7 @@ fn check_approved_removals<'a>(
         Ok(())
     } else {
         Err(format!(
-            "Upgrade plan changed: removal of {} was not approved. Review the upgrade again before applying it.",
+            "Transaction plan changed: removal of {} was not approved. Review the preview again before applying it.",
             unapproved.join(", ")
         ))
     }

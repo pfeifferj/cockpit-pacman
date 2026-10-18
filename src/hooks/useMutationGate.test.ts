@@ -13,6 +13,7 @@ import {
   cleanCache,
   installPackage,
   syncDatabase,
+  previewInstall,
   getActiveTransaction,
   refreshExternalLockHolder,
 } from "../api";
@@ -101,7 +102,14 @@ describe("useMutationGate", () => {
     expect(other.result.current.blocked).toBe(false);
   });
 
-
+  it("does not register previews", async () => {
+    mockSpawn.mockReturnValueOnce(Promise.resolve(JSON.stringify({ packages: [] })));
+    const { result } = renderHook(() => useMutationGate("x", { permission: true }));
+    await act(async () => {
+      await previewInstall("vim").catch(() => undefined);
+    });
+    expect(result.current.blocked).toBe(false);
+  });
 });
 
 describe("transaction owner and label", () => {

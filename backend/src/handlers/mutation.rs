@@ -13,7 +13,7 @@ use crate::inhibit::ShutdownInhibitor;
 use crate::models::{
     AddReason, ConflictInfo, KeyInfo, PreflightResponse, PreflightState, PreflightWarning,
     PreviewAdd, PreviewRemove, ProviderChoice, RemoveReason, ReplacementInfo, StreamEvent,
-    WarningSeverity, preview_totals,
+    TransactionPreview, WarningSeverity, preview_totals,
 };
 use crate::util::{
     CheckResult, DEFAULT_MUTATION_TIMEOUT_SECS, TimeoutGuard, check_cancel,
@@ -697,12 +697,16 @@ pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
     )
 }
 
-pub fn install_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
+pub fn install_package(
+    name: &str,
+    timeout_secs: Option<u64>,
+    approved_removals: &[String],
+) -> Result<()> {
     crate::network::require_network()?;
     let (mut handle, timeout) = begin_mutation(
         EventScope::Install,
         MutationOpts {
-            questions: Some(false),
+            questions: Some(!approved_removals.is_empty()),
         },
         timeout_secs,
     )?;
@@ -738,6 +742,12 @@ pub fn install_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
         return Err(prepare_failure(&err_msg));
     }
 
+    crate::alpm::check_approved_removals(
+        tx.remove().iter().map(|pkg| pkg.name()),
+        approved_removals,
+    )
+    .map_err(|e| prepare_failure(&e))?;
+
     commit_and_complete(
         &mut tx,
         &timeout,
@@ -745,7 +755,11 @@ pub fn install_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
     )
 }
 
-pub fn remove_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
+pub fn remove_package(
+    name: &str,
+    timeout_secs: Option<u64>,
+    approved_removals: &[String],
+) -> Result<()> {
     let (mut handle, timeout) = begin_mutation(
         EventScope::Remove,
         MutationOpts { questions: None },
@@ -775,11 +789,25 @@ pub fn remove_package(name: &str, timeout_secs: Option<u64>) -> Result<()> {
         return Err(prepare_failure(&err_msg));
     }
 
+    let allowed: Vec<String> = std::iter::once(name)
+        .chain(approved_removals.iter().map(String::as_str))
+        .map(str::to_string)
+        .collect();
+    crate::alpm::check_approved_removals(tx.remove().iter().map(|pkg| pkg.name()), &allowed)
+        .map_err(fail_complete)?;
+
     commit_and_complete(
         &mut tx,
         &timeout,
         Some(format!("Successfully removed {}", name)),
     )
+}
+
+fn emit_preview_error(message: String) -> Result<()> {
+    emit_json(&TransactionPreview {
+        error: Some(message),
+        ..Default::default()
+    })
 }
 
 /// What a prepared transaction adds and removes, with each package's reason.
@@ -842,6 +870,136 @@ fn assign_reasons(
         };
     }
     (add, remove)
+}
+
+fn finish_preview(
+    tx: &mut TransactionGuard,
+    targets: &[String],
+    removing: bool,
+    state: &Rc<RefCell<PreflightState>>,
+    warnings: Vec<PreflightWarning>,
+) -> Result<()> {
+    emit_json(&build_preview(tx, targets, removing, state, warnings)?)
+}
+
+/// Prepares the transaction, never commits it, and returns what it would do.
+pub(crate) fn build_preview(
+    tx: &mut TransactionGuard,
+    targets: &[String],
+    removing: bool,
+    state: &Rc<RefCell<PreflightState>>,
+    mut warnings: Vec<PreflightWarning>,
+) -> Result<TransactionPreview> {
+    if is_cancelled() {
+        anyhow::bail!("Operation cancelled");
+    }
+
+    // Questions fire inside prepare, so the state is read only afterwards.
+    let prepared = tx.prepare_detailed();
+    let s = state.borrow();
+
+    if !s.declined_removals.is_empty() {
+        warnings.push(PreflightWarning {
+            id: "removal_declined".to_string(),
+            severity: WarningSeverity::Danger,
+            title: "Package dependencies could not be resolved".to_string(),
+            message: "These install targets have dependencies that cannot be satisfied. \
+                The install will fail because it does not skip unresolved targets."
+                .to_string(),
+            packages: s.declined_removals.clone(),
+            blocking: false,
+            disk: None,
+        });
+    }
+
+    let mut preview = TransactionPreview {
+        conflicts: s.conflicts.clone(),
+        replacements: s.replacements.clone(),
+        providers: s.providers.clone(),
+        import_keys: s.import_keys.clone(),
+        warnings,
+        ..Default::default()
+    };
+
+    match prepared {
+        Err(failure) => {
+            preview.error = Some(format!("Failed to prepare transaction: {}", failure));
+            preview.conflicts.extend(failure.conflicting);
+            preview.blocked_by = failure.unsatisfied;
+        }
+        Ok(()) => {
+            (preview.add, preview.remove) = preview_items(tx, targets, removing);
+            let (download, net) = preview_totals(&preview.add, &preview.remove);
+            preview.total_download_size = download;
+            preview.net_installed_size = net;
+            preview.success = true;
+            preview.warnings.extend(crate::space::check(download, net));
+        }
+    }
+    Ok(preview)
+}
+
+/// Previews an install without committing; a held lock returns database_locked.
+pub fn preflight_install(name: &str) -> Result<()> {
+    setup_signal_handler()?;
+
+    let mut handle = get_handle()?;
+    let state = Rc::new(RefCell::new(PreflightState::default()));
+    record_questions(&mut handle, &state);
+
+    let not_found = || format!("Package '{}' not found in any repository", name);
+    if !handle.syncdbs().iter().any(|db| db.pkg(name).is_ok()) {
+        return emit_preview_error(not_found());
+    }
+
+    if is_cancelled() {
+        anyhow::bail!("Operation cancelled");
+    }
+
+    let mut tx = TransactionGuard::new(&mut handle, TransFlag::NONE)?;
+
+    let Some(pkg) = tx.syncdbs().iter().find_map(|db| db.pkg(name).ok()) else {
+        return emit_preview_error(not_found());
+    };
+    if let Err(e) = tx.add_pkg(pkg) {
+        return emit_preview_error(format!("Failed to add '{}' to transaction: {}", name, e));
+    }
+
+    finish_preview(&mut tx, &[name.to_string()], false, &state, Vec::new())
+}
+
+/// Previews `remove-package NAME` with the same RECURSE flag. Packages that
+/// still need NAME come back in `blocked_by` with success false.
+pub fn preflight_remove(name: &str) -> Result<()> {
+    setup_signal_handler()?;
+
+    let mut handle = get_handle()?;
+    // remove-package sets no question callback, so neither does its preview.
+    let state = Rc::new(RefCell::new(PreflightState::default()));
+
+    if handle.localdb().pkg(name).is_err() {
+        return emit_preview_error(format!("Package '{}' is not installed", name));
+    }
+
+    if is_cancelled() {
+        anyhow::bail!("Operation cancelled");
+    }
+
+    let mut tx = TransactionGuard::new(&mut handle, TransFlag::RECURSE)?;
+
+    let mark_result = tx
+        .localdb()
+        .pkg(name)
+        .map_err(|e| e.to_string())
+        .and_then(|pkg| tx.remove_pkg(pkg).map_err(|e| e.to_string()));
+    if let Err(err_msg) = mark_result {
+        return emit_preview_error(format!(
+            "Failed to mark '{}' for removal: {}",
+            name, err_msg
+        ));
+    }
+
+    finish_preview(&mut tx, &[name.to_string()], true, &state, Vec::new())
 }
 
 #[cfg(test)]

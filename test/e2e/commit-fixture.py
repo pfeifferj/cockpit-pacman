@@ -12,6 +12,9 @@ BASE = Path('/run/cockpit-pacman-e2e')
 STATE = BASE / 'commit'
 PACKAGE = 'cockpit-pacman-e2e-commit'
 VICTIM = PACKAGE + '-old'
+EXTRA = PACKAGE + '-other'
+DEPENDENCY = PACKAGE + '-dep'
+CONSUMER = PACKAGE + '-consumer'
 BACKEND = '/usr/libexec/cockpit-pacman/cockpit-pacman-backend'
 FIXTURE = '/usr/local/libexec/cockpit-pacman-e2e/commit-fixture.py'
 UNIT = 'cockpit-pacman-scheduled.service'
@@ -49,8 +52,8 @@ def backend_pids():
             continue
         if args[0] not in (BACKEND.encode(), (BACKEND + '.real').encode()):
             continue
-        if args[1:2] in ([b'scheduled-run'], [b'upgrade']) or (
-                args[1:2] in ([b'install-package'], [b'downgrade'], [b'downgrade-archive'])
+        if args[1:2] in ([b'scheduled-run'], [b'upgrade'], [b'remove-orphans']) or (
+                args[1:2] in ([b'install-package'], [b'downgrade'], [b'downgrade-archive'], [b'remove-package'])
                 and args[2:3] == [PACKAGE.encode()]):
             pids.append(int(entry.name))
     return pids
@@ -61,7 +64,7 @@ def installed_version(name=PACKAGE):
     return result.stdout.strip().split()[-1] if result.returncode == 0 else None
 
 
-def package(version, name=PACKAGE, conflicts=None):
+def package(version, name=PACKAGE, conflicts=(), depends=()):
     tree = STATE / ('build-' + name + '-' + version)
     target = tree / 'usr/share' / name / 'version'
     target.parent.mkdir(parents=True)
@@ -75,8 +78,9 @@ packager = Cockpit E2E
 size = 4
 arch = any
 license = GPL
-''' + (f'conflict = {conflicts}\n' if conflicts else ''))
-    (tree / '.INSTALL').write_text(f'pre_upgrade() {{ {FIXTURE} scriptlet; }}\n' if name == PACKAGE else '')
+''' + ''.join(f'conflict = {name}\n' for name in conflicts)
+        + ''.join(f'depend = {name}\n' for name in depends))
+    (tree / '.INSTALL').write_text(f'pre_upgrade() {{ {FIXTURE} scriptlet; }}\n' if name == PACKAGE and version != '4-1' else '')
     archive = STATE / f'{name}-{version}-any.pkg.tar.zst'
     run(['bsdtar', '--zstd', '-cf', str(archive), '-C', str(tree), '.PKGINFO', '.INSTALL', 'usr'])
     archive.chmod(0o644)
@@ -120,6 +124,7 @@ Server = file://{STATE}
         abort = 'AbortOnFail\n' if when == 'PreTransaction' else ''
         path.write_text(f'''[Trigger]
 Operation = Upgrade
+Operation = Install
 Type = Package
 Target = {PACKAGE}
 [Action]
@@ -139,14 +144,27 @@ def publish(updated, signatures=False):
 def publish_conflict():
     if installed_version(VICTIM) is None:
         raise SystemExit('Set up the removal fixture before publishing a conflict')
-    publish(package('3-1', conflicts=VICTIM))
+    publish(package('3-1', conflicts=[VICTIM, EXTRA]))
 
 
 def cached_conflict():
     if installed_version(VICTIM) is None:
         raise SystemExit('Set up the removal fixture before caching a conflict')
-    archive = package('0-1', conflicts=VICTIM)
+    archive = package('0-1', conflicts=[VICTIM, EXTRA])
     shutil.copy2(archive, Path('/var/cache/pacman/pkg') / archive.name)
+
+
+def removal_graph():
+    saved_hooks = [(hook, hook.read_text()) for hook in HOOKS]
+    for hook, _content in saved_hooks:
+        hook.unlink()
+    dependency = package('1-1', DEPENDENCY)
+    target = package('4-1', depends=[DEPENDENCY])
+    consumer = package('1-1', CONSUMER, depends=[DEPENDENCY])
+    run(['pacman', '-U', '--noconfirm', str(dependency), str(target), str(consumer)], stdout=subprocess.DEVNULL)
+    run(['pacman', '-D', '--asdeps', DEPENDENCY], stdout=subprocess.DEVNULL)
+    for hook, content in saved_hooks:
+        hook.write_text(content.replace('Operation = Upgrade\nOperation = Install', 'Operation = Remove'))
 
 
 def unknown_signer():
@@ -202,6 +220,9 @@ def state():
     print(json.dumps({
         'version': installed_version(),
         'victim_version': installed_version(VICTIM),
+        'extra_version': installed_version(EXTRA),
+        'dependency_version': installed_version(DEPENDENCY),
+        'consumer_version': installed_version(CONSUMER),
         'payload': PAYLOAD.read_text().strip() if PAYLOAD.exists() else None,
         'pre': (STATE / 'pre-entered').exists(),
         'scriptlet': (STATE / 'scriptlet-entered').exists(),
@@ -226,10 +247,15 @@ def cleanup():
     run(['systemctl', 'stop', UNIT])
     for path in HOOKS:
         path.unlink(missing_ok=True)
+    if installed_version(CONSUMER) is not None:
+        run(['pacman', '-R', '--noconfirm', CONSUMER], stdout=subprocess.DEVNULL)
     if installed_version() is not None:
         run(['pacman', '-R', '--noconfirm', PACKAGE], stdout=subprocess.DEVNULL)
     if installed_version(VICTIM) is not None:
         run(['pacman', '-R', '--noconfirm', VICTIM], stdout=subprocess.DEVNULL)
+    for name in [EXTRA, DEPENDENCY]:
+        if installed_version(name) is not None:
+            run(['pacman', '-R', '--noconfirm', name], stdout=subprocess.DEVNULL)
     for name, path in [('pacman.conf', PACMAN_CONF), ('config.json', CONFIG), ('scheduled.jsonl', HISTORY)]:
         saved = STATE / name
         if saved.exists():
@@ -239,10 +265,11 @@ def cleanup():
             path.unlink(missing_ok=True)
     for suffix in ['.db', '.db.sig', '.files', '.files.sig']:
         (Path('/var/lib/pacman/sync') / (PACKAGE + suffix)).unlink(missing_ok=True)
-    for version in ['0-1', '1-1', '2-1', '3-1']:
+    for version in ['0-1', '1-1', '2-1', '3-1', '4-1']:
         for suffix in ['', '.sig']:
             (Path('/var/cache/pacman/pkg') / f'{PACKAGE}-{version}-any.pkg.tar.zst{suffix}').unlink(missing_ok=True)
-    (Path('/var/cache/pacman/pkg') / f'{VICTIM}-1-1-any.pkg.tar.zst').unlink(missing_ok=True)
+    for name in [VICTIM, EXTRA, DEPENDENCY, CONSUMER]:
+        (Path('/var/cache/pacman/pkg') / f'{name}-1-1-any.pkg.tar.zst').unlink(missing_ok=True)
     settings = json.loads((STATE / 'settings.json').read_text())
     if subprocess.run(['systemctl', 'is-failed', '--quiet', UNIT], capture_output=True, check=False).returncode == 0:
         run(['systemctl', 'reset-failed', UNIT])
@@ -259,7 +286,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=['setup', 'pre', 'scriptlet', 'post', 'release', 'state', 'term',
                                           'scheduled-start', 'scheduled-stop', 'publish-conflict', 'publish-update',
-                                          'cached-conflict', 'uninstall-target', 'unknown-signer', 'cleanup'])
+                                          'cached-conflict', 'uninstall-target', 'unknown-signer', 'install-extra', 'removal-graph', 'cleanup'])
     parser.add_argument('--phase', choices=['pre', 'scriptlet'], default='scriptlet')
     parser.add_argument('--fail', action='store_true')
     parser.add_argument('--removal', action='store_true')
@@ -277,6 +304,10 @@ def main():
         cached_conflict()
     elif args.action == 'uninstall-target':
         run(['pacman', '-R', '--noconfirm', PACKAGE], stdout=subprocess.DEVNULL)
+    elif args.action == 'install-extra':
+        run(['pacman', '-U', '--noconfirm', str(package('1-1', EXTRA))], stdout=subprocess.DEVNULL)
+    elif args.action == 'removal-graph':
+        removal_graph()
     elif args.action == 'unknown-signer':
         unknown_signer()
     elif args.action in ('pre', 'scriptlet', 'post'):
