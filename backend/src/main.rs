@@ -1,4 +1,6 @@
-use cockpit_pacman_backend::handlers::mutation::{preflight_install, preflight_remove};
+use cockpit_pacman_backend::handlers::mutation::{
+    preflight_install, preflight_remove, preflight_remove_orphans,
+};
 use std::env;
 use std::time::Duration;
 
@@ -37,6 +39,7 @@ const COMMANDS: &[&str] = &[
     "preflight-upgrade",
     "preflight-install",
     "preflight-remove",
+    "preflight-remove-orphans",
     "sync-database",
     "upgrade",
     "local-package-info",
@@ -120,6 +123,10 @@ Commands:
   preflight-remove NAME  Preview removing a package and its unneeded
                          dependencies without committing (requires root)
                          Returns blocked_by for packages that still need NAME
+  preflight-remove-orphans [names]
+                         Preview removing orphans without committing
+                         (requires root)
+                         names: comma-separated orphans, empty for all
   sync-database [force] [timeout]
                          Sync package databases (requires root)
                          force: true|false (default: true)
@@ -142,9 +149,10 @@ Commands:
   refresh-keyring        Refresh keys from keyserver (requires root)
   init-keyring           Initialize and populate keyring (requires root)
   list-orphans           List orphan packages (dependencies no longer required)
-  remove-orphans [timeout]
-                         Remove all orphan packages (requires root)
+  remove-orphans [timeout] [names]
+                         Remove orphan packages (requires root)
                          timeout: seconds (default: 300)
+                         names: comma-separated orphans, empty for all
   install-package NAME [timeout] [approved-removals]
                          Install a package from repositories (requires root)
                          timeout: seconds (default: 300)
@@ -290,6 +298,11 @@ fn arg_list(args: &[String], i: usize) -> Vec<String> {
 
 fn validate_names(names: &[String]) -> anyhow::Result<()> {
     names.iter().try_for_each(|n| validate_package_name(n))
+}
+
+type RemoveOrphansArgs = (Option<u64>, Vec<String>);
+fn parse_remove_orphans(args: &[String]) -> RemoveOrphansArgs {
+    (args.get(2).and_then(|s| s.parse().ok()), arg_list(args, 3))
 }
 
 fn arg_usize(args: &[String], i: usize, default: usize) -> usize {
@@ -472,8 +485,12 @@ fn main() {
         "init-keyring" => init_keyring(),
         "list-orphans" => list_orphans(),
         "remove-orphans" => {
-            let timeout = args.get(2).and_then(|s| s.parse().ok());
-            remove_orphans(timeout)
+            let (timeout, names) = parse_remove_orphans(&args);
+            let approved = arg_list(&args, 4);
+            validate_names(&names).and_then(|_| {
+                validate_names(&approved)?;
+                remove_orphans(&names, timeout, &approved)
+            })
         }
         "preflight-install" => {
             if args.len() < 3 {
@@ -488,6 +505,10 @@ fn main() {
                 std::process::exit(1);
             }
             validate_package_name(&args[2]).and_then(|_| preflight_remove(&args[2]))
+        }
+        "preflight-remove-orphans" => {
+            let names = arg_list(&args, 2);
+            validate_names(&names).and_then(|_| preflight_remove_orphans(&names))
         }
         "install-package" => {
             if args.len() < 3 {

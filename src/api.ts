@@ -379,6 +379,12 @@ export async function previewRemove(name: string): Promise<TransactionPreview> {
   return runBackend<TransactionPreview>("preflight-remove", [sanitizeSearchInput(name)]);
 }
 
+/** Resolves removing the given orphans, or all of them, without committing. */
+export async function previewRemoveOrphans(names?: string[]): Promise<TransactionPreview> {
+  const args = names && names.length > 0 ? [names.map(n => sanitizeSearchInput(n)).join(",")] : [];
+  return runBackend<TransactionPreview>("preflight-remove-orphans", args);
+}
+
 export interface PreviewTotals {
   /** Packages the transaction installs, upgrades or removes. */
   count: number;
@@ -961,11 +967,11 @@ export function removePackage(
   return runStreamingBackend("remove-package", args, callbacks, { gracefulCancel: true });
 }
 
-export function removeOrphans(callbacks: UpgradeCallbacks): StreamingHandle {
-  const args: string[] = [];
-  if (callbacks.timeout !== undefined) {
-    args.push(String(callbacks.timeout));
-  }
+/** Removes the given orphans, or every orphan when `names` is empty. */
+export function removeOrphans(callbacks: UpgradeCallbacks, names?: string[], approvedRemovals: string[] = []): StreamingHandle {
+  const args = [callbacks.timeout === undefined ? "" : String(callbacks.timeout),
+    (names ?? []).map(sanitizeSearchInput).join(","),
+    approvedRemovals.map(sanitizeSearchInput).join(",")];
   return runStreamingBackend("remove-orphans", args, callbacks, { gracefulCancel: true });
 }
 

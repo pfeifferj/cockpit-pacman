@@ -4,17 +4,22 @@ import { render, screen, fireEvent, act, cleanup, waitFor, within } from "@testi
 import { TransactionHost, TransactionHostProvider } from "./TransactionHost";
 import { TransactionBanner } from "./TransactionBanner";
 import { PackageActionModal, installConfig } from "./PackageActionModal";
+import { OrphansView } from "./OrphansView";
+import { NavigationProvider } from "../contexts/NavigationContext";
 import * as api from "../api";
 import { mutationGate } from "../hooks/useMutationGate";
 import { AnnouncerProvider } from "../contexts/AnnouncerContext";
 import { mockSpawn } from "../test/setup";
 import { createMockStreamingProcess } from "../test/mocks";
+import { sweepA11y } from "../test/a11ySweep";
 
 vi.mock("../api", async () => {
   const actual = await vi.importActual("../api");
   return {
     ...actual,
     checkUpdates: vi.fn().mockResolvedValue({ updates: [], warnings: [] }),
+    listOrphans: vi.fn(),
+    previewRemoveOrphans: vi.fn(),
   };
 });
 
@@ -158,4 +163,124 @@ describe("TransactionHost", () => {
 
 
 
+  describe("an orphan removal whose view unmounts", () => {
+    const orphanPreview: api.TransactionPreview = {
+      ...preview,
+      add: [],
+      remove: [{ name: "libunused", version: "1.0-1", installed_size: 1, reason: "target" }],
+      net_installed_size: -1,
+    };
+
+    const OrphanPage: React.FC<{ show: boolean; onViewOrphans?: () => void }> = ({ show, onViewOrphans }) => (
+      <AnnouncerProvider>
+        <NavigationProvider value={{ onViewOrphans }}>
+          <TransactionHostProvider>
+            <TransactionBanner
+              activeSlug="installed"
+              activeOptions={{ filter: show ? "orphan" : "all" }}
+              onNavigate={vi.fn()}
+            />
+            <TransactionHost />
+            {show && <OrphansView onRowClick={vi.fn()} />}
+          </TransactionHostProvider>
+        </NavigationProvider>
+      </AnnouncerProvider>
+    );
+
+    async function startAndLeave(onViewOrphans?: () => void) {
+      vi.mocked(api.listOrphans).mockResolvedValue({
+        orphans: [{ name: "libunused", version: "1.0-1", installed_size: 1, repository: "extra" }],
+        total_size: 1,
+      } as api.OrphanResponse);
+      vi.mocked(api.previewRemoveOrphans).mockResolvedValue(orphanPreview);
+      const spawned = spawnProcess();
+      const view = render(<OrphanPage show onViewOrphans={onViewOrphans} />);
+      fireEvent.click(await screen.findByRole("button", { name: "Remove 1 orphan" }));
+      const dialog = await screen.findByRole("dialog", { name: "Remove orphan packages?" });
+      fireEvent.click(await within(dialog).findByRole("button", { name: "Remove 1 orphan" }));
+      emit(spawned.proc, { type: "log", level: "info", message: "removing libunused" });
+      view.rerender(<OrphanPage show={false} onViewOrphans={onViewOrphans} />);
+      return spawned;
+    }
+
+    it("keeps the backend running and routes View progress to the orphan list", async () => {
+      const onViewOrphans = vi.fn();
+      const { proc, close, input } = await startAndLeave(onViewOrphans);
+      finish = () => emit(proc, { type: "complete", success: true });
+
+      expect(close).not.toHaveBeenCalled();
+      expect(input).not.toHaveBeenCalled();
+      expect(api.getActiveTransaction()?.command).toBe("remove-orphans");
+      const viewProgress = screen.getByRole("button", { name: "View progress" });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(viewProgress).not.toHaveFocus();
+
+      fireEvent.click(viewProgress);
+      expect(onViewOrphans).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("opens a progress dialog without a route, and stops through the same handle", async () => {
+      const { proc, input } = await startAndLeave();
+      fireEvent.click(screen.getByRole("button", { name: "View progress" }));
+
+      const dialog = screen.getByRole("dialog", { name: "Removing 1 orphan package" });
+      await waitFor(() => expect(within(dialog).getByRole("log")).toHaveTextContent("removing libunused"));
+      const cancel = within(dialog).getByRole("button", { name: "Cancel" });
+      expect(cancel).toHaveClass("pf-m-secondary");
+      fireEvent.click(cancel);
+      const stop = within(dialog).getByRole("button", { name: "Stop removing orphan packages" });
+      expect(stop).toHaveClass("pf-m-danger");
+      fireEvent.click(stop);
+      expect(input).toHaveBeenCalledTimes(1);
+      expect(input).toHaveBeenCalledWith("cancel\n", true);
+
+      emit(proc, { type: "complete", success: false, message: "cancelled" });
+      expect(screen.getByRole("dialog", { name: "Stopped removing 1 orphan package" })).toBe(dialog);
+      expect(within(dialog).getByText("Orphan removal stopped")).toBeInTheDocument();
+      expect(within(dialog).queryByRole("button", { name: "Run in background" })).not.toBeInTheDocument();
+      expect(api.getActiveTransaction()).toBeNull();
+    });
+
+    it("shows the removal phase and value, and hides the dialog with Run in background", async () => {
+      const { proc } = await startAndLeave();
+      fireEvent.click(screen.getByRole("button", { name: "View progress" }));
+      const dialog = screen.getByRole("dialog", { name: "Removing 1 orphan package" });
+      expect(dialog).toHaveTextContent("Preparing");
+      expect(within(dialog).queryByRole("progressbar")).not.toBeInTheDocument();
+
+      emit(proc, { type: "progress", operation: "remove_start", package: "libunused", percent: 50, current: 1, total: 1 });
+      const bar = await within(dialog).findByRole("progressbar", { name: "Removing packages" });
+      expect(bar).toHaveAttribute("aria-valuenow", "47");
+      expect(bar).toHaveAttribute("aria-valuetext", "47 percent, Removing packages, 1 of 1");
+      sweepA11y({ dialogs: ["Removing 1 orphan package"] });
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Run in background" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "View progress" })).toBeInTheDocument();
+      finish = () => emit(proc, { type: "complete", success: true });
+    });
+
+    it("titles a finished removal in the past tense and lists what it removed", async () => {
+      const { proc } = await startAndLeave();
+      emit(proc, { type: "complete", success: true });
+      expect(screen.getByRole("heading", { name: /Removed 1 orphan package$/ })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "View result" }));
+      const dialog = screen.getByRole("dialog", { name: "Removed 1 orphan package" });
+      expect(dialog).toHaveTextContent("Removed 1 package, freeing");
+      expect(within(within(dialog).getByRole("list", { name: "Removed packages" })).getByText("libunused")).toBeInTheDocument();
+      expect(within(dialog).queryByRole("button", { name: "Back to orphan list" })).not.toBeInTheDocument();
+      const closeButtons = within(dialog).getAllByRole("button", { name: "Close" });
+      const footerClose = closeButtons[closeButtons.length - 1];
+      expect(footerClose).toHaveClass("pf-m-primary");
+      sweepA11y({ dialogs: ["Removed 1 orphan package"] });
+
+      fireEvent.click(footerClose);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: /Removed 1 orphan package$/ })).not.toBeInTheDocument();
+    });
+  });
 });

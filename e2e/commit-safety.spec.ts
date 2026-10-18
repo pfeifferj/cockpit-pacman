@@ -306,7 +306,18 @@ test.describe("package transaction boundaries", () => {
     expect(await state(pacman)).toMatchObject({ version: null, dependency_version: null, post: true, pids: [], locked: false });
   });
 
-
+  test("refuses an orphan that became explicitly installed after preview", async ({ pacman }) => {
+    await fixture(pacman, "setup", "--phase", "pre");
+    await guestCommand(pacman.frame, ["pacman", "-D", "--asdeps", PACKAGE]);
+    const preview = JSON.parse(await guestCommand(pacman.frame, [BACKEND, "preflight-remove-orphans", PACKAGE]));
+    expect(preview.remove.map((pkg: { name: string }) => pkg.name)).toEqual([PACKAGE]);
+    await guestCommand(pacman.frame, ["pacman", "-D", "--asexplicit", PACKAGE]);
+    await start(pacman, ["remove-orphans", "", PACKAGE, PACKAGE]);
+    await expect.poll(async () => (await result(pacman)).done).toBe(true);
+    const events = (await result(pacman)).output.trim().split("\n").map(line => JSON.parse(line));
+    expect(events.find(event => event.type === "complete")).toMatchObject({ success: false, code: "transaction_failed" });
+    expect(await state(pacman)).toMatchObject({ version: "1-1", pre: false, post: false, pids: [], locked: false });
+  });
 
   async function openInstall(pacman: PackmanPage) {
     await pacman.switchTab("Search Packages");
@@ -384,7 +395,32 @@ test.describe("package transaction boundaries", () => {
     expect(await state(pacman)).toMatchObject({ version: "3-1", victim_version: null, post: true, locked: false });
   });
 
-
+  test("keeps a selected orphan removal alive when its filter closes", async ({ pacman }) => {
+    await fixture(pacman, "setup", "--phase", "pre");
+    await fixture(pacman, "removal-graph");
+    await guestCommand(pacman.frame, ["pacman", "-D", "--asdeps", PACKAGE]);
+    const tree = await guestCommand(pacman.frame, ["pacman", "-Q", "tree"]);
+    await pacman.switchTab("Installed Packages");
+    await pacman.selectFilter("Orphans");
+    await pacman.panel.getByRole("checkbox", { name: "Select all orphans", exact: true }).uncheck();
+    await pacman.panel.getByRole("row").filter({ has: pacman.frame.getByRole("button", { name: PACKAGE, exact: true }) })
+      .getByRole("checkbox").check();
+    await pacman.panel.getByRole("button", { name: "Remove 1 orphan", exact: true }).click();
+    const confirm = pacman.frame.getByRole("dialog", { name: "Remove orphan packages?" });
+    await confirm.getByRole("button", { name: "Remove 1 orphan", exact: true }).click();
+    await waitForBarrier(pacman, "pre");
+    const pids = (await state(pacman)).pids;
+    await pacman.selectFilter("All");
+    await expect(pacman.frame.getByRole("button", { name: "View progress", exact: true })).toBeVisible();
+    expect((await state(pacman)).pids).toEqual(pids);
+    await pacman.frame.getByRole("button", { name: "View progress", exact: true }).click();
+    await expect(pacman.panel.getByRole("button", { name: "Cancel", exact: true })).toBeVisible();
+    expect((await state(pacman)).pids).toEqual(pids);
+    await fixture(pacman, "release");
+    await expect.poll(async () => (await state(pacman)).pids).toEqual([]);
+    expect(await state(pacman)).toMatchObject({ version: null, dependency_version: "1-1", consumer_version: "1-1", post: true, locked: false });
+    expect(await guestCommand(pacman.frame, ["pacman", "-Q", "tree"])).toBe(tree);
+  });
 
   test("requires a refreshed install preview after an outside package change", async ({ pacman }) => {
     await fixture(pacman, "setup", "--removal", "--phase", "pre");

@@ -32,7 +32,7 @@ test.describe("Orphans Tab", () => {
 
   test("offers to remove them", async ({ pacman }) => {
     await expect(
-      pacman.panel.getByRole("button", { name: /Remove All Orphans/i })
+      pacman.panel.getByRole("button", { name: /^Remove \d+ orphan/ })
     ).toBeVisible({ timeout: 30000 });
   });
 

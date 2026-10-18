@@ -81,7 +81,7 @@ describe("TransactionBanner", () => {
   });
 
   it("routes orphan removal to the orphan filter and hides only there", () => {
-    finish = start(() => { removeOrphans(noop); });
+    finish = start(() => { removeOrphans(noop, ["libfoo"]); });
     const onNavigate = vi.fn();
     const { rerender } = render(
       <TransactionBanner activeSlug="installed" activeOptions={{ filter: "explicit" }} onNavigate={onNavigate} />,

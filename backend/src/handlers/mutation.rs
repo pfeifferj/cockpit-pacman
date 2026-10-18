@@ -628,25 +628,55 @@ pub fn run_upgrade(
     }
 }
 
-pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
+fn is_orphan(pkg: &alpm::Package) -> bool {
+    pkg.reason() == alpm::PackageReason::Depend
+        && pkg.required_by().is_empty()
+        && pkg.optional_for().is_empty()
+}
+
+fn current_orphans(db: &alpm::Db) -> Vec<String> {
+    db.pkgs()
+        .iter()
+        .filter(|pkg| is_orphan(pkg))
+        .map(|pkg| pkg.name().to_string())
+        .collect()
+}
+
+/// The orphans a removal acts on: all of them when none are requested,
+/// otherwise the requested names, each of which must be a current orphan.
+pub(crate) fn select_orphans(
+    requested: &[String],
+    orphans: &[String],
+) -> std::result::Result<Vec<String>, String> {
+    if requested.is_empty() {
+        return Ok(orphans.to_vec());
+    }
+    let not_orphans: Vec<&str> = requested
+        .iter()
+        .filter(|name| !orphans.contains(name))
+        .map(String::as_str)
+        .collect();
+    if !not_orphans.is_empty() {
+        return Err(format!("Not orphan packages: {}", not_orphans.join(", ")));
+    }
+    Ok(requested.to_vec())
+}
+
+pub fn remove_orphans(
+    names: &[String],
+    timeout_secs: Option<u64>,
+    approved_removals: &[String],
+) -> Result<()> {
     let (mut handle, timeout) = begin_mutation(
         EventScope::Remove,
         MutationOpts { questions: None },
         timeout_secs,
     )?;
 
-    let orphan_names: Vec<String> = {
-        let localdb = handle.localdb();
-        localdb
-            .pkgs()
-            .iter()
-            .filter(|pkg| {
-                pkg.reason() == alpm::PackageReason::Depend
-                    && pkg.required_by().is_empty()
-                    && pkg.optional_for().is_empty()
-            })
-            .map(|pkg| pkg.name().to_string())
-            .collect()
+    let mut tx = TransactionGuard::new(&mut handle, TransFlag::RECURSE)?;
+    let orphan_names = match select_orphans(names, &current_orphans(tx.localdb())) {
+        Ok(selected) => selected,
+        Err(message) => return Err(fail_complete(message)),
     };
 
     if orphan_names.is_empty() {
@@ -660,8 +690,6 @@ pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
     }
 
     check_cancel_early!(&timeout);
-
-    let mut tx = TransactionGuard::new(&mut handle, TransFlag::RECURSE)?;
 
     for name in &orphan_names {
         if let Ok(pkg) = tx.localdb().pkg(name.as_str())
@@ -689,6 +717,15 @@ pub fn remove_orphans(timeout_secs: Option<u64>) -> Result<()> {
         });
         return Ok(());
     }
+
+    let allowed: Vec<String> = orphan_names
+        .iter()
+        .map(String::as_str)
+        .chain(approved_removals.iter().map(String::as_str))
+        .map(str::to_string)
+        .collect();
+    crate::alpm::check_approved_removals(tx.remove().iter().map(|pkg| pkg.name()), &allowed)
+        .map_err(fail_complete)?;
 
     commit_and_complete(
         &mut tx,
@@ -1002,12 +1039,86 @@ pub fn preflight_remove(name: &str) -> Result<()> {
     finish_preview(&mut tx, &[name.to_string()], true, &state, Vec::new())
 }
 
+/// Previews `remove-orphans [names]`: all current orphans when `names` is
+/// empty, otherwise exactly those, each of which must be an orphan.
+pub fn preflight_remove_orphans(names: &[String]) -> Result<()> {
+    setup_signal_handler()?;
+
+    let mut handle = get_handle()?;
+    let state = Rc::new(RefCell::new(PreflightState::default()));
+
+    let mut tx = TransactionGuard::new(&mut handle, TransFlag::RECURSE)?;
+    let selected = match select_orphans(names, &current_orphans(tx.localdb())) {
+        Ok(selected) => selected,
+        Err(message) => return emit_preview_error(message),
+    };
+    if selected.is_empty() {
+        return emit_json(&TransactionPreview {
+            success: true,
+            ..Default::default()
+        });
+    }
+
+    if is_cancelled() {
+        anyhow::bail!("Operation cancelled");
+    }
+
+    let mut unmarked = Vec::new();
+    for name in &selected {
+        if let Ok(pkg) = tx.localdb().pkg(name.as_str())
+            && tx.remove_pkg(pkg).is_err()
+        {
+            unmarked.push(name.clone());
+        }
+    }
+    let warnings = if unmarked.is_empty() {
+        Vec::new()
+    } else {
+        vec![PreflightWarning {
+            id: "not_marked".to_string(),
+            severity: WarningSeverity::Warning,
+            title: "Some orphans cannot be removed".to_string(),
+            message: "These packages could not be added to the removal and would stay \
+                installed."
+                .to_string(),
+            packages: unmarked,
+            blocking: false,
+            disk: None,
+        }]
+    };
+
+    finish_preview(&mut tx, &selected, true, &state, warnings)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn names(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn select_orphans_empty_request_takes_all() {
+        let orphans = names(&["a", "b"]);
+        assert_eq!(select_orphans(&[], &orphans), Ok(orphans.clone()));
+    }
+
+    #[test]
+    fn select_orphans_keeps_requested_subset() {
+        let orphans = names(&["a", "b", "c"]);
+        assert_eq!(
+            select_orphans(&names(&["c", "a"]), &orphans),
+            Ok(names(&["c", "a"]))
+        );
+    }
+
+    #[test]
+    fn select_orphans_rejects_non_orphans_by_name() {
+        let orphans = names(&["a"]);
+        let err = select_orphans(&names(&["a", "bash", "glibc"]), &orphans).unwrap_err();
+        assert!(err.contains("bash, glibc"), "{err}");
+        assert!(!err.contains("a,"), "{err}");
     }
 
     fn add(name: &str, old: Option<(&str, i64)>) -> PreviewAdd {
