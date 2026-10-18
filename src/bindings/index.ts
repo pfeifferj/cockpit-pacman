@@ -31,16 +31,16 @@ export type DependencyNode = { id: string, name: string, version: string, depth:
 
 export type DependencyTreeResponse = { nodes: Array<DependencyNode>, edges: Array<DependencyEdge>, root: string, max_depth_reached: boolean, warnings: Array<string>, };
 
-export type DiskSpaceShortfall = {
+export type DiskSpaceShortfall = { 
 /**
  * Mount point of the short filesystem.
  */
-mount: string,
+mount: string, 
 /**
  * Bytes to free on `mount`: to fit the transaction when blocking, else to
  * stay above the low-space floor afterwards.
  */
-deficit: number,
+deficit: number, 
 /**
  * The package cache is on this filesystem, so cleaning it frees space here.
  */
@@ -92,7 +92,7 @@ export type NewsItem = { title: string, link: string, published: string, summary
 
 export type NewsReadState = { dismissed: Array<string>, };
 
-export type NewsResponse = { items: Array<NewsItem>,
+export type NewsResponse = { items: Array<NewsItem>, 
 /**
  * True when served from the on-disk cache because the live fetch failed.
  */
@@ -116,17 +116,17 @@ export type PacnewStatus = { has_pacnew: boolean, files: Array<PacnewFile>, };
 
 export type PreflightKeyInfo = { fingerprint: string, uid: string, };
 
-export type PreflightResponse = { success: boolean, error?: string, conflicts?: Array<ConflictInfo>, replacements?: Array<ReplacementInfo>, removals?: Array<string>, providers?: Array<ProviderChoice>, import_keys?: Array<PreflightKeyInfo>, warnings?: Array<PreflightWarning>, packages_to_upgrade: number, total_download_size: number,
+export type PreflightResponse = { success: boolean, error?: string, conflicts?: Array<ConflictInfo>, replacements?: Array<ReplacementInfo>, removals?: Array<string>, providers?: Array<ProviderChoice>, import_keys?: Array<PreflightKeyInfo>, warnings?: Array<PreflightWarning>, packages_to_upgrade: number, total_download_size: number, 
 /**
  * Everything the upgrade installs or upgrades, pulled-in dependencies included.
  */
 add?: Array<PreviewAdd>, remove?: Array<PreviewRemove>, net_installed_size?: number, };
 
-export type PreflightWarning = { id: string, severity: WarningSeverity, title: string, message: string, packages: Array<string>,
+export type PreflightWarning = { id: string, severity: WarningSeverity, title: string, message: string, packages: Array<string>, 
 /**
  * Blocks confirmation.
  */
-blocking: boolean,
+blocking: boolean, 
 /**
  * Set on the `disk_space` warning.
  */
@@ -188,7 +188,7 @@ export type SecurityInfoIssue = { name: string, severity: string, issue_type: st
 
 export type SecurityInfoResponse = { name: string, advisories: Array<SecurityInfoAdvisory>, groups: Array<SecurityInfoGroup>, issues: Array<SecurityInfoIssue>, disabled?: boolean, };
 
-export type SecurityResponse = { advisories: Array<PackageSecurityAdvisory>,
+export type SecurityResponse = { advisories: Array<PackageSecurityAdvisory>, 
 /**
  * True when served from the on-disk cache because the live fetch failed.
  */
@@ -196,7 +196,7 @@ stale?: boolean, disabled?: boolean, };
 
 export type ServiceRestart = { name: string, pid: number, affected_packages: Array<string>, reason: string, restart_blocked?: RestartBlocked | null, };
 
-export type ServicesStatus = { restart_required: boolean, services: Array<ServiceRestart>,
+export type ServicesStatus = { restart_required: boolean, services: Array<ServiceRestart>, 
 /**
  * The scan could not see every process, so `services` may be short.
  */
