@@ -182,6 +182,8 @@ pub fn clean_cache(keep_versions: u32, filter_pkgs: &[String], mode: &str) -> Re
     emit_event(&StreamEvent::Event {
         event: "Starting cache cleanup".to_string(),
         package: None,
+        current: None,
+        total: None,
     });
 
     if !cache_path.exists() {

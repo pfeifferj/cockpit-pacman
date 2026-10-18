@@ -88,9 +88,13 @@ pub(crate) fn setup_progress_cb(handle: &mut Alpm) {
     );
 }
 
+fn hook_position(position: usize, total: usize) -> Option<(usize, usize)> {
+    (total > 0).then_some((position, total))
+}
+
 pub(crate) fn setup_event_cb(handle: &mut Alpm, scope: EventScope) {
     handle.set_event_cb((), move |event: AnyEvent, _: &mut ()| {
-        let (event_str, pkg_name) = match event.event() {
+        let (event_str, pkg_name, position) = match event.event() {
             Event::PackageOperationStart(op) | Event::PackageOperationDone(op) => {
                 let (op_name, pkg_name) = match op.operation() {
                     PackageOperation::Install(pkg) if scope.maps_installs() => {
@@ -110,29 +114,42 @@ pub(crate) fn setup_event_cb(handle: &mut Alpm, scope: EventScope) {
                     }
                     _ => return,
                 };
-                (op_name.to_string(), Some(pkg_name))
+                (op_name.to_string(), Some(pkg_name), None)
             }
             Event::ScriptletInfo(info) if scope.verbose() => {
-                ("scriptlet".to_string(), Some(info.line().to_string()))
+                ("scriptlet".to_string(), Some(info.line().to_string()), None)
             }
-            Event::DatabaseMissing(db) if scope.verbose() => {
-                ("db_missing".to_string(), Some(db.dbname().to_string()))
-            }
-            Event::RetrieveStart if scope.verbose() => ("retrieve_start".to_string(), None),
-            Event::RetrieveDone if scope.verbose() => ("retrieve_done".to_string(), None),
-            Event::RetrieveFailed if scope.verbose() => ("retrieve_failed".to_string(), None),
-            Event::TransactionStart => ("transaction_start".to_string(), None),
-            Event::TransactionDone => ("transaction_done".to_string(), None),
-            Event::HookStart(_) => ("hook_start".to_string(), None),
-            Event::HookDone(_) => ("hook_done".to_string(), None),
-            Event::HookRunStart(h) => ("hook_run_start".to_string(), Some(h.name().to_string())),
-            Event::HookRunDone(h) => ("hook_run_done".to_string(), Some(h.name().to_string())),
-            _ if scope == EventScope::Upgrade => ("other".to_string(), None),
+            Event::DatabaseMissing(db) if scope.verbose() => (
+                "db_missing".to_string(),
+                Some(db.dbname().to_string()),
+                None,
+            ),
+            Event::RetrieveStart if scope.verbose() => ("retrieve_start".to_string(), None, None),
+            Event::RetrieveDone if scope.verbose() => ("retrieve_done".to_string(), None, None),
+            Event::RetrieveFailed if scope.verbose() => ("retrieve_failed".to_string(), None, None),
+            Event::TransactionStart => ("transaction_start".to_string(), None, None),
+            Event::TransactionDone => ("transaction_done".to_string(), None, None),
+            Event::HookStart(_) => ("hook_start".to_string(), None, None),
+            Event::HookDone(_) => ("hook_done".to_string(), None, None),
+            Event::HookRunStart(h) => (
+                "hook_run_start".to_string(),
+                Some(h.name().to_string()),
+                hook_position(h.position(), h.total()),
+            ),
+            Event::HookRunDone(h) => (
+                "hook_run_done".to_string(),
+                Some(h.name().to_string()),
+                hook_position(h.position(), h.total()),
+            ),
+            _ if scope == EventScope::Upgrade => ("other".to_string(), None, None),
             _ => return,
         };
+        let (current, total) = position.unzip();
         emit_event(&StreamEvent::Event {
             event: event_str,
             package: pkg_name,
+            current,
+            total,
         });
     });
 }
@@ -797,5 +814,47 @@ mod tests {
             "linux-firmware",
             ["firmware"].iter().copied()
         ));
+    }
+
+    #[test]
+    fn hook_position_known_total() {
+        assert_eq!(hook_position(3, 12), Some((3, 12)));
+    }
+
+    #[test]
+    fn hook_position_zero_total_is_none() {
+        assert_eq!(hook_position(0, 0), None);
+    }
+
+    #[test]
+    fn event_serializes_position_when_set() {
+        let json = serde_json::to_string(&StreamEvent::Event {
+            event: "hook_run_start".to_string(),
+            package: Some("systemd-update".to_string()),
+            current: Some(2),
+            total: Some(5),
+        })
+        .ok();
+        assert_eq!(
+            json.as_deref(),
+            Some(
+                r#"{"type":"event","event":"hook_run_start","package":"systemd-update","current":2,"total":5}"#
+            )
+        );
+    }
+
+    #[test]
+    fn event_omits_position_when_unset() {
+        let json = serde_json::to_string(&StreamEvent::Event {
+            event: "transaction_start".to_string(),
+            package: None,
+            current: None,
+            total: None,
+        })
+        .ok();
+        assert_eq!(
+            json.as_deref(),
+            Some(r#"{"type":"event","event":"transaction_start","package":null}"#)
+        );
     }
 }

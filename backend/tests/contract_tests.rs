@@ -717,6 +717,8 @@ fn stream_event_event_package_serializes_as_null_when_none() {
     let event = StreamEvent::Event {
         event: "transaction_done".into(),
         package: None,
+        current: None,
+        total: None,
     };
     let v = to_json(&event);
     assert_eq!(v["type"], "event");

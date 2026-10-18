@@ -512,10 +512,12 @@ pub const ERROR_CODES: &[&str] = &[
     "database_locked",
     "network_error",
     "transaction_failed",
+    "signature_error",
     "validation_error",
     "cancelled",
     "not_found",
     "permission_denied",
+    "config_changed",
     "internal_error",
 ];
 
@@ -537,6 +539,18 @@ pub const NETWORK_ERROR_KEYWORDS: &[&str] = &[
     "download library error",
 ];
 
+// libalpm signature diagnostics, mirrored in test/fixtures/error-codes.json.
+pub const SIGNATURE_ERROR_KEYWORDS: &[&str] = &[
+    "pgp signature",
+    "missing required signature",
+    "signature from",
+    "unknown trust",
+    "marginal trust",
+    "required key missing",
+    "could not be looked up remotely",
+    "\" is disabled",
+];
+
 pub fn classify_message(message: &str) -> Option<&'static str> {
     let lower = message.to_lowercase();
     if lower.contains("timed out") || lower.contains("timeout") {
@@ -547,6 +561,9 @@ pub fn classify_message(message: &str) -> Option<&'static str> {
     }
     if NETWORK_ERROR_KEYWORDS.iter().any(|kw| lower.contains(kw)) {
         return Some("network_error");
+    }
+    if SIGNATURE_ERROR_KEYWORDS.iter().any(|kw| lower.contains(kw)) {
+        return Some("signature_error");
     }
     None
 }
@@ -603,6 +620,7 @@ fn classify_io(kind: io::ErrorKind) -> Option<&'static str> {
     match kind {
         PermissionDenied => Some("permission_denied"),
         TimedOut => Some("timeout"),
+        NotFound => Some("not_found"),
         ConnectionRefused | ConnectionReset | ConnectionAborted | NotConnected
         | AddrNotAvailable => Some("internal_error"),
         HostUnreachable | NetworkUnreachable => Some("network_error"),
@@ -749,8 +767,8 @@ macro_rules! check_cancel_early {
 #[cfg(test)]
 mod tests {
     use super::{
-        ERROR_CODES, classify_error, classify_message, config_path, enqueue_capped,
-        list_cache_packages, output_with_timeout, write_bytes_atomic_with_mode,
+        ERROR_CODES, SIGNATURE_ERROR_KEYWORDS, classify_error, classify_message, config_path,
+        enqueue_capped, list_cache_packages, output_with_timeout, write_bytes_atomic_with_mode,
         write_event_flushed, write_json_atomic_with_mode,
     };
     use crate::models::StreamEvent;
@@ -915,6 +933,72 @@ mod tests {
         assert!(classify_message("connection refused").is_some());
         // main.rs's unwrap_or fallback is only valid if internal_error is in the set.
         assert!(ERROR_CODES.contains(&"internal_error"));
+    }
+
+    #[test]
+    fn a_missing_file_classifies_as_not_found() {
+        let err: anyhow::Error = std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Mirrorlist not found at /etc/pacman.d/mirrorlist",
+        )
+        .into();
+        assert_eq!(classify_error(&err), Some("not_found"));
+        assert_eq!(
+            classify_error(&err.context("Failed to read mirrorlist")),
+            Some("not_found")
+        );
+    }
+
+    #[test]
+    fn signature_failures_classify_as_signature_error() {
+        let messages = [
+            "Failed to commit transaction: invalid or corrupted package (PGP signature)",
+            "Failed to commit transaction: invalid or corrupted database (PGP signature)",
+            "Failed to commit transaction: package missing required signature",
+            "Failed to commit transaction: missing PGP signature",
+            "Failed to commit transaction: invalid PGP signature",
+            "foo-1.0-1-x86_64.pkg.tar.zst: signature from \"Jane Doe <jane@archlinux.org>\" is unknown trust",
+            "foo: signature from \"Jane Doe\" is marginal trust",
+            "foo: signature from \"Jane Doe\" should never be trusted",
+            "required key missing from keyring",
+            "key \"ABCDEF0123456789\" could not be looked up remotely",
+            "foo: key \"Jane Doe\" is disabled",
+        ];
+        for msg in messages {
+            assert_eq!(classify_message(msg), Some("signature_error"), "{msg}");
+        }
+        assert!(ERROR_CODES.contains(&"signature_error"));
+    }
+
+    #[test]
+    fn checksum_corruption_and_network_failures_keep_their_class() {
+        assert_eq!(
+            classify_message(
+                "Failed to commit transaction: invalid or corrupted package (checksum)"
+            ),
+            None
+        );
+        assert_eq!(
+            classify_message("failed retrieving file 'foo.pkg.tar.zst.sig' from mirror"),
+            Some("network_error")
+        );
+        assert_eq!(
+            classify_message("could not resolve host"),
+            Some("network_error")
+        );
+    }
+
+    #[test]
+    fn signature_keywords_match_shared_fixture() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../test/fixtures/error-codes.json")).unwrap();
+        let pinned: Vec<&str> = fixture["signatureKeywords"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(pinned, SIGNATURE_ERROR_KEYWORDS);
     }
 
     #[test]

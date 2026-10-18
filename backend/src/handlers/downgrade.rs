@@ -118,6 +118,8 @@ pub(crate) fn install_downgrade(
     emit_event(&StreamEvent::Event {
         event: format!("Downgrading {} to version {}", name, version),
         package: Some(name.to_string()),
+        current: None,
+        total: None,
     });
 
     let (path, siglevel) = match source {

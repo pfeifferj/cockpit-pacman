@@ -4,10 +4,12 @@
     "database_locked",
     "network_error",
     "transaction_failed",
+    "signature_error",
     "validation_error",
     "cancelled",
     "not_found",
     "permission_denied",
+    "config_changed",
     "internal_error"
   ],
   "networkKeywords": [
@@ -24,5 +26,15 @@
     "failed retrieving file",
     "failed to retrieve",
     "download library error"
+  ],
+  "signatureKeywords": [
+    "pgp signature",
+    "missing required signature",
+    "signature from",
+    "unknown trust",
+    "marginal trust",
+    "required key missing",
+    "could not be looked up remotely",
+    "\" is disabled"
   ]
 }

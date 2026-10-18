@@ -289,6 +289,12 @@ pub enum StreamEvent {
         event: String,
         #[ts(optional)]
         package: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        current: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        total: Option<usize>,
     },
     #[serde(rename = "complete")]
     Complete {

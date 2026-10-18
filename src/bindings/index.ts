@@ -70,7 +70,7 @@ export type NewsItem = { title: string, link: string, published: string, summary
 
 export type NewsReadState = { dismissed: Array<string>, };
 
-export type NewsResponse = { items: Array<NewsItem>, 
+export type NewsResponse = { items: Array<NewsItem>,
 /**
  * True when served from the on-disk cache because the live fetch failed.
  */
@@ -148,7 +148,7 @@ export type SecurityInfoIssue = { name: string, severity: string, issue_type: st
 
 export type SecurityInfoResponse = { name: string, advisories: Array<SecurityInfoAdvisory>, groups: Array<SecurityInfoGroup>, issues: Array<SecurityInfoIssue>, disabled?: boolean, };
 
-export type SecurityResponse = { advisories: Array<PackageSecurityAdvisory>, 
+export type SecurityResponse = { advisories: Array<PackageSecurityAdvisory>,
 /**
  * True when served from the on-disk cache because the live fetch failed.
  */
@@ -156,7 +156,7 @@ stale?: boolean, disabled?: boolean, };
 
 export type ServiceRestart = { name: string, pid: number, affected_packages: Array<string>, reason: string, restart_blocked?: RestartBlocked | null, };
 
-export type ServicesStatus = { restart_required: boolean, services: Array<ServiceRestart>, 
+export type ServicesStatus = { restart_required: boolean, services: Array<ServiceRestart>,
 /**
  * The scan could not see every process, so `services` may be short.
  */
@@ -185,7 +185,7 @@ export type SignoffListResponse = { signoff_groups: Array<SignoffGroupWithLocal>
 
 export type SignoffTarget = { pkgbase: string, repo: string, arch: string, };
 
-export type StreamEvent = { "type": "log", level: string, message: string, } | { "type": "progress", operation: string, package: string, percent: number, current: number, total: number, } | { "type": "download", filename: string, event: string, downloaded?: number, total?: number, } | { "type": "event", event: string, package?: string, } | { "type": "complete", success: boolean, message?: string, code?: string, details?: string, } | { "type": "mirror_test", url: string, current: number, total: number, result: MirrorTestResult, };
+export type StreamEvent = { "type": "log", level: string, message: string, } | { "type": "progress", operation: string, package: string, percent: number, current: number, total: number, } | { "type": "download", filename: string, event: string, downloaded?: number, total?: number, } | { "type": "event", event: string, package?: string, current?: number, total?: number, } | { "type": "complete", success: boolean, message?: string, code?: string, details?: string, } | { "type": "mirror_test", url: string, current: number, total: number, result: MirrorTestResult, };
 
 export type SyncPackageDetails = { name: string, version: string, description: string | null, url: string | null, licenses: Array<string>, groups: Array<string>, provides: Array<string>, depends: Array<string>, optdepends: Array<string>, conflicts: Array<string>, replaces: Array<string>, download_size: number, installed_size: number, packager: string | null, architecture: string | null, build_date: number, repository: string, };
 

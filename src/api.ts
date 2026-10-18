@@ -96,10 +96,12 @@ export type ErrorCode =
   | "database_locked"
   | "network_error"
   | "transaction_failed"
+  | "signature_error"
   | "validation_error"
   | "cancelled"
   | "not_found"
   | "permission_denied"
+  | "config_changed"
   | "internal_error";
 
 export const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<ErrorCode>([
@@ -107,10 +109,12 @@ export const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   "database_locked",
   "network_error",
   "transaction_failed",
+  "signature_error",
   "validation_error",
   "cancelled",
   "not_found",
   "permission_denied",
+  "config_changed",
   "internal_error",
 ]);
 
@@ -167,6 +171,19 @@ export const NETWORK_ERROR_KEYWORDS = [
   "download library error",
 ];
 
+// Package and key signature failures, as libalpm words them. Mirrors
+// SIGNATURE_ERROR_KEYWORDS in backend/src/util.rs, which cites the source of each.
+export const SIGNATURE_ERROR_KEYWORDS = [
+  "pgp signature",
+  "missing required signature",
+  "signature from",
+  "unknown trust",
+  "marginal trust",
+  "required key missing",
+  "could not be looked up remotely",
+  "\" is disabled",
+];
+
 export function parseErrorCode(message: string): ErrorCode {
   const lower = message.toLowerCase();
   if (lower.includes("timed out") || lower.includes("timeout")) {
@@ -177,6 +194,9 @@ export function parseErrorCode(message: string): ErrorCode {
   }
   if (NETWORK_ERROR_KEYWORDS.some((kw) => lower.includes(kw))) {
     return "network_error";
+  }
+  if (SIGNATURE_ERROR_KEYWORDS.some((kw) => lower.includes(kw))) {
+    return "signature_error";
   }
   if (lower.includes("transaction") || lower.includes("commit")) {
     return "transaction_failed";
@@ -406,6 +426,7 @@ function runStreamingBackend(
   type Completion = { success: boolean; message?: string; code?: ErrorCode; details?: string };
   let terminal: Completion | undefined;
   let startupTimeout: Completion | undefined;
+  let signatureFailure = false;
 
   const markComplete = (
     success: boolean,
@@ -416,12 +437,20 @@ function runStreamingBackend(
     if (completionHandled) return;
     completionHandled = true;
 
+    const msg = message || "Operation failed";
+    let failureCode = code ?? parseErrorCode(msg);
+    if (
+      code === undefined && failureCode === "transaction_failed" && signatureFailure &&
+      msg.toLowerCase().includes("invalid or corrupted package")
+    ) {
+      failureCode = "signature_error";
+    }
+
     try {
       if (success) {
         callbacks.onComplete();
       } else {
-        const msg = message || "Operation failed";
-        callbacks.onError(msg, code ?? parseErrorCode(msg), details);
+        callbacks.onError(msg, failureCode, details);
       }
     } catch (callbackError) {
       console.error("Callback error in markComplete:", callbackError);
@@ -506,6 +535,10 @@ function runStreamingBackend(
         callbacks.onEvent?.(event);
 
         if (event.type === "log") {
+          // libalpm can replace a signature error with a generic integrity error at commit.
+          if (event.level === "error" && parseErrorCode(event.message) === "signature_error") {
+            signatureFailure = true;
+          }
           callbacks.onData?.(`[${event.level}] ${event.message}\n`);
         } else if (event.type === "progress") {
           callbacks.onData?.(`[${event.operation}] ${event.package} ${event.percent}%\n`);
