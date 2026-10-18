@@ -10,7 +10,7 @@ command = sys.argv[1] if len(sys.argv) > 1 else ''
 env = os.environ.copy()
 if command.startswith('signoff-'):
     env['COCKPIT_PACMAN_TEST_ARCHWEB_URL'] = 'http://127.0.0.1:18080'
-if command in ('list-archive-versions', 'downgrade-archive'):
+if command in ('list-archive-versions', 'preflight-downgrade-archive', 'downgrade-archive'):
     env['COCKPIT_PACMAN_TEST_ARCHIVE_URL'] = 'http://127.0.0.1:18080/archive'
 proxy_marker = STATE / 'proxy-endpoints.json'
 if proxy_marker.exists():

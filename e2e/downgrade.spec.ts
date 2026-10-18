@@ -46,7 +46,7 @@ test.describe("Downgrade modal", () => {
     const details = pacman.frame.getByRole("dialog").first();
     await details.getByRole("button", { name: "Downgrade", exact: true }).click();
 
-    const modal = pacman.frame.getByRole("dialog", { name: `Downgrade ${TARGET}` });
+    const modal = pacman.frame.getByRole("dialog", { name: new RegExp(`^(Downgrade|Upgrade) ${TARGET}$`) });
     await expect(modal.locator("h1")).toHaveText(`Downgrade ${TARGET}`);
     await expect(modal.getByRole("button", { name: "Cache", exact: true })).toBeVisible({ timeout: 15000 });
     return modal;
@@ -89,14 +89,14 @@ test.describe("Downgrade modal", () => {
     expect((await guestCommand(pacman, ["pacman", "-Qp", originalPath])).trim()).toBe(originalQuery);
 
     const modal = await openDowngrade(pacman);
-    const targetRow = modal.locator('tbody tr').filter({ has: pacman.page.locator('button', { hasText: /^Upgrade$/ }) }).first();
+    const targetRow = modal.locator('tbody tr').filter({ has: pacman.page.getByRole('button', { name: /^Select / }) }).first();
     await expect(targetRow).toBeVisible({ timeout: 15000 });
     const selectedVersion = (await targetRow.locator('td[data-label="Version"] code').innerText()).trim();
     expect(selectedVersion).not.toBe(original.version);
 
     restore = { path: originalPath, query: originalQuery };
-    await targetRow.getByRole("button", { name: "Upgrade", exact: true }).click();
-    await modal.getByRole("button", { name: "Confirm Upgrade", exact: true }).click();
+    await targetRow.getByRole("button", { name: /^Select / }).click();
+    await modal.getByRole("button", { name: `Upgrade ${TARGET} to ${selectedVersion}`, exact: true }).click();
 
     await expect(modal.getByText("Version change complete", { exact: true }))
       .toBeVisible({ timeout: 120000 });

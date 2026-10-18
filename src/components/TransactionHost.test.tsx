@@ -4,6 +4,7 @@ import { render, screen, fireEvent, act, cleanup, waitFor, within } from "@testi
 import { TransactionHost, TransactionHostProvider } from "./TransactionHost";
 import { TransactionBanner } from "./TransactionBanner";
 import { PackageActionModal, installConfig } from "./PackageActionModal";
+import { DowngradeModal } from "./DowngradeModal";
 import { OrphansView } from "./OrphansView";
 import { NavigationProvider } from "../contexts/NavigationContext";
 import * as api from "../api";
@@ -18,6 +19,8 @@ vi.mock("../api", async () => {
   return {
     ...actual,
     checkUpdates: vi.fn().mockResolvedValue({ updates: [], warnings: [] }),
+    listDowngrades: vi.fn(),
+    previewDowngrade: vi.fn(),
     listOrphans: vi.fn(),
     previewRemoveOrphans: vi.fn(),
   };
@@ -161,7 +164,33 @@ describe("TransactionHost", () => {
     expect(screen.queryByText("Install vim failed")).not.toBeInTheDocument();
   });
 
+  it("backgrounds a downgrade and reopens it at the running step", async () => {
+    const version: api.CachedVersion = {
+      name: "vim",
+      version: "9.0-1",
+      filename: "vim-9.0-1-x86_64.pkg.tar.zst",
+      size: 1024,
+      installed_version: "9.1-1",
+      is_older: true,
+    };
+    vi.mocked(api.listDowngrades).mockResolvedValue({ packages: [version] } as api.DowngradeResponse);
+    vi.mocked(api.previewDowngrade).mockResolvedValue(preview);
+    const { proc, close } = spawnProcess();
+    finish = () => emit(proc, { type: "complete", success: true });
+    renderPage((onClose) => <DowngradeModal packageName="vim" currentVersion="9.1-1" isOpen onClose={onClose} />);
 
+    fireEvent.click(await screen.findByRole("button", { name: "Select 9.0-1" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Downgrade vim to 9.0-1" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Run in background" }));
+    });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(close).not.toHaveBeenCalled();
+    expect(api.getActiveTransaction()?.command).toBe("downgrade");
+    fireEvent.click(screen.getByRole("button", { name: "View progress" }));
+    expect(within(screen.getByRole("dialog", { name: "Downgrade vim" })).getByText("Downgrading vim to 9.0-1…")).toBeInTheDocument();
+  });
 
   describe("an orphan removal whose view unmounts", () => {
     const orphanPreview: api.TransactionPreview = {

@@ -1046,9 +1046,100 @@ export async function listDowngrades(packageName?: string): Promise<DowngradeRes
 export function downgradePackage(
   callbacks: UpgradeCallbacks,
   name: string,
-  version: string
+  version: string,
+  approvedRemovals: string[] = [],
 ): StreamingHandle {
-  return runStreamingBackend("downgrade", [sanitizeSearchInput(name), sanitizeSearchInput(version)], callbacks, { gracefulCancel: true });
+  return runStreamingBackend("downgrade", [sanitizeSearchInput(name), sanitizeSearchInput(version), "", approvedRemovals.map(sanitizeSearchInput).join(",")], callbacks, { gracefulCancel: true });
+}
+
+/** Resolves `downgrade NAME VERSION` from the cached file without committing. */
+export async function previewDowngrade(name: string, version: string): Promise<TransactionPreview> {
+  return runBackend<TransactionPreview>("preflight-downgrade", [sanitizeSearchInput(name), sanitizeSearchInput(version)]);
+}
+
+/**
+ * Downloads an archive package into the cache, then resolves
+ * `downgrade-archive NAME FILENAME` without committing. Download events reach
+ * `onEvent`; aborting `signal` stops the backend and rejects with "cancelled".
+ */
+export function previewDowngradeArchive(
+  name: string,
+  filename: string,
+  options: { onEvent?: (event: StreamEvent) => void; signal?: AbortController["signal"] } = {},
+): Promise<TransactionPreview> {
+  return new Promise((resolve, reject) => {
+    const command = "preflight-downgrade-archive";
+    const proc = cockpit.spawn(
+      [backendPath(), command, sanitizeSearchInput(name), filename],
+      { superuser: "try", err: "message" },
+    );
+    beginOwnLockCall();
+    let lockCallEnded = false;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const endLockCall = () => {
+      if (lockCallEnded) return;
+      lockCallEnded = true;
+      clearTimeout(deadline);
+      endOwnLockCall();
+    };
+    let buffer = "";
+    let preview: TransactionPreview | null = null;
+    let failure: BackendError | null = null;
+
+    const handleLine = (line: string) => {
+      if (!line.trim()) return;
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        return;
+      }
+      if (typeof parsed.type === "string") {
+        options.onEvent?.(parsed as unknown as StreamEvent);
+      } else if (typeof parsed.code === "string" && typeof parsed.message === "string") {
+        failure = BackendError.fromStructured({
+          code: asErrorCode(parsed.code),
+          message: parsed.message,
+          details: typeof parsed.details === "string" ? parsed.details : undefined,
+        });
+      } else {
+        preview = parsed as unknown as TransactionPreview;
+      }
+    };
+
+    const abort = () => proc.close("cancelled");
+
+    proc.stream((data) => {
+      buffer += data;
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      lines.forEach(handleLine);
+    });
+    proc.then(() => {
+      endLockCall();
+      options.signal?.removeEventListener("abort", abort);
+      handleLine(buffer);
+      if (failure) reject(failure);
+      else if (preview) resolve(preview);
+      else reject(new BackendError(`Backend returned no preview for ${command}`, "internal_error"));
+    });
+    proc.catch((ex: unknown) => {
+      endLockCall();
+      options.signal?.removeEventListener("abort", abort);
+      if (failure) {
+        reject(failure);
+        return;
+      }
+      const message = options.signal?.aborted ? "cancelled" : extractErrorMessage(ex);
+      reject(new BackendError(`Backend command '${command}' failed: ${message}`, parseErrorCode(message)));
+    });
+    options.signal?.addEventListener("abort", abort);
+    if (options.signal?.aborted) abort();
+    else if (!lockCallEnded) deadline = setTimeout(() => {
+      failure = new BackendError("Archive preview timed out.", "timeout");
+      proc.close("timeout");
+    }, 300_000);
+  });
 }
 
 export async function listArchiveVersions(packageName: string, query?: string): Promise<DowngradeResponse> {
@@ -1062,9 +1153,10 @@ export async function listArchiveVersions(packageName: string, query?: string): 
 export function downgradeFromArchive(
   callbacks: UpgradeCallbacks,
   name: string,
-  filename: string
+  filename: string,
+  approvedRemovals: string[] = [],
 ): StreamingHandle {
-  return runStreamingBackend("downgrade-archive", [sanitizeSearchInput(name), filename], callbacks, { gracefulCancel: true });
+  return runStreamingBackend("downgrade-archive", [sanitizeSearchInput(name), filename, "", approvedRemovals.map(sanitizeSearchInput).join(",")], callbacks, { gracefulCancel: true });
 }
 
 export interface ScheduledRunsParams {

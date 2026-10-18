@@ -251,7 +251,7 @@ test.describe("package transaction boundaries", () => {
       signing: { fingerprint: before.signing!.fingerprint, keyring_fingerprints: [] },
     });
   });
-  for (const operation of ["install"] as const) {
+  for (const operation of ["install", "downgrade"] as const) {
     test(`${operation} rejects a changed removal plan and accepts renewed consent`, async ({ pacman }) => {
       await fixture(pacman, "setup", "--removal", "--phase", "pre");
       if (operation === "install") {

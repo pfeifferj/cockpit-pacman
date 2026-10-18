@@ -86,7 +86,15 @@ test.describe("Proxy routing", () => {
     expect(metadata.records.some(record => record.kind === "origin" && record.method === "HEAD" && record.path === "/core/os/x86_64/core.db")).toBe(true);
     await resetPackage(pacman);
     await guestCommand(pacman.frame, [FIXTURE, "archive-ready"]);
+    const beforePreview = await guestCommand(pacman.frame, ["pacman", "-Q", "htop"]);
+    expect((await backend(pacman, ["preflight-downgrade-archive", "htop", listing.packages[0].filename])).pop()).toMatchObject({ success: true });
+    expect(await guestCommand(pacman.frame, ["pacman", "-Q", "htop"])).toBe(beforePreview);
+    const previewTraffic = await state(pacman);
+    expect(transferred(previewTraffic.records, /\.pkg\.tar\.zst$/)).toBe(true);
+    expect(transferred(previewTraffic.records, /\.pkg\.tar\.zst\.sig$/)).toBe(true);
     expect((await backend(pacman, ["downgrade-archive", "htop", listing.packages[0].filename])).pop()).toMatchObject({ success: true });
+    expect((await state(pacman)).records.filter(record => record.kind === "origin" && /\.pkg\.tar\.zst(?:\.sig)?$/.test(record.path ?? "")))
+      .toEqual(previewTraffic.records.filter(record => record.kind === "origin" && /\.pkg\.tar\.zst(?:\.sig)?$/.test(record.path ?? "")));
     const result = await state(pacman);
     expect(result.blocked).toBe(0);
     expect(transferred(result.records, /\.pkg\.tar\.zst$/)).toBe(true);

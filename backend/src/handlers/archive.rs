@@ -3,7 +3,8 @@ use std::time::Duration;
 
 use crate::alpm::get_handle;
 use crate::handlers::downgrade::{
-    DowngradeSource, compare_versions, get_installed_version, install_downgrade, is_version_older,
+    DowngradeSource, compare_versions, emit_archive_preview, get_installed_version,
+    install_downgrade, is_version_older,
 };
 use crate::models::{CachedVersion, DowngradeResponse};
 use crate::util::{emit_json, parse_package_filename};
@@ -163,7 +164,7 @@ fn build_archive_versions(
     packages
 }
 
-pub fn downgrade_from_archive(name: &str, filename: &str, timeout: Option<u64>) -> Result<()> {
+fn archive_source(name: &str, filename: &str) -> Result<(String, DowngradeSource)> {
     validate_package_name(name)?;
     validate_archive_filename(filename, name)?;
 
@@ -172,8 +173,28 @@ pub fn downgrade_from_archive(name: &str, filename: &str, timeout: Option<u64>) 
     let base = crate::endpoints::endpoint(ARCHIVE_BASE_URL, "COCKPIT_PACMAN_TEST_ARCHIVE_URL")?;
     let url = archive_file_url_at(&base, name, filename)
         .ok_or_else(|| anyhow::anyhow!("Invalid package name"))?;
+    let source = DowngradeSource::Archive {
+        url,
+        filename: filename.to_string(),
+    };
+    Ok((version, source))
+}
 
-    install_downgrade(DowngradeSource::Url(url), name, &version, timeout)
+/// Previews an archive version, downloading it into the package cache.
+pub fn preflight_downgrade_archive(name: &str, filename: &str) -> Result<()> {
+    crate::network::require_network()?;
+    let (_, source) = archive_source(name, filename)?;
+    emit_archive_preview(name, source)
+}
+
+pub fn downgrade_from_archive(
+    name: &str,
+    filename: &str,
+    timeout: Option<u64>,
+    approved_removals: &[String],
+) -> Result<()> {
+    let (version, source) = archive_source(name, filename)?;
+    install_downgrade(source, name, &version, timeout, approved_removals)
 }
 
 #[cfg(test)]

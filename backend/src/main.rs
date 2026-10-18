@@ -1,3 +1,5 @@
+use cockpit_pacman_backend::handlers::archive::preflight_downgrade_archive;
+use cockpit_pacman_backend::handlers::downgrade::preflight_downgrade;
 use cockpit_pacman_backend::handlers::mutation::{
     preflight_install, preflight_remove, preflight_remove_orphans,
 };
@@ -40,6 +42,8 @@ const COMMANDS: &[&str] = &[
     "preflight-install",
     "preflight-remove",
     "preflight-remove-orphans",
+    "preflight-downgrade",
+    "preflight-downgrade-archive",
     "sync-database",
     "upgrade",
     "local-package-info",
@@ -127,6 +131,12 @@ Commands:
                          Preview removing orphans without committing
                          (requires root)
                          names: comma-separated orphans, empty for all
+  preflight-downgrade NAME VERSION
+                         Preview a downgrade to a cached version without
+                         committing (requires root)
+  preflight-downgrade-archive NAME FILENAME
+                         Download an archive version into the cache and
+                         preview the downgrade without committing (requires root)
   sync-database [force] [timeout]
                          Sync package databases (requires root)
                          force: true|false (default: true)
@@ -185,14 +195,14 @@ Commands:
                          search: filter by package name (substring)
   list-downgrades [NAME] List cached package versions available for downgrade
                          NAME: optional package name to filter
-  downgrade NAME VERSION [timeout]
+  downgrade NAME VERSION [timeout] [approved-removals]
                          Downgrade a package to a cached version (requires root)
                          timeout: seconds (default: 300)
   list-archive-versions NAME [QUERY]
                          List versions available in the Arch Linux Archive
                          filtered to the system architecture and 'any'
                          QUERY: optional version substring, applied before the cap
-  downgrade-archive NAME FILENAME [timeout]
+  downgrade-archive NAME FILENAME [timeout] [approved-removals]
                          Downgrade to an archive version via pacman -U URL
                          (requires root; downloads and verifies the package)
                          timeout: seconds (default: 300)
@@ -510,6 +520,20 @@ fn main() {
             let names = arg_list(&args, 2);
             validate_names(&names).and_then(|_| preflight_remove_orphans(&names))
         }
+        "preflight-downgrade" => {
+            if args.len() < 4 {
+                eprintln!("Error: preflight-downgrade requires NAME and VERSION");
+                std::process::exit(1);
+            }
+            preflight_downgrade(&args[2], &args[3])
+        }
+        "preflight-downgrade-archive" => {
+            if args.len() < 4 {
+                eprintln!("Error: preflight-downgrade-archive requires NAME and FILENAME");
+                std::process::exit(1);
+            }
+            preflight_downgrade_archive(&args[2], &args[3])
+        }
         "install-package" => {
             if args.len() < 3 {
                 eprintln!("Error: install-package requires a package name");
@@ -633,8 +657,11 @@ fn main() {
                 std::process::exit(1);
             }
             let timeout = args.get(4).and_then(|s| s.parse().ok());
-            validate_package_name(&args[2])
-                .and_then(|_| downgrade_package(&args[2], &args[3], timeout))
+            validate_package_name(&args[2]).and_then(|_| {
+                let approved = arg_list(&args, 5);
+                validate_names(&approved)?;
+                downgrade_package(&args[2], &args[3], timeout, &approved)
+            })
         }
         "list-archive-versions" => {
             if args.len() < 3 {
@@ -659,7 +686,11 @@ fn main() {
             let timeout = args.get(4).and_then(|s| s.parse().ok());
             validate_package_name(&args[2])
                 .and_then(|_| validate_archive_filename(&args[3], &args[2]))
-                .and_then(|_| downgrade_from_archive(&args[2], &args[3], timeout))
+                .and_then(|_| {
+                    let approved = arg_list(&args, 5);
+                    validate_names(&approved)?;
+                    downgrade_from_archive(&args[2], &args[3], timeout, &approved)
+                })
         }
         "get-schedule" => get_schedule_config(),
         "set-schedule" => {

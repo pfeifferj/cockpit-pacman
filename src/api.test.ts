@@ -10,7 +10,7 @@ import {
   createMockStreamingProcess,
 } from "./test/mocks";
 import { STREAM_FIRST_OUTPUT_TIMEOUT_MS } from "./constants";
-import { getActiveTransaction, installPackage, getSignoffList, signoffPackage, signoffPackages, revokeSignoff } from "./api";
+import { getActiveTransaction, previewDowngradeArchive, installPackage, getSignoffList, signoffPackage, signoffPackages, revokeSignoff } from "./api";
 import {
   formatSize,
   listInstalled,
@@ -984,6 +984,8 @@ describe("downgradeFromArchive", () => {
         "downgrade-archive",
         "bash",
         "bash-5.1.016-1-x86_64.pkg.tar.zst",
+        "",
+        "",
       ],
       { superuser: "require", err: "out" }
     );
@@ -1222,5 +1224,20 @@ describe("transaction ownership", () => {
     expect(getActiveTransaction()).toBeNull();
   });
 
-
+  it("terminates an archive preview that exceeds its deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const process = createMockStreamingProcess();
+      process.close = vi.fn(problem => process._fail({ problem }));
+      mockSpawn.mockReturnValue(process);
+      const pending = previewDowngradeArchive("bash", "bash-1-1-any.pkg.tar.zst");
+      const failure = expect(pending).rejects.toMatchObject({ code: "timeout", message: "Archive preview timed out." });
+      await vi.advanceTimersByTimeAsync(300_000);
+      await failure;
+      expect(process.close).toHaveBeenCalledWith("timeout");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -290,6 +290,7 @@ pub unsafe fn initialize(command: &str) {
         "sync-database"
             | "upgrade"
             | "install-package"
+            | "preflight-downgrade-archive"
             | "downgrade"
             | "downgrade-archive"
             | "scheduled-run"

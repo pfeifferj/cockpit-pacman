@@ -159,7 +159,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(503, b'fixture download unavailable')
             else:
                 self.send_response(200)
-                self.send_header('Content-Length', str(package.stat().st_size))
+                if state['archive'] != 'stall':
+                    self.send_header('Content-Length', str(package.stat().st_size))
                 self.end_headers()
                 try:
                     with package.open('rb') as source:
@@ -255,7 +256,7 @@ def main():
         shutil.copy2(packages['target'] + '.sig', packages['cached_target'] + '.sig')
     else:
         state = read('service.json')
-        processes = subprocess.run(['pgrep', '-f', '^' + BACKEND + ' downgrade-archive '], capture_output=True, check=False)
+        processes = subprocess.run(['pgrep', '-f', '^' + BACKEND + r'(\.real)? (preflight-downgrade-archive|downgrade-archive) '], capture_output=True, check=False)
         if processes.returncode not in (0, 1):
             raise SystemExit('Could not inspect archive download processes')
         state['active_transactions'] = len(processes.stdout.splitlines())
