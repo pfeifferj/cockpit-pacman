@@ -1,5 +1,7 @@
 import { BACKEND_TIMEOUT_MS, STREAM_FIRST_OUTPUT_TIMEOUT_MS } from "./constants";
 import { isDbLockError, sanitizeSearchInput } from "./utils";
+import { initialProgress, progressPercent, reduceProgress, type ProgressState } from "./progress";
+import { startSystemWatch, type FileWatch } from "./systemWatch";
 
 // Wire types are generated from the Rust serde structs via ts-rs (see
 // backend/src + src/bindings). Imported for local use and re-exported so
@@ -245,6 +247,8 @@ async function runBackend<T>(command: string, args: string[] = [], options?: { s
   const cancel = () => spawnPromise.close("cancelled");
   options?.signal?.addEventListener("abort", cancel, { once: true });
 
+  const holdsDbLock = DB_LOCK_COMMANDS.has(command);
+  if (holdsDbLock) beginOwnLockCall();
   let output: string;
   try {
     output = await spawnPromise;
@@ -265,6 +269,7 @@ async function runBackend<T>(command: string, args: string[] = [], options?: { s
   } finally {
     clearTimeout(timeoutId);
     options?.signal?.removeEventListener("abort", cancel);
+    if (holdsDbLock) endOwnLockCall();
   }
 
   if (!output || output.trim() === "") {
@@ -413,6 +418,175 @@ export interface StreamingHandle {
   cancel: () => void;
   /** Close the channel; this does not confirm that the backend has exited. */
   forceStop: () => void;
+  /** Sets the registry entry's reopen while this run is the active transaction. */
+  setReopen?: (reopen: (() => void) | undefined) => void;
+}
+
+export type SystemChangeKind = "system" | "sync";
+
+type SystemChangeListener = (kind: SystemChangeKind) => void;
+
+const systemChangeListeners = new Set<{ listener: SystemChangeListener; kinds: SystemChangeKind[] }>();
+
+const SYSTEM_CHANGE_COMMANDS: Record<string, SystemChangeKind> = {
+  "upgrade": "system",
+  "install-package": "system",
+  "remove-package": "system",
+  "remove-orphans": "system",
+  "downgrade": "system",
+  "downgrade-archive": "system",
+  "clean-cache": "system",
+  "refresh-keyring": "system",
+  "init-keyring": "system",
+  "sync-database": "sync",
+};
+
+/** Subscribes to completed mutations and external changes. Failures also notify because state may have changed. */
+export function onSystemChanged(
+  listener: SystemChangeListener,
+  kinds: SystemChangeKind[] = ["system", "sync"],
+): () => void {
+  const entry = { listener, kinds };
+  systemChangeListeners.add(entry);
+  if (!systemWatch) {
+    systemWatch = startSystemWatch({
+      ownActivity: () => activeTransaction !== null && activeTransaction.command !== EXTERNAL_COMMAND,
+      notify: () => notifySystemChanged("system"),
+    });
+  }
+  return () => {
+    systemChangeListeners.delete(entry);
+    if (systemChangeListeners.size === 0 && systemWatch) {
+      systemWatch.close();
+      systemWatch = null;
+    }
+  };
+}
+
+function notifySystemChanged(kind: SystemChangeKind): void {
+  for (const entry of [...systemChangeListeners]) {
+    if (!entry.kinds.includes(kind)) continue;
+    try {
+      entry.listener(kind);
+    } catch (listenerError) {
+      console.error("System change listener error:", listenerError);
+    }
+  }
+}
+
+export interface ActiveTransaction {
+  /** Backend command, or "external" for a lock held by a process outside this page. */
+  command: string;
+  /** Package name for single-package commands; the holding process for "external". */
+  target?: string;
+  startedAt: number;
+  /** Reopens the dialog showing this run's progress, for runs moved to the background. */
+  reopen?: () => void;
+  /** Current step, e.g. "Downloading packages". */
+  phase?: string;
+  /** 0-100, undefined while no count is known. */
+  percent?: number;
+}
+
+export interface TransactionOutcome {
+  command: string;
+  target?: string;
+  status: "success" | "stopped" | "failed";
+  endedAt: number;
+}
+
+type ActiveTransactionListener = (transaction: ActiveTransaction | null) => void;
+
+let activeTransaction: ActiveTransaction | null = null;
+let transactionOutcome: TransactionOutcome | null = null;
+// Bumped whenever this page starts or ends a run, so a lock check that overlapped one is discarded.
+let ownRunEpoch = 0;
+let ownLockCalls = 0;
+let systemWatch: FileWatch | null = null;
+
+/** Non-streaming commands whose backend holds db.lck through a transaction while it runs. */
+const DB_LOCK_COMMANDS = new Set([
+  "preflight-upgrade",
+  "preflight-install",
+  "preflight-remove",
+  "preflight-remove-orphans",
+  "preflight-downgrade",
+  "set-install-reason",
+]);
+
+function beginOwnLockCall(): void {
+  ownLockCalls++;
+  ownRunEpoch++;
+}
+
+function endOwnLockCall(): void {
+  ownLockCalls--;
+  ownRunEpoch++;
+}
+const activeTransactionListeners = new Set<ActiveTransactionListener>();
+
+const EXTERNAL_COMMAND = "external";
+const PROGRESS_PUBLISH_MS = 250;
+
+const TARGETED_COMMANDS = new Set(["install-package", "remove-package", "downgrade", "downgrade-archive"]);
+
+/** The system-changing streaming command currently running in this page, if any. */
+export function getActiveTransaction(): ActiveTransaction | null {
+  return activeTransaction;
+}
+
+/** How the last system-changing command run by this page ended, until dismissed or replaced. */
+export function getTransactionOutcome(): TransactionOutcome | null {
+  return transactionOutcome;
+}
+
+export function dismissTransactionOutcome(): void {
+  if (!transactionOutcome) return;
+  transactionOutcome = null;
+  setActiveTransaction(activeTransaction);
+}
+
+/** Subscribes to transaction, progress and outcome changes; returns an unsubscribe function. */
+export function onActiveTransactionChanged(listener: ActiveTransactionListener): () => void {
+  activeTransactionListeners.add(listener);
+  return () => {
+    activeTransactionListeners.delete(listener);
+  };
+}
+
+function setActiveTransaction(transaction: ActiveTransaction | null): void {
+  activeTransaction = transaction;
+  for (const listener of [...activeTransactionListeners]) {
+    try {
+      listener(transaction);
+    } catch (listenerError) {
+      console.error("Active transaction listener error:", listenerError);
+    }
+  }
+}
+
+function setExternalHolder(holder: string | null): void {
+  const current = activeTransaction;
+  if (current && current.command !== EXTERNAL_COMMAND) return;
+  if (!holder) {
+    if (current) {
+      setActiveTransaction(null);
+      notifySystemChanged("system");
+    }
+    return;
+  }
+  if (current?.target === holder) return;
+  setActiveTransaction({ command: EXTERNAL_COMMAND, target: holder, startedAt: Date.now() });
+}
+
+/** Tracks external lock holders, excluding this page's own lock calls. */
+export async function refreshExternalLockHolder(): Promise<void> {
+  if (activeTransaction && activeTransaction.command !== EXTERNAL_COMMAND) return;
+  if (ownLockCalls > 0) return;
+  const epoch = ownRunEpoch;
+  const status = await checkLock();
+  if (epoch !== ownRunEpoch) return;
+  setExternalHolder(status.locked && !status.stale ? status.blocking_process ?? null : null);
 }
 
 function runStreamingBackend(
@@ -421,6 +595,10 @@ function runStreamingBackend(
   callbacks: UpgradeCallbacks,
   options?: { gracefulCancel?: boolean }
 ): StreamingHandle {
+  if (command in SYSTEM_CHANGE_COMMANDS && activeTransaction && activeTransaction.command !== EXTERNAL_COMMAND) {
+    globalThis.queueMicrotask(() => callbacks.onError("Another package operation is still running.", "database_locked"));
+    return { cancel() {}, forceStop() {} };
+  }
   let buffer = "";
   let completionHandled = false;
   type Completion = { success: boolean; message?: string; code?: ErrorCode; details?: string };
@@ -446,6 +624,23 @@ function runStreamingBackend(
       failureCode = "signature_error";
     }
 
+    clearProgressTimer();
+    if (registered) {
+      ownRunEpoch++;
+          transactionOutcome = {
+        command,
+        target: registered.target,
+        status: success ? "success" : failureCode === "cancelled" ? "stopped" : "failed",
+        endedAt: Date.now(),
+      };
+    }
+    // Cleared before the callbacks so a follow-up mutation they start is not gated on this one.
+    if (registered && activeTransaction === registered) {
+      setActiveTransaction(null);
+    } else if (registered) {
+      setActiveTransaction(activeTransaction);
+    }
+
     try {
       if (success) {
         callbacks.onComplete();
@@ -455,6 +650,9 @@ function runStreamingBackend(
     } catch (callbackError) {
       console.error("Callback error in markComplete:", callbackError);
     }
+
+    const changeKind = SYSTEM_CHANGE_COMMANDS[command];
+    if (changeKind) notifySystemChanged(changeKind);
   };
 
   // A handler that returns Err (rather than emitting a complete event) makes
@@ -488,24 +686,47 @@ function runStreamingBackend(
   };
 
   const su = callbacks.superuser ?? "require";
+  let registered: ActiveTransaction | null = null;
+  let progress: ProgressState = initialProgress;
+  let progressPublishedAt = 0;
+  let progressTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const clearProgressTimer = () => {
+    if (progressTimer !== undefined) {
+      clearTimeout(progressTimer);
+      progressTimer = undefined;
+    }
+  };
+
+  const publishProgress = () => {
+    progressTimer = undefined;
+    if (!registered || activeTransaction !== registered) return;
+    progressPublishedAt = Date.now();
+    const percent = progressPercent(progress);
+    if (registered.phase === progress.phaseLabel && registered.percent === percent) return;
+    registered = { ...registered, phase: progress.phaseLabel, percent };
+    setActiveTransaction(registered);
+  };
+
+  // Database files are not package downloads, so the reducer's labels do not fit a sync.
+  const tracksProgress = command in SYSTEM_CHANGE_COMMANDS && command !== "sync-database";
+  const trackProgress = (event: StreamEvent) => {
+    if (!tracksProgress || completionHandled) return;
+    progress = reduceProgress(progress, event, { downloadBytes: 0, packages: 0 });
+    if (progressTimer !== undefined) return;
+    progressTimer = setTimeout(publishProgress, Math.max(0, progressPublishedAt + PROGRESS_PUBLISH_MS - Date.now()));
+  };
+
   const proc = cockpit.spawn(
     [backendPath(), command, ...args],
     su === "none" ? { err: "out" } : { superuser: su, err: "out" }
   );
 
-  let firstOutputTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
-    firstOutputTimer = undefined;
-    startupTimeout = {
-      success: false,
-      message: `Backend command '${command}' produced no output within ${STREAM_FIRST_OUTPUT_TIMEOUT_MS / 1000}s.` +
-        (su === "none" ? "" : " The privileged bridge may be waiting for administrative access."),
-      code: "timeout",
-    };
-    if (options?.gracefulCancel) proc.input("cancel\n", true);
-    else proc.close("timeout");
-  }, STREAM_FIRST_OUTPUT_TIMEOUT_MS);
+  let firstOutputTimer: ReturnType<typeof setTimeout> | undefined;
+  let outputSeen = false;
 
   const clearFirstOutputTimer = () => {
+    outputSeen = true;
     if (firstOutputTimer !== undefined) {
       clearTimeout(firstOutputTimer);
       firstOutputTimer = undefined;
@@ -533,6 +754,7 @@ function runStreamingBackend(
 
         const event = parsed as unknown as StreamEvent;
         callbacks.onEvent?.(event);
+        trackProgress(event);
 
         if (event.type === "log") {
           // libalpm can replace a signature error with a generic integrity error at commit.
@@ -607,10 +829,42 @@ function runStreamingBackend(
   proc.then(() => finish());
   proc.catch((ex: unknown) => finish(ex));
 
+  // Armed only once every handler is attached, so a spawn that throws leaves no timer behind.
+  if (!outputSeen && !completionHandled) {
+    firstOutputTimer = setTimeout(() => {
+    firstOutputTimer = undefined;
+    startupTimeout = {
+      success: false,
+      message: `Backend command '${command}' produced no output within ${STREAM_FIRST_OUTPUT_TIMEOUT_MS / 1000}s.` +
+        (su === "none" ? "" : " The privileged bridge may be waiting for administrative access."),
+      code: "timeout",
+    };
+    if (options?.gracefulCancel) proc.input("cancel\n", true);
+    else proc.close("timeout");
+    }, STREAM_FIRST_OUTPUT_TIMEOUT_MS);
+  }
+
+  if (command in SYSTEM_CHANGE_COMMANDS && !completionHandled) {
+    registered = {
+      command,
+      target: TARGETED_COMMANDS.has(command) ? args[0] : undefined,
+      startedAt: Date.now(),
+    };
+    ownRunEpoch++;
+    transactionOutcome = null;
+    setActiveTransaction(registered);
+  }
+
   const forceStop = () => proc.close("cancelled");
+  const setReopen = (reopen: (() => void) | undefined) => {
+    if (!registered || activeTransaction !== registered) return;
+    registered = { ...registered, reopen };
+    setActiveTransaction(registered);
+  };
   return {
     cancel: options?.gracefulCancel ? () => proc.input("cancel\n", true) : forceStop,
     forceStop,
+    setReopen,
   };
 }
 

@@ -10,7 +10,7 @@ import {
   createMockStreamingProcess,
 } from "./test/mocks";
 import { STREAM_FIRST_OUTPUT_TIMEOUT_MS } from "./constants";
-import { getSignoffList, signoffPackage, signoffPackages, revokeSignoff } from "./api";
+import { getActiveTransaction, installPackage, getSignoffList, signoffPackage, signoffPackages, revokeSignoff } from "./api";
 import {
   formatSize,
   listInstalled,
@@ -813,14 +813,16 @@ describe("syncDatabase", () => {
 
   it("only forces a re-download when asked to", () => {
     const callbacks = { onComplete: vi.fn(), onError: vi.fn() };
-
-    mockSpawn.mockReturnValue(createMockStreamingProcess());
+    const first = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(first);
     syncDatabase(callbacks);
     expect(mockSpawn).toHaveBeenCalledWith(
       expect.arrayContaining(["sync-database", "false"]),
       expect.any(Object)
     );
 
+    first._emit(JSON.stringify({ type: "complete", success: true }) + "\n");
+    first._complete();
     mockSpawn.mockReturnValue(createMockStreamingProcess());
     syncDatabase(callbacks, true);
 
@@ -1195,4 +1197,30 @@ describe("signoff batch API", () => {
     await expect(signoffPackages(targets, { username: "fixture", password: "secret" })).rejects.toMatchObject({ code: "validation_error" });
     expect(mockSpawn).not.toHaveBeenCalled();
   });
+});
+
+
+describe("transaction ownership", () => {
+  it("rejects a competing mutation without replacing the running transaction", async () => {
+    const process = createMockStreamingProcess();
+    mockSpawn.mockReturnValue(process);
+    const running = { onComplete: vi.fn(), onError: vi.fn() };
+    const competing = { onComplete: vi.fn(), onError: vi.fn() };
+    runUpgrade(running);
+    const active = getActiveTransaction();
+    mockSpawn.mockClear();
+    installPackage(competing, "vim");
+    await Promise.resolve();
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(competing.onError).toHaveBeenCalledWith("Another package operation is still running.", "database_locked");
+    expect(getActiveTransaction()).toBe(active);
+    process._emit(JSON.stringify({ type: "complete", success: true }) + "\n");
+    expect(getActiveTransaction()).toBe(active);
+    expect(running.onComplete).not.toHaveBeenCalled();
+    process._complete();
+    expect(running.onComplete).toHaveBeenCalledOnce();
+    expect(getActiveTransaction()).toBeNull();
+  });
+
+
 });

@@ -1,3 +1,4 @@
+import { afterEach } from "vitest";
 import type {
   PackageListResponse,
   ServicesStatus,
@@ -139,6 +140,12 @@ interface StreamingMockProcess {
   _fail: (error: unknown) => void;
 }
 
+const streamingProcesses = new Set<StreamingMockProcess>();
+afterEach(() => {
+  for (const proc of streamingProcesses) proc._fail({ problem: "cancelled" });
+  streamingProcesses.clear();
+});
+
 export function createMockStreamingProcess(): StreamingMockProcess {
   const proc: StreamingMockProcess = {
     _streamCallback: undefined,
@@ -174,6 +181,7 @@ export function createMockStreamingProcess(): StreamingMockProcess {
       }
     },
   };
+  streamingProcesses.add(proc);
   return proc;
 }
 

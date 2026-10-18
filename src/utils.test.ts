@@ -5,6 +5,8 @@ import {
   sanitizeSearchInput,
   sanitizeErrorMessage,
   sanitizeUrl,
+  plural,
+  ignoreNotice,
   MAX_SEARCH_LENGTH,
 } from "./utils";
 
@@ -168,5 +170,29 @@ describe("sanitizeUrl", () => {
   it("normalizes valid URLs", () => {
     const result = sanitizeUrl("https://EXAMPLE.COM/path");
     expect(result).toBe("https://example.com/path");
+  });
+});
+
+describe("plural", () => {
+  it("uses the singular for one and appends s otherwise", () => {
+    expect(plural(1, "package")).toBe("1 package");
+    expect(plural(0, "package")).toBe("0 packages");
+    expect(plural(2, "package")).toBe("2 packages");
+  });
+
+  it("takes an irregular plural", () => {
+    expect(plural(1, "entry", "entries")).toBe("1 entry");
+    expect(plural(3, "entry", "entries")).toBe("3 entries");
+  });
+
+  it("groups thousands", () => {
+    expect(plural(1234, "file")).toBe((1234).toLocaleString() + " files");
+  });
+});
+
+describe("ignoreNotice", () => {
+  it("names the package and the direction", () => {
+    expect(ignoreNotice("vim", true)).toBe("vim is now ignored during upgrades");
+    expect(ignoreNotice("vim", false)).toBe("vim is no longer ignored during upgrades");
   });
 });

@@ -1,26 +1,78 @@
-import React, { useEffect, useRef } from "react";
-import { CodeBlock, CodeBlockCode, ExpandableSection } from "@patternfly/react-core";
+import React, { useLayoutEffect, useRef, useState } from "react";
+import { Button, CodeBlock, CodeBlockCode, ExpandableSection } from "@patternfly/react-core";
 import { LOG_CONTAINER_HEIGHT } from "../constants";
 
 interface LogViewerProps {
   log: string;
   placeholder?: string;
   className?: string;
+  "aria-label"?: string;
 }
 
-/** Scrollable log output that follows the latest line. */
-export const LogViewer: React.FC<LogViewerProps> = ({ log, placeholder, className }) => {
+const FOLLOW_THRESHOLD_PX = 24;
+
+/**
+ * Scrollable log output. It follows new lines only while scrolled to within
+ * FOLLOW_THRESHOLD_PX of the bottom; scrolling up pauses following.
+ */
+export const LogViewer: React.FC<LogViewerProps> = ({ log, placeholder, className, "aria-label": ariaLabel = "Output" }) => {
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (ref.current) {
+  const followingRef = useRef(true);
+  const [following, setFollowing] = useState(true);
+
+  const setFollow = (value: boolean) => {
+    followingRef.current = value;
+    setFollowing(value);
+  };
+
+  useLayoutEffect(() => {
+    if (ref.current && followingRef.current) {
       ref.current.scrollTop = ref.current.scrollHeight;
     }
   }, [log]);
+
+  const handleScroll = () => {
+    const el = ref.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= FOLLOW_THRESHOLD_PX;
+    if (atBottom !== followingRef.current) setFollow(atBottom);
+  };
+
+  const jumpToLatest = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    setFollow(true);
+    // The button unmounts once following resumes; keep keyboard focus on the log.
+    el.focus();
+  };
+
   return (
-    <div ref={ref} className={className} style={{ maxHeight: LOG_CONTAINER_HEIGHT, overflow: "auto" }}>
+    <div
+      ref={ref}
+      className={className}
+      style={{ maxHeight: LOG_CONTAINER_HEIGHT, overflow: "auto" }}
+      onScroll={handleScroll}
+      tabIndex={0}
+      role="log"
+      aria-live="off"
+      aria-label={ariaLabel}
+    >
       <CodeBlock>
         <CodeBlockCode>{log || placeholder}</CodeBlockCode>
       </CodeBlock>
+      {!following && (
+        <div style={{ position: "sticky", bottom: 0, display: "flex", justifyContent: "flex-end" }}>
+          <Button
+            variant="link"
+            size="sm"
+            onClick={jumpToLatest}
+            style={{ background: "var(--pf-t--global--background--color--primary--default)" }}
+          >
+            Jump to latest
+          </Button>
+        </div>
+      )}
     </div>
   );
 };

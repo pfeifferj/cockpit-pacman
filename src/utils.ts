@@ -46,3 +46,13 @@ export function sanitizeUrl(url: string | null | undefined): string | null {
     return null;
   }
 }
+
+/** "1 package", "3 packages"; `many` defaults to `one` + "s". */
+export function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n.toLocaleString()} ${n === 1 ? one : many}`;
+}
+
+/** Result line for an ignore or unignore. */
+export function ignoreNotice(name: string, ignored: boolean): string {
+  return `${name} is ${ignored ? "now" : "no longer"} ignored during upgrades`;
+}
