@@ -52,6 +52,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--image', type=Path)
     parser.add_argument('--timeout', type=int, default=3600)
+    parser.add_argument('--require-kvm', action='store_true', help='fail instead of falling back to software emulation')
     parser.add_argument('--inspect-seconds', type=int, default=0, choices=range(3601), metavar='0..3600')
     parser.add_argument('--inspect-on-success', action='store_true', help='also keep a successful guest for --inspect-seconds')
     parser.add_argument('--session', type=Path, help='rerun tests against a guest waiting after a failure')
@@ -61,6 +62,12 @@ def main():
     if args.session:
         run_tests(json.loads(args.session.read_text()), args.tests)
         return
+    if args.require_kvm:
+        try:
+            with open('/dev/kvm', 'rb+'):
+                pass
+        except OSError as error:
+            raise RuntimeError('KVM is required; grant the runner read/write access to /dev/kvm') from error
     with tempfile.TemporaryDirectory(prefix='cockpit-pacman-e2e-') as directory:
         work = Path(directory)
         os.chmod(work, 0o700)
@@ -102,9 +109,11 @@ def main():
                '-o', 'LogLevel=ERROR', '-o', 'ConnectTimeout=3', '-o', 'ServerAliveInterval=5',
                '-o', 'ServerAliveCountMax=2', 'root@127.0.0.1']
         session = {'url': f'https://127.0.0.1:{cockpit_port}', 'password': password, 'ssh': ssh}
+        acceleration = 'kvm' if args.require_kvm else 'kvm:tcg'
+        print(f'Starting Arch guest with acceleration={acceleration}', flush=True)
         with (work / 'serial.log').open('wb') as serial:
             guest = subprocess.Popen([
-                'qemu-system-x86_64', '-machine', 'accel=kvm:tcg', '-m', '4096', '-smp', '2',
+                'qemu-system-x86_64', '-machine', f'accel={acceleration}', '-m', '4096', '-smp', '2',
                 '-display', 'none', '-monitor', 'none', '-serial', 'stdio',
                 '-drive', f'file={work}/disk.qcow2,format=qcow2,if=virtio',
                 '-drive', f'file={work}/seed.iso,format=raw,media=cdrom',

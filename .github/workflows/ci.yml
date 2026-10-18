@@ -136,9 +136,18 @@ jobs:
           sudo apt-get install -y qemu-system-x86 qemu-utils xorriso rsync openssh-client
           npm ci
           npx playwright install --with-deps chromium
+      - name: Enable KVM
+        run: sudo chmod 0666 /dev/kvm
       - name: Build frontend
         run: |
           npm run build
           cp src/index.html src/manifest.json dist/
       - name: Test against disposable Arch guest
-        run: python3 test/e2e/vm.py
+        run: python3 test/e2e/vm.py --require-kvm
+      - name: Upload browser failures
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-failures
+          path: test-results/
+          retention-days: 7
