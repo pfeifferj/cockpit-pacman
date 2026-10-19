@@ -334,9 +334,9 @@ describe("App Signoffs availability", () => {
       }],
       total: 1,
     });
-    render(<App />);
+    await act(async () => { render(<App />); });
 
-    const tab = await screen.findByRole("tab", { name: /^Signoffs\s*1\s*to sign off$/ });
+    const tab = screen.getByRole("tab", { name: /^Signoffs\s*1\s*to sign off$/ });
     expect(tab).toHaveAttribute("aria-selected", "false");
     expect(screen.queryByRole("button", { name: "counted" })).not.toBeInTheDocument();
   });
