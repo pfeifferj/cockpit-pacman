@@ -9,8 +9,10 @@ from `pacman.conf`) for the length of a transaction. A lock left behind by a
 crash blocks every later operation.
 
 The plugin looks for a process holding the file, matching by inode so a holder
-in another mount namespace is still found. If nothing holds it, the Updates
-view offers to clear it and logs that it did (`journalctl -t cockpit-pacman`).
+in another mount namespace is still found. The affected view waits for a live
+holder or offers to remove a stale lock and retry. If the holder cannot be
+checked, enable administrative access and retry; the lock is left alone.
+Lock removal is recorded under `journalctl -t cockpit-pacman`.
 
 By hand:
 
@@ -34,9 +36,9 @@ loss) or libalpm fails mid-transaction: some packages are upgraded, the rest
 are not, and the post-transaction hooks (initramfs, systemd reload) may not
 have run.
 
-Re-run the upgrade. Nothing resumes; the transaction is recomputed from the
-database, so whatever is still out of date is upgraded and the hooks run at
-the end.
+Check `pacman.log` to see what was applied. Re-run the upgrade for packages
+still out of date. Reinstall any already-upgraded package whose required hooks
+failed; repeating the upgrade alone will not redo a current kernel's hooks.
 
 ## Only some repositories updated
 
@@ -81,6 +83,20 @@ Independent service evidence describes only the most recent invocation and
 can be lost after reboot or unit unloading; it does not reconstruct older
 missing records. Use the journal for older diagnostics when available.
 
+## A save was refused
+
+Repositories and Mirrors refuse a save if the file changed since it was read
+or pacman holds the database lock. Your edits stay in the page. Reload and
+reapply them, or review the outside changes before choosing to overwrite.
+Undo also checks the saved revision and refuses to overwrite a later edit.
+
+## History origins
+
+History labels transactions recorded by the plugin as From Cockpit or
+Scheduled upgrade. Older entries matched to a scheduled run by time are
+labelled Probably scheduled. Unlabelled entries can come from pacman or
+another tool; they do not establish who ran the command.
+
 ## Backend command diagnostics
 
 Commands that end with an error, and background news refreshes, write
@@ -111,9 +127,9 @@ means the tracker names no version to upgrade to. To turn the panel off, see
 | `/etc/pacman.conf.backup.<epoch>` | Taken before each repository save. |
 | `/etc/pacman.d/mirrorlist.backup.<epoch>` | Taken before each mirrorlist save. |
 
-Five backups of each are kept. Manual ones outrank the automatic ones taken
-before a restore, so a run of restores cannot evict them; the Origin column in
-Backup history says which is which.
+Five backups of each are kept. The newest backup is protected so a restore can
+be undone; remaining slots prefer manual backups. The Origin column identifies
+manual and automatic backups.
 
 Restore from Backup history in the Mirrors and Repositories tabs, or by hand:
 

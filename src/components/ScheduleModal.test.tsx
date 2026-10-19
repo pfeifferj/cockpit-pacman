@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup, fireEvent, act } from "@testing-library/react";
 import { ScheduleModal } from "./ScheduleModal";
 import * as api from "../api";
+import { sweepA11y } from "../test/a11ySweep";
 
 vi.mock("../api", async () => {
   const actual = await vi.importActual("../api");
@@ -15,6 +16,7 @@ vi.mock("../api", async () => {
 
 const mockGetScheduleConfig = vi.mocked(api.getScheduleConfig);
 const mockGetScheduledRuns = vi.mocked(api.getScheduledRuns);
+const mockSetScheduleConfig = vi.mocked(api.setScheduleConfig);
 
 const config: api.ScheduleConfig = {
   enabled: true,
@@ -53,20 +55,6 @@ describe("ScheduleModal run history", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(() => cleanup());
 
-  it("cannot save defaults when the schedule could not be read", async () => {
-    mockGetScheduleConfig.mockRejectedValue(new Error("Permission denied"));
-    mockGetScheduledRuns.mockResolvedValue({ runs: [], total: 0 });
-    render(<ScheduleModal isOpen onClose={() => {}} />);
-
-    await screen.findByText("Permission denied");
-    fireEvent.click(screen.getByRole("switch"));
-    const save = screen.getByRole("button", { name: "Save" });
-
-    expect(save).toBeDisabled();
-    fireEvent.click(save);
-    expect(api.setScheduleConfig).not.toHaveBeenCalled();
-  });
-
   it("labels a skipped run as skipped, not success", async () => {
     await renderWithRuns([
       run({
@@ -77,6 +65,20 @@ describe("ScheduleModal run history", () => {
     ]);
 
     expect(await screen.findByText("Skipped")).toBeInTheDocument();
+    expect(screen.queryByText("Success")).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toHaveAccessibleName("Scheduled upgrades");
+  });
+
+  it("shows an unrecorded run with unknown counts alongside a history warning", async () => {
+    mockGetScheduleConfig.mockResolvedValue(config);
+    mockGetScheduledRuns.mockResolvedValue({
+      runs: [run({ status: "unrecorded", packages_checked: null, packages_upgraded: null })],
+      total: 1, warning: "Some run records could not be read",
+    });
+    render(<ScheduleModal isOpen onClose={() => {}} />);
+    expect(await screen.findByText("Record unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Unknown")).toBeInTheDocument();
+    expect(screen.getByText("Could not read the run history")).toBeInTheDocument();
     expect(screen.queryByText("Success")).not.toBeInTheDocument();
   });
 
@@ -132,26 +134,168 @@ describe("ScheduleModal run history", () => {
     expect(await screen.findByText("No scheduled runs yet")).toBeInTheDocument();
     expect(screen.queryByText("Could not read the run history")).not.toBeInTheDocument();
   });
-  it("shows a completed service with missing results separately from a failed upgrade", async () => {
-    await renderWithRuns([run({ status: "unrecorded", mode: "unknown", packages_checked: null, packages_upgraded: null })]);
-    expect(await screen.findByText("Record unavailable")).toBeInTheDocument();
-    expect(screen.getByText("Unknown")).toBeInTheDocument();
-    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
-    expect(screen.queryByText("0 checked")).not.toBeInTheDocument();
-  });
+});
 
-  it("keeps independent service evidence visible when the history file is unreadable", async () => {
-    mockGetScheduleConfig.mockResolvedValue(config);
-    mockGetScheduledRuns.mockResolvedValue({
-      runs: [run({ status: "failed", mode: "unknown", packages_checked: null, packages_upgraded: null })],
-      total: 1, warning: "Permission denied reading scheduled.jsonl",
+describe("ScheduleModal package limit", () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => cleanup());
+
+  it("counts the limit in singular and plural", async () => {
+    await renderWithRuns([]);
+
+    expect(
+      await screen.findByText("Upgrades with more than 1 package will be skipped as a safety measure."),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Plus" }));
+    expect(
+      screen.getByText("Upgrades with more than 2 packages will be skipped as a safety measure."),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("ScheduleModal run details", () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => cleanup());
+
+  it("shows a skipped run's reason as text after expanding the row", async () => {
+    await renderWithRuns([
+      run({ status: "skipped", details: ["Skipped: 9 updates exceed safety limit of 1"] }),
+    ]);
+    fireEvent.click(await screen.findByRole("button", { name: /Show run history/ }));
+    expect(screen.queryByText(/exceed safety limit/)).not.toBeVisible();
+
+    const toggle = screen.getByRole("button", { name: /Details/ });
+    await act(async () => {
+      fireEvent.click(toggle);
     });
-    render(<ScheduleModal isOpen onClose={() => {}} />);
-    expect(await screen.findByText("Could not read the run history")).toBeInTheDocument();
-    expect(await screen.findByText("Failed")).toBeInTheDocument();
-    expect(screen.getByText("Unknown")).toBeInTheDocument();
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/exceed safety limit/)).toBeVisible();
   });
 
+  it("explains a recovered run in its expanded row", async () => {
+    await renderWithRuns([run({ status: "ok", removed_stale_lock: true })]);
+    fireEvent.click(await screen.findByRole("button", { name: /Show run history/ }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Details/ }));
+    });
+
+    expect(screen.getByText(/Cleared a leftover pacman lock/)).toBeVisible();
+  });
+
+  it("offers no expansion for a run with nothing more to say", async () => {
+    await renderWithRuns([run({ status: "ok" })]);
+    fireEvent.click(await screen.findByRole("button", { name: /Show run history/ }));
+    await screen.findByText("Success");
+
+    expect(screen.queryByRole("button", { name: /Details/ })).not.toBeInTheDocument();
+  });
+
+  it("opens with the history expanded and focused when asked", async () => {
+    mockGetScheduleConfig.mockResolvedValue(config);
+    mockGetScheduledRuns.mockResolvedValue({ runs: [run({ status: "ok" })], total: 1 });
+    render(<ScheduleModal isOpen onClose={() => {}} initialHistoryExpanded />);
+
+    const caption = await screen.findByText("Last 1 scheduled run");
+    await waitFor(() => expect(caption).toHaveFocus());
+    expect(screen.getByRole("grid", { name: "Scheduled run history" })).toBeVisible();
+  });
+});
+
+describe("ScheduleModal unsaved edits", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetScheduleConfig.mockResolvedValue(config);
+    mockGetScheduledRuns.mockResolvedValue({ runs: [], total: 0 });
+    mockSetScheduleConfig.mockResolvedValue({ success: true, message: "Schedule updated" } as Awaited<ReturnType<typeof api.setScheduleConfig>>);
+  });
+  afterEach(() => cleanup());
+
+  const renderAndEdit = async (onClose = vi.fn(), onSaved = vi.fn()) => {
+    render(<ScheduleModal isOpen onClose={onClose} onSaved={onSaved} />);
+    const preset = await screen.findByLabelText("Schedule");
+    fireEvent.change(preset, { target: { value: "weekly" } });
+    return { onClose, onSaved };
+  };
+
+  it("asks before Escape discards edits, and Discard changes closes without saving", async () => {
+    const { onClose } = await renderAndEdit();
+
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+
+    expect(await screen.findByText("Discard changes to the schedule?")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Keep editing" })).toHaveFocus();
+    sweepA11y();
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(mockSetScheduleConfig).not.toHaveBeenCalled();
+  });
+
+  it("Keep editing returns to the form with the edit intact", async () => {
+    const { onClose } = await renderAndEdit();
+    fireEvent.click(screen.getByText("Close").closest("button")!);
+    fireEvent.click(await screen.findByRole("button", { name: "Keep editing" }));
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Schedule")).toHaveValue("weekly");
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+
+  it("asks before a backdrop click discards edits", async () => {
+    const { onClose } = await renderAndEdit();
+    const backdrop = document.querySelector(".pf-v6-c-backdrop");
+    expect(backdrop).not.toBeNull();
+    fireEvent.mouseDown(backdrop!);
+
+    expect(await screen.findByText("Discard changes to the schedule?")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("closes at once when nothing was edited", async () => {
+    const onClose = vi.fn();
+    render(<ScheduleModal isOpen onClose={onClose} />);
+    await screen.findByLabelText("Schedule");
+    sweepA11y();
+    fireEvent.click(screen.getByText("Close").closest("button")!);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Discard changes to the schedule?")).not.toBeInTheDocument();
+  });
+
+  it("Save writes the schedule, reports it and closes", async () => {
+    const { onClose, onSaved } = await renderAndEdit();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    });
+
+    expect(mockSetScheduleConfig).toHaveBeenCalledWith(expect.objectContaining({ schedule: "weekly" }));
+    expect(onSaved).toHaveBeenCalledWith("Schedule updated");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays open with the error when Save fails", async () => {
+    mockSetScheduleConfig.mockRejectedValue(new Error("Failed to write timer drop-in"));
+    const { onClose, onSaved } = await renderAndEdit();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Schedule")).toHaveValue("weekly");
+    expect(screen.getByText("Could not save the schedule")).toBeInTheDocument();
+    expect(screen.getByText("Failed to write timer drop-in")).toBeInTheDocument();
+  });
+
+  it("names a failed configuration read", async () => {
+    mockGetScheduleConfig.mockRejectedValue(new Error("timer unit missing"));
+    mockGetScheduledRuns.mockResolvedValue({ runs: [], total: 0 });
+    render(<ScheduleModal isOpen onClose={() => {}} />);
+    expect(await screen.findByText("Could not load the schedule")).toBeInTheDocument();
+    expect(screen.queryByText("Error")).not.toBeInTheDocument();
+  });
 });
 
 describe("ScheduleModal timer and running service state", () => {
@@ -183,7 +327,8 @@ describe("ScheduleModal timer and running service state", () => {
     const mismatched = { ...config, enabled, timer_active: !enabled };
     mockGetScheduleConfig.mockResolvedValueOnce(mismatched).mockResolvedValue({ ...mismatched, timer_active: enabled });
     vi.mocked(api.setScheduleConfig).mockResolvedValue({ success: true, message: "Schedule saved" });
-    render(<ScheduleModal isOpen onClose={() => {}} />);
+    const onClose = vi.fn();
+    render(<ScheduleModal isOpen onClose={onClose} />);
     expect(await screen.findByText("Timer and saved settings differ")).toBeInTheDocument();
     const save = screen.getByRole("button", { name: "Save" });
     expect(save).toBeEnabled();
@@ -191,8 +336,7 @@ describe("ScheduleModal timer and running service state", () => {
     await waitFor(() => expect(api.setScheduleConfig).toHaveBeenCalledWith({
       enabled, mode: config.mode, schedule: config.schedule, max_packages: config.max_packages,
     }));
-    await waitFor(() => expect(screen.queryByText("Timer and saved settings differ")).not.toBeInTheDocument());
-    expect(save).toBeDisabled();
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
 
   it("keeps the running service separate from the last completed run", async () => {

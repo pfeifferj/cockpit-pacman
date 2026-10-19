@@ -275,12 +275,13 @@ pub(crate) fn add_pkg_failure(name: &str, e: impl std::fmt::Display) -> anyhow::
 
 pub(crate) fn commit_and_complete(
     tx: &mut TransactionGuard,
+    run: &crate::models::RunCommand,
     timeout: &TimeoutGuard,
     success_msg: Option<String>,
 ) -> Result<()> {
     let _inhibitor = ShutdownInhibitor::take("Applying package changes");
     check_cancel_early!(timeout);
-    match tx.commit() {
+    match tx.commit_logged(run) {
         Err(error) if error.is::<crate::network::NetworkError>() => Err(error),
         Err(error) => handle_commit_error(
             &error.to_string(),
@@ -575,7 +576,13 @@ pub fn run_upgrade(
 
     let _inhibitor = ShutdownInhibitor::take("Applying package changes");
 
-    match run_sysupgrade(&mut handle, &timeout, None, Some(approved_removals))? {
+    match run_sysupgrade(
+        &mut handle,
+        &timeout,
+        None,
+        Some(approved_removals),
+        crate::models::RunOrigin::Cockpit,
+    )? {
         SysupgradeOutcome::CancelledEarly(r) => {
             emit_cancellation_complete(&r);
             Ok(())
@@ -729,6 +736,7 @@ pub fn remove_orphans(
 
     commit_and_complete(
         &mut tx,
+        &crate::models::RunCommand::cockpit("remove-orphans", orphan_names.clone()),
         &timeout,
         Some(format!("Removed {} orphan package(s)", orphan_names.len())),
     )
@@ -861,6 +869,7 @@ pub fn install_package(
 
     commit_and_complete(
         &mut tx,
+        &crate::models::RunCommand::cockpit("install", vec![name.into()]),
         &timeout,
         Some(format!("Successfully installed {}", name)),
     )
@@ -909,6 +918,7 @@ pub fn remove_package(
 
     commit_and_complete(
         &mut tx,
+        &crate::models::RunCommand::cockpit("remove", vec![name.into()]),
         &timeout,
         Some(format!("Successfully removed {}", name)),
     )

@@ -85,6 +85,7 @@ pub fn run_sysupgrade(
     timeout: &TimeoutGuard,
     flags: Option<&InterventionFlags>,
     approved_removals: Option<&[String]>,
+    origin: crate::models::RunOrigin,
 ) -> Result<SysupgradeOutcome> {
     checkpoint!(timeout);
 
@@ -129,7 +130,12 @@ pub fn run_sysupgrade(
 
     checkpoint!(timeout);
 
-    let commit_err = tx.commit().err().map(|e| e.to_string());
+    let run = crate::models::RunCommand {
+        verb: "upgrade",
+        targets: tx.add().iter().map(|pkg| pkg.name().into()).collect(),
+        origin,
+    };
+    let commit_err = tx.commit_logged(&run).err().map(|e| e.to_string());
     let check = check_cancel(timeout);
     let intervention = flags.map(|f| f.reasons()).filter(|r| !r.is_empty());
     drop(tx);

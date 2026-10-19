@@ -1,4 +1,6 @@
 import { test, expect } from "./fixtures";
+import { guestCommand } from "./guest";
+import { withSavedConfig } from "./config-file";
 
 test.describe("Mirrors Tab", () => {
   test.beforeEach(async ({ pacman }) => {
@@ -45,9 +47,33 @@ test.describe("Mirrors Tab", () => {
     }
   });
 
-  test("does not offer to write a mirrorlist nothing has changed", async ({ pacman }) => {
-    await expect(pacman.panel.getByRole("button", { name: "Save Changes" })).toBeDisabled({
+  test("does not offer to write an unchanged mirrorlist", async ({ pacman }) => {
+    await expect(pacman.panel.getByRole("button", { name: "Save changes" })).toBeDisabled({
       timeout: 30000,
     });
+  });
+});
+
+
+test("saves mirror order and undoes it on disk", async ({ pacman }) => {
+  test.skip(process.env.COCKPIT_FAULT_TESTS !== "1", "requires a disposable VM snapshot");
+  await pacman.navigateToPlugin();
+  await withSavedConfig(pacman.frame, "mirror", async () => {
+    const before = await guestCommand(pacman.frame, ["sha256sum", "/etc/pacman.d/mirrorlist"]);
+    await pacman.switchTab("Mirrors");
+    const urls = pacman.panel.locator('td[data-label="URL"] span[style*="mono"]');
+    await expect(urls.nth(1)).toBeVisible();
+    const originalFirst = (await urls.first().innerText()).trim();
+    const moved = (await urls.nth(1).innerText()).trim();
+    await pacman.panel.getByRole("button", { name: `More actions for ${moved}`, exact: true }).click({ timeout: 15000 });
+    await pacman.frame.getByRole("menuitem", { name: "Move to top", exact: true }).click({ timeout: 15000 });
+    await expect(urls.first()).toHaveText(moved);
+    await pacman.panel.getByRole("button", { name: "Save changes", exact: true }).click({ timeout: 15000 });
+    await expect(pacman.panel.getByRole("heading", { name: /^Success alert:\s*Saved \/etc\/pacman\.d\/mirrorlist$/ })).toBeVisible();
+    expect(await guestCommand(pacman.frame, ["sha256sum", "/etc/pacman.d/mirrorlist"])).not.toBe(before);
+    await pacman.panel.getByRole("button", { name: "Undo", exact: true }).click({ timeout: 15000 });
+    await expect(pacman.panel.getByRole("heading", { name: /^Success alert:\s*Undid the \/etc\/pacman\.d\/mirrorlist change$/ })).toBeVisible();
+    expect(await guestCommand(pacman.frame, ["sha256sum", "/etc/pacman.d/mirrorlist"])).toBe(before);
+    await expect(urls.first()).toHaveText(originalFirst);
   });
 });

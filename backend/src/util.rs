@@ -586,6 +586,12 @@ pub fn emit_failure(message: &str, fallback: &'static str) {
 /// Classify typed causes before falling back to the rendered error message.
 pub fn classify_error(err: &anyhow::Error) -> Option<&'static str> {
     for cause in err.chain() {
+        if cause.is::<archweb_client::AuthRejected>() {
+            return Some("permission_denied");
+        }
+        if cause.is::<crate::backups::ConfigChanged>() {
+            return Some("config_changed");
+        }
         if cause.is::<crate::network::NetworkError>() || cause.is::<crate::models::InvalidInput>() {
             return Some("validation_error");
         }

@@ -103,7 +103,7 @@ when credentials are present. World-readable credentials are rejected.
 Invalid or unreadable settings block network operations. Failed proxy
 connections never fall back to direct access. Local operations remain available.
 
-Keyring refresh uses dirmngr, which needs separate configuration. Refresh is
+Key retrieval and refresh use dirmngr, which needs separate configuration. Both are
 blocked in `proxy`/`direct` modes and in `inherit` mode with an active proxy.
 After configuring dirmngr, allow refresh with `"keyring": "external"`;
 `"keyring": "deny"` always blocks it. Package hooks also control their own

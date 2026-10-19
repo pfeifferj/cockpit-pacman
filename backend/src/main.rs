@@ -31,6 +31,15 @@ use cockpit_pacman_backend::validation::{
     validate_search_query, validate_signoff_arg,
 };
 
+fn required_arg(args: &[String], offset: usize) -> anyhow::Result<&str> {
+    args.get(offset)
+        .map(String::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            cockpit_pacman_backend::models::InvalidInput("Missing required argument".into()).into()
+        })
+}
+
 fn parse_install_target(args: &[String], offset: usize) -> anyhow::Result<InstallTarget> {
     let reinstall = match arg_opt(args, offset + 2).as_deref() {
         None | Some("false") => false,
@@ -55,6 +64,13 @@ const SYSTEMD_INVOKED: &[&str] = &["scheduled-run", "scheduled-record-interrupte
 /// (USAGE is checked against it in tests) and the unknown-command suggestion.
 /// Keep in sync with the dispatch match in `main`.
 const COMMANDS: &[&str] = &[
+    "undo-repo-save",
+    "undo-mirror-save",
+    "cache-cleanup-preview",
+    "receive-key",
+    "lsign-key",
+    "news-mark-unread",
+    "restore-dismissed",
     "list-installed",
     "check-updates",
     "preflight-upgrade",
@@ -131,6 +147,18 @@ const COMMANDS: &[&str] = &[
 const USAGE: &str = r#"Usage: cockpit-pacman-backend <command> [args]
 
 Commands:
+  undo-repo-save TIMESTAMP REVISION
+                         Undo a repository save if it is still current
+  undo-mirror-save TIMESTAMP REVISION
+                         Undo a mirror save if it is still current
+  cache-cleanup-preview KEEP PACKAGES MODE
+                         Estimate cleanup for all/only/except selection
+  receive-key FINGERPRINT [keyserver]
+                         Receive a key without trusting it (requires root)
+  lsign-key FINGERPRINT   Trust a received key locally (requires root)
+  news-mark-unread URL    Undo marking a news item read
+  restore-dismissed KIND EXPECTED [PREVIOUS]
+                         Undo an alert dismissal if it is still current
   list-installed [offset] [limit] [search] [filter] [repo] [sort_by] [sort_dir]
                          List installed packages (paginated)
                          filter: all|explicit|dependency
@@ -207,15 +235,17 @@ Commands:
                          KEEP: number of versions to keep (default: 3)
                          PKGS: comma-separated package names
                          MODE: all|only|except (default: only with PKGS, otherwise all)
-  history [offset] [limit] [filter] [search]
+  history [offset] [limit] [filter] [search] [until]
                          View package history from pacman.log
-                         filter: all|upgraded|installed|removed
+                         filter: all|upgraded|installed|removed|downgraded|reinstalled
                          search: filter by package name (substring)
-  history-grouped [offset] [limit] [filter] [search]
+                         until: YYYY-MM-DD, through the end of that local day
+  history-grouped [offset] [limit] [filter] [search] [until]
                          View package history grouped by upgrade runs
-                         Groups entries within 60s of each other
-                         filter: all|upgraded|installed|removed
+                         Groups entries by transaction markers
+                         filter: all|upgraded|installed|removed|downgraded|reinstalled
                          search: filter by package name (substring)
+                         until: YYYY-MM-DD, through the end of that local day
   list-downgrades [NAME] List cached package versions available for downgrade
                          NAME: optional package name to filter
   downgrade NAME VERSION [timeout] [approved-removals]
@@ -255,7 +285,7 @@ Commands:
                          Test mirror speed and latency
                          urls: comma-separated list of mirror URLs
                          timeout: seconds (default: 60)
-  save-mirrorlist <json> Save mirrorlist (requires root)
+  save-mirrorlist <json> <revision> Save mirrorlist (requires root)
                          json: JSON array of mirror entries
   list-mirror-backups    List available mirrorlist backups
   restore-mirror-backup <timestamp>
@@ -637,7 +667,7 @@ fn main() {
             };
             get_cache_files(name, arg_usize(&args, 3, 0), arg_usize(&args, 4, 50))
         }
-        "clean-cache" => {
+        "clean-cache" | "cache-cleanup-preview" => {
             let keep_versions = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(3);
             let filter_pkgs: Vec<String> = args
                 .get(3)
@@ -659,7 +689,17 @@ fn main() {
                 });
             validate_keep_versions(keep_versions)
                 .and_then(|_| validate_cache_selection(mode, &filter_pkgs))
-                .and_then(|_| clean_cache(keep_versions, &filter_pkgs, mode))
+                .and_then(|_| {
+                    if args[1] == "cache-cleanup-preview" {
+                        cockpit_pacman_backend::handlers::cache::preview_cleanup(
+                            keep_versions,
+                            &filter_pkgs,
+                            mode,
+                        )
+                    } else {
+                        clean_cache(keep_versions, &filter_pkgs, mode)
+                    }
+                })
         }
         "history" => {
             let (offset, limit, filter, search) = parse_history(&args, 100);
@@ -667,7 +707,15 @@ fn main() {
                 if let Some(q) = search.as_deref() {
                     validate_search_query(q)?;
                 }
-                get_history(offset, limit, filter.as_deref(), search.as_deref())
+                get_history(
+                    offset,
+                    limit,
+                    filter.as_deref(),
+                    search.as_deref(),
+                    arg_opt(&args, 6)
+                        .map(|date| cockpit_pacman_backend::handlers::log::parse_until(&date))
+                        .transpose()?,
+                )
             })
         }
         "history-grouped" => {
@@ -676,7 +724,15 @@ fn main() {
                 if let Some(q) = search.as_deref() {
                     validate_search_query(q)?;
                 }
-                get_grouped_history(offset, limit, filter.as_deref(), search.as_deref())
+                get_grouped_history(
+                    offset,
+                    limit,
+                    filter.as_deref(),
+                    search.as_deref(),
+                    arg_opt(&args, 6)
+                        .map(|date| cockpit_pacman_backend::handlers::log::parse_until(&date))
+                        .transpose()?,
+                )
             })
         }
         "list-downgrades" => {
@@ -764,8 +820,10 @@ fn main() {
                 .and_then(|_| test_mirrors(&urls, timeout))
         }
         "save-mirrorlist" => {
-            if args.len() < 3 {
-                eprintln!("Error: save-mirrorlist requires a JSON array of mirrors");
+            if args.len() < 4 {
+                eprintln!(
+                    "Error: save-mirrorlist requires a JSON array of mirrors and its revision"
+                );
                 std::process::exit(1);
             }
             validate_json_payload_size(&args[2])
@@ -773,7 +831,7 @@ fn main() {
                     serde_json::from_str::<Vec<MirrorEntry>>(&args[2])
                         .map_err(|e| anyhow::anyhow!("Invalid JSON: {}", e))
                 })
-                .and_then(|mirrors| save_mirrorlist(&mirrors))
+                .and_then(|mirrors| save_mirrorlist(&mirrors, &args[3]))
         }
         "list-mirror-backups" => list_mirror_backups(),
         "restore-mirror-backup" => {
@@ -909,6 +967,37 @@ fn main() {
         }
         "check-lock" => check_lock(),
         "version" => emit_json(&serde_json::json!({ "version": env!("CARGO_PKG_VERSION") })),
+        "undo-repo-save" | "undo-mirror-save" => required_arg(&args, 2).and_then(|timestamp| {
+            let timestamp = timestamp.parse::<i64>().map_err(|_| {
+                anyhow::Error::from(cockpit_pacman_backend::models::InvalidInput(
+                    "Invalid backup timestamp".into(),
+                ))
+            })?;
+            let revision = required_arg(&args, 3)?;
+            if args[1] == "undo-repo-save" {
+                cockpit_pacman_backend::handlers::repos::undo_repo_save(timestamp, revision)
+            } else {
+                cockpit_pacman_backend::handlers::mirrors::undo_mirror_save(timestamp, revision)
+            }
+        }),
+        "news-mark-unread" => required_arg(&args, 2)
+            .and_then(cockpit_pacman_backend::handlers::news::mark_news_unread),
+        "restore-dismissed" => required_arg(&args, 2).and_then(|kind| {
+            cockpit_pacman_backend::handlers::news::restore_dismissed(
+                kind,
+                required_arg(&args, 3)?,
+                arg_opt(&args, 4).as_deref(),
+            )
+        }),
+        "receive-key" => required_arg(&args, 2).and_then(|fingerprint| {
+            cockpit_pacman_backend::handlers::keyring::receive_key(
+                fingerprint,
+                arg_opt(&args, 3).as_deref(),
+            )
+        }),
+        "lsign-key" => {
+            required_arg(&args, 2).and_then(cockpit_pacman_backend::handlers::keyring::lsign_key)
+        }
         "list-repos" => list_repos(),
         "save-repos" => {
             if args.len() < 4 {
@@ -1266,13 +1355,16 @@ mod tests {
         let dispatched: BTreeSet<&str> = body
             .lines()
             .filter_map(|line| {
-                let rest = line.strip_prefix("        \"")?;
-                if rest.starts_with(' ') {
-                    return None;
-                }
-                let (name, after) = rest.split_once('"')?;
-                after.trim_start().starts_with("=>").then_some(name)
+                line.strip_prefix("        ")?
+                    .split_once(" =>")
+                    .map(|(names, _)| names)
             })
+            .flat_map(|names| {
+                names
+                    .split('|')
+                    .filter_map(|name| name.trim().strip_prefix('"')?.strip_suffix('"'))
+            })
+            .filter(|name| !matches!(*name, "--help" | "-h" | "help"))
             .collect();
 
         let declared: BTreeSet<&str> = COMMANDS.iter().copied().collect();

@@ -1,5 +1,7 @@
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
+use std::time::UNIX_EPOCH;
 
 use crate::alpm::{find_available_updates, get_handle, reason_to_string};
 use crate::db::{find_package_repo, get_repo_map};
@@ -137,7 +139,16 @@ pub fn check_updates() -> Result<()> {
     if degraded {
         warnings.push("Saved cockpit-pacman package ignores could not be read".to_string());
     }
-    let response = UpdatesResponse { updates, warnings };
+    let sync_dir = crate::handlers::lock::db_lock_path().with_file_name("sync");
+    let response = UpdatesResponse {
+        updates,
+        warnings,
+        last_sync_at: crate::handlers::log::last_sync_at(),
+        oldest_database_at: oldest_sync_db_mtime(
+            handle.syncdbs().iter().map(|db| db.name()),
+            &sync_dir,
+        ),
+    };
     emit_json(&response)
 }
 
@@ -718,4 +729,22 @@ mod search_tests {
             .unwrap();
         assert!(err.chain().any(|c| c.is::<InvalidInput>()));
     }
+}
+
+pub(crate) fn oldest_sync_db_mtime<'a>(
+    repos: impl IntoIterator<Item = &'a str>,
+    sync_dir: &Path,
+) -> Option<i64> {
+    let mut oldest: Option<i64> = None;
+    for name in repos {
+        let modified = std::fs::metadata(sync_dir.join(format!("{name}.db")))
+            .and_then(|m| m.modified())
+            .ok()?;
+        let secs = match modified.duration_since(UNIX_EPOCH) {
+            Ok(d) => d.as_secs() as i64,
+            Err(e) => -(e.duration().as_secs() as i64),
+        };
+        oldest = Some(oldest.map_or(secs, |o| o.min(secs)));
+    }
+    oldest
 }

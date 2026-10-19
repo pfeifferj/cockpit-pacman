@@ -1,15 +1,15 @@
 use anyhow::{Context, Result};
-use pacman_log::{Event, LogReader};
+use pacman_log::{Event, parse_entry};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufWriter, Read, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
-use crate::models::{LogEntry, UpdateStats};
-const CACHE_VERSION: u8 = 1;
+use crate::models::{LogEntry, TransactionOrigin, UpdateStats};
+const CACHE_VERSION: u8 = 2;
 const MAX_CACHE_BYTES: u64 = 64 * 1024 * 1024;
 const LOG_PATH: &str = "/var/log/pacman.log";
 const TS_FMT: &str = "%Y-%m-%dT%H:%M:%S%z";
@@ -50,6 +50,7 @@ pub(crate) struct ParsedLog {
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct LogTransaction {
+    pub origin: Option<TransactionOrigin>,
     pub command: Option<String>,
     pub start_time: String,
     pub end_time: String,
@@ -185,23 +186,39 @@ fn parse(file: &File) -> Result<ParsedLog> {
     let mut parsed = ParsedLog::default();
     let mut command = None;
     let mut active: Option<LogTransaction> = None;
-    // Keep the opened inode when pacman.log is rotated during the read.
-    for entry in LogReader::open(format!("/proc/self/fd/{}", file.as_raw_fd())).entries() {
-        let entry = match entry {
-            Ok(entry) => entry,
+    let reader = BufReader::new(File::open(format!("/proc/self/fd/{}", file.as_raw_fd()))?);
+    for line in reader.lines() {
+        let line = match line {
+            Ok(line) => line,
             Err(error) if error.kind() == std::io::ErrorKind::InvalidData => continue,
             Err(error) => return Err(error).context("Could not read pacman.log"),
         };
+        match crate::handlers::log::cockpit_line(&line) {
+            Some(crate::handlers::log::CockpitLine::Run(run, origin)) => {
+                command = Some((run, origin));
+                continue;
+            }
+            Some(crate::handlers::log::CockpitLine::Incomplete) => {
+                command = None;
+                continue;
+            }
+            None => {}
+        }
+        let Some(entry) = parse_entry(&line) else {
+            continue;
+        };
         match entry.event {
-            Event::Command(value) => command = Some(value),
+            Event::Command(value) => command = Some((value, TransactionOrigin::Pacman)),
             Event::TransactionStart => {
                 if let Some(mut transaction) = active.take() {
                     transaction.end = parsed.entries.len();
                     parsed.transactions.push(transaction);
                 }
                 let timestamp = entry.timestamp.format(TS_FMT).to_string();
+                let (command, origin) = command.take().unzip();
                 active = Some(LogTransaction {
-                    command: command.take(),
+                    command,
+                    origin,
                     start_time: timestamp.clone(),
                     end_time: timestamp,
                     start: parsed.entries.len(),
@@ -216,6 +233,8 @@ fn parse(file: &File) -> Result<ParsedLog> {
                 }
             }
             Event::Operation(operation) => parsed.entries.push(LogEntry {
+                command: active.as_ref().and_then(|tx| tx.command.clone()),
+                origin: active.as_ref().and_then(|tx| tx.origin),
                 timestamp: operation.timestamp.format(TS_FMT).to_string(),
                 action: operation.action.to_string(),
                 package: operation.package,
@@ -504,6 +523,8 @@ mod tests {
         let signature = Signature::from_metadata(&fs::metadata(&fixture.log).unwrap());
         let fake = ParsedLog {
             entries: vec![LogEntry {
+                command: None,
+                origin: None,
                 timestamp: String::new(),
                 action: "installed".into(),
                 package: "fake".into(),
@@ -632,5 +653,22 @@ mod tests {
             text.len(),
             warm.entries.len()
         );
+    }
+    #[test]
+    fn cached_provenance_does_not_leak_from_failed_commits() {
+        let fixture = Fixture::new();
+        fs::write(&fixture.log, "[2026-01-21T10:00:00+0000] [COCKPIT-PACMAN] Running 'cockpit-pacman install first' (cockpit)\n[2026-01-21T10:00:00+0000] [COCKPIT-PACMAN] Commit did not complete\n[2026-01-21T10:00:01+0000] [ALPM] transaction started\n[2026-01-21T10:00:02+0000] [ALPM] installed unknown (1-1)\n[2026-01-21T10:00:03+0000] [ALPM] transaction completed\n[2026-01-21T10:00:04+0000] [COCKPIT-PACMAN] Running 'cockpit-pacman upgrade second' (scheduled)\n[2026-01-21T10:00:05+0000] [ALPM] transaction started\n[2026-01-21T10:00:06+0000] [ALPM] upgraded second (1-1 -> 2-1)\n").unwrap();
+        for _ in 0..2 {
+            let parsed = fixture.read();
+            assert_eq!(parsed.entries.len(), 2);
+            assert_eq!(parsed.entries[0].origin, None);
+            assert_eq!(parsed.entries[0].command, None);
+            assert_eq!(parsed.entries[1].origin, Some(TransactionOrigin::Scheduled));
+            assert_eq!(
+                parsed.transactions[1].origin,
+                Some(TransactionOrigin::Scheduled)
+            );
+            assert_eq!(parsed.transactions[1].end, 2);
+        }
     }
 }

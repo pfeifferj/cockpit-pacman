@@ -9,7 +9,57 @@ const SESSION_IFACE = "org.freedesktop.Secret.Session";
 
 const LOOKUP_ATTRS = { service: "cockpit-pacman", type: "archweb" };
 
+const SERVICE_ABSENT_ERRORS = new Set([
+  "org.freedesktop.DBus.Error.ServiceUnknown",
+  "org.freedesktop.DBus.Error.NameHasNoOwner",
+]);
+
+// cockpit.dbus problem codes meaning the session bus itself is unreachable.
+const BUS_ABSENT_PROBLEMS = new Set(["not-found", "disconnected"]);
+
+/**
+ * absent: no ArchWeb item, or no Secret Service on the session bus.
+ * locked: unlocking needs an interactive prompt.
+ * malformed: the item lacks a username or a secret.
+ * failed: anything else.
+ */
+export type CredentialErrorReason = "absent" | "locked" | "malformed" | "failed";
+
+export class CredentialError extends Error {
+  reason: CredentialErrorReason;
+
+  constructor(reason: CredentialErrorReason, message: string) {
+    super(message);
+    this.name = "CredentialError";
+    this.reason = reason;
+  }
+}
+
+function classify(err: unknown): CredentialError {
+  if (err instanceof CredentialError) return err;
+  const e = (err ?? {}) as { name?: unknown; message?: unknown; problem?: unknown };
+  const message = typeof e.message === "string" && e.message
+    ? e.message
+    : typeof e.problem === "string" ? e.problem : String(err);
+  if (typeof e.name === "string" && SERVICE_ABSENT_ERRORS.has(e.name)) {
+    return new CredentialError("absent", message);
+  }
+  // cockpit.dbus reports a failed bus connection as a problem code with no D-Bus error name.
+  if (typeof e.problem === "string" && typeof e.name !== "string" && BUS_ABSENT_PROBLEMS.has(e.problem)) {
+    return new CredentialError("absent", message);
+  }
+  return new CredentialError("failed", message);
+}
+
 export async function getCredentials(): Promise<KeyringCredentials> {
+  try {
+    return await readCredentials();
+  } catch (err) {
+    throw classify(err);
+  }
+}
+
+async function readCredentials(): Promise<KeyringCredentials> {
   const info = await cockpit.user();
   const uid = info.id;
   const client = cockpit.dbus(SERVICE_NAME, {
@@ -42,13 +92,13 @@ export async function getCredentials(): Promise<KeyringCredentials> {
       )) as [string[], string];
 
       if (promptPath !== "/") {
-        throw new Error("Keyring requires interactive unlock");
+        throw new CredentialError("locked", "Keyring requires interactive unlock");
       }
       itemPaths = unlockedPaths;
     }
 
     if (itemPaths.length === 0) {
-      throw new Error("No ArchWeb credentials found in keyring");
+      throw new CredentialError("absent", "No ArchWeb credentials found in keyring");
     }
 
     const itemPath = itemPaths[0];
@@ -62,7 +112,7 @@ export async function getCredentials(): Promise<KeyringCredentials> {
     const attrs = attrsResult[0].v;
     const username = attrs.username;
     if (!username) {
-      throw new Error("Keyring item missing 'username' attribute");
+      throw new CredentialError("malformed", "Keyring item missing 'username' attribute");
     }
 
     const [secrets] = (await client.call(
@@ -74,7 +124,7 @@ export async function getCredentials(): Promise<KeyringCredentials> {
 
     const secretTuple = secrets[itemPath];
     if (!secretTuple) {
-      throw new Error("Failed to retrieve secret from keyring");
+      throw new CredentialError("malformed", "Failed to retrieve secret from keyring");
     }
 
     const passwordBytes = secretTuple[2];

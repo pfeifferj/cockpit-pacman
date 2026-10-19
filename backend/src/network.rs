@@ -295,6 +295,7 @@ pub unsafe fn initialize(command: &str) {
             | "downgrade-archive"
             | "scheduled-run"
             | "refresh-keyring"
+            | "receive-key"
             | "fetch-news"
             | "fetch-mirror-status"
             | "refresh-mirrors"
@@ -357,7 +358,7 @@ pub fn require_keyring_network() -> Result<(), NetworkError> {
         .is_some_and(|policy| policy.deny_keyring)
     {
         return Err(NetworkError(
-            "key refresh uses independent dirmngr routing; configure it separately and opt in with keyring: external",
+            "key operations use independent dirmngr routing; configure it separately and opt in with keyring: external",
         ));
     }
     Ok(())

@@ -49,6 +49,8 @@ fn test_package_list_response_serialization() {
 #[test]
 fn test_updates_response_serialization() {
     let response = UpdatesResponse {
+        last_sync_at: None,
+        oldest_database_at: None,
         updates: vec![UpdateInfo {
             name: "linux".to_string(),
             current_version: "6.7.0-arch1-1".to_string(),
@@ -1252,6 +1254,8 @@ fn test_mirror_backup_list_response_empty() {
 #[test]
 fn test_restore_mirror_backup_response_serialization() {
     let response = RestoreMirrorBackupResponse {
+        revision: None,
+        backup_timestamp: None,
         warnings: vec![],
         success: true,
         backup_path: Some("/etc/pacman.d/mirrorlist.backup.1704067200".to_string()),
@@ -1267,6 +1271,8 @@ fn test_restore_mirror_backup_response_serialization() {
 #[test]
 fn test_restore_mirror_backup_response_no_backup_path() {
     let response = RestoreMirrorBackupResponse {
+        revision: None,
+        backup_timestamp: None,
         warnings: vec![],
         success: true,
         backup_path: None,
@@ -1475,6 +1481,8 @@ fn test_build_update_stats_map_counts_per_package() {
 
     let entries = vec![
         LogEntry {
+            command: None,
+            origin: None,
             timestamp: "2024-01-01T00:00:00+0000".into(),
             action: "installed".into(),
             package: "linux".into(),
@@ -1482,6 +1490,8 @@ fn test_build_update_stats_map_counts_per_package() {
             new_version: Some("6.1.0".into()),
         },
         LogEntry {
+            command: None,
+            origin: None,
             timestamp: "2024-02-01T00:00:00+0000".into(),
             action: "upgraded".into(),
             package: "linux".into(),
@@ -1489,6 +1499,8 @@ fn test_build_update_stats_map_counts_per_package() {
             new_version: Some("6.2.0".into()),
         },
         LogEntry {
+            command: None,
+            origin: None,
             timestamp: "2024-03-01T00:00:00+0000".into(),
             action: "upgraded".into(),
             package: "linux".into(),
@@ -1496,6 +1508,8 @@ fn test_build_update_stats_map_counts_per_package() {
             new_version: Some("6.3.0".into()),
         },
         LogEntry {
+            command: None,
+            origin: None,
             timestamp: "2024-01-15T00:00:00+0000".into(),
             action: "installed".into(),
             package: "git".into(),
@@ -1503,6 +1517,8 @@ fn test_build_update_stats_map_counts_per_package() {
             new_version: Some("2.43.0".into()),
         },
         LogEntry {
+            command: None,
+            origin: None,
             timestamp: "2024-02-15T00:00:00+0000".into(),
             action: "upgraded".into(),
             package: "git".into(),

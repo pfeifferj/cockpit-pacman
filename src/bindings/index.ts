@@ -13,15 +13,21 @@ export type BackupSource = "manual" | "auto";
  */
 export type BlockedBy = { target: string, depend: string, causing?: string, };
 
+export type CacheCleanupPreview = { files: number, bytes: number, };
+
 export type CacheFiles = { files: Array<CachePackage>, total: number, };
 
-export type CacheGroup = { name: string, latest_version: string, file_count: number, total_size: number, };
+export type CacheFreeSpace = { mount: string, free_bytes: number, };
 
-export type CacheInfo = { total_size: number, package_count: number, unique_packages: number, multi_version_packages: number, total: number, groups: Array<CacheGroup>, path: string, };
+export type CacheGroup = { installed_version: string | null, downgrade_version: string | null, name: string, latest_version: string, file_count: number, total_size: number, };
+
+export type CacheInfo = { free_space?: CacheFreeSpace, total_size: number, package_count: number, unique_packages: number, multi_version_packages: number, total: number, groups: Array<CacheGroup>, path: string, };
 
 export type CachePackage = { name: string, version: string, filename: string, size: number, };
 
 export type CachedVersion = { name: string, version: string, filename: string, size: number, installed_version: string | null, is_older: boolean, };
+
+export type ConfigurationUndoResponse = { success: boolean, revision: string, backup_timestamp: number | null, backup_path: string | null, warnings: Array<string>, };
 
 export type ConflictInfo = { package1: string, package2: string, };
 
@@ -56,21 +62,23 @@ export type IgnoreOperationResponse = { success: boolean, package: string, messa
 
 export type IgnoredPackagesResponse = { packages: Array<string> | null, total: number | null, };
 
+export type KeyActionResponse = { key: KeyringKey, };
+
 export type KeyringKey = { fingerprint: string, uid: string, created: string | null, expires: string | null, trust: string, };
 
 export type KeyringState = "ready" | "uninitialized" | "undetermined";
 
 export type KeyringStatusResponse = { keys: Array<KeyringKey>, total: number, master_key_initialized: boolean, status: KeyringState, warnings: Array<string>, };
 
-export type ListReposResponse = { repos: Array<RepoEntry>, revision: string, };
+export type ListReposResponse = { not_synced: Array<string>, repos: Array<RepoEntry>, revision: string, };
 
 export type LockRemoveResult = { removed: boolean, error?: string, };
 
 export type LockStatus = { locked: boolean, stale: boolean, lock_path: string, blocking_process?: string, holder_unknown: boolean, };
 
-export type LogEntry = { timestamp: string, action: string, package: string, old_version: string | null, new_version: string | null, };
+export type LogEntry = { command: string | null, origin: TransactionOrigin | null, timestamp: string, action: string, package: string, old_version: string | null, new_version: string | null, };
 
-export type LogGroup = { id: string, command: string | null, start_time: string, end_time: string, entries: Array<LogEntry>, upgraded_count: number, installed_count: number, removed_count: number, downgraded_count: number, reinstalled_count: number, part?: number, parts?: number, };
+export type LogGroup = { origin: TransactionOrigin | null, id: string, command: string | null, start_time: string, end_time: string, entries: Array<LogEntry>, upgraded_count: number, installed_count: number, removed_count: number, downgraded_count: number, reinstalled_count: number, part?: number, parts?: number, };
 
 export type LogResponse = { entries: Array<LogEntry>, total: number, total_upgraded: number, total_installed: number, total_removed: number, total_other: number, };
 
@@ -80,7 +88,7 @@ export type MirrorBackupListResponse = { backups: Array<MirrorBackup>, warnings:
 
 export type MirrorEntry = { url: string, enabled: boolean, comment: string | null, };
 
-export type MirrorListResponse = { mirrors: Array<MirrorEntry>, total: number, enabled_count: number, path: string, last_modified: number | null, };
+export type MirrorListResponse = { revision: string, mirrors: Array<MirrorEntry>, total: number, enabled_count: number, path: string, last_modified: number | null, };
 
 export type MirrorStatus = { url: string, country: string | null, country_code: string | null, last_sync: string | null, delay: number | null, score: number | null, completion_pct: number | null, active: boolean, ipv4: boolean, ipv6: boolean, };
 
@@ -158,13 +166,13 @@ export type RepositoryCount = { name: string, count: number, };
 
 export type RestartBlocked = "session_critical" | "cockpit_session" | "cockpit_transport";
 
-export type RestoreMirrorBackupResponse = { success: boolean, backup_path: string | null, message: string, warnings: Array<string>, };
+export type RestoreMirrorBackupResponse = { revision: string | null, backup_timestamp: number | null, success: boolean, backup_path: string | null, message: string, warnings: Array<string>, };
 
-export type RestoreRepoBackupResponse = { success: boolean, backup_path: string | null, message: string, warnings: Array<string>, };
+export type RestoreRepoBackupResponse = { revision: string | null, backup_timestamp: number | null, success: boolean, backup_path: string | null, message: string, warnings: Array<string>, };
 
-export type SaveMirrorlistResponse = { success: boolean, backup_path: string | null, message: string, warnings: Array<string>, };
+export type SaveMirrorlistResponse = { revision: string, backup_timestamp: number | null, success: boolean, backup_path: string | null, message: string, warnings: Array<string>, };
 
-export type SaveReposResponse = { success: boolean, backup_path: string | null, message: string, revision: string, warnings: Array<string>, };
+export type SaveReposResponse = { backup_timestamp: number | null, success: boolean, backup_path: string | null, message: string, revision: string, warnings: Array<string>, };
 
 export type ScheduleConfig = { enabled: boolean, mode: string, schedule: string, max_packages: number, timer_active: boolean | null, timer_error?: string, timer_next_run: string | null, timer_calendar: string | null, };
 
@@ -231,6 +239,8 @@ export type StreamEvent = { "type": "log", level: string, message: string, } | {
 
 export type SyncPackageDetails = { name: string, version: string, description: string | null, url: string | null, licenses: Array<string>, groups: Array<string>, provides: Array<string>, depends: Array<string>, optdepends: Array<string>, installed_optdepends?: Array<string>, conflicts: Array<string>, replaces: Array<string>, download_size: number, installed_size: number, packager: string | null, architecture: string | null, build_date: number, repository: string, installed_version?: string, };
 
+export type TransactionOrigin = "pacman" | "cockpit" | "scheduled";
+
 /**
  * What a transaction would do, computed through trans_prepare without a commit.
  */
@@ -240,7 +250,7 @@ export type UpdateInfo = { name: string, current_version: string, new_version: s
 
 export type UpdateStats = { update_count: number, first_installed: string | null, last_updated: string | null, avg_days_between_updates: number | null, };
 
-export type UpdatesResponse = { updates: Array<UpdateInfo>, warnings: Array<string>, };
+export type UpdatesResponse = { last_sync_at: number | null, oldest_database_at: number | null, updates: Array<UpdateInfo>, warnings: Array<string>, };
 
 export type VersionMatch = "match" | "mismatch" | "not_installed";
 

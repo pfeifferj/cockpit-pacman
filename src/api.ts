@@ -9,10 +9,15 @@ import { startSystemWatch, type FileWatch } from "./systemWatch";
 import type {
   CacheFiles,
   CacheInfo,
+  CacheCleanupPreview,
+  ConfigurationUndoResponse,
+  KeyActionResponse,
   DependencyTreeResponse,
   DismissalState,
   DowngradeResponse,
   GroupedLogResponse,
+  LogGroup,
+  TransactionOrigin,
   IgnoreOperationResponse,
   IgnoredPackagesResponse,
   KeyringStatusResponse,
@@ -221,7 +226,7 @@ export function parseErrorCode(message: string): ErrorCode {
   return "internal_error";
 }
 
-async function runBackend<T>(command: string, args: string[] = [], options?: { superuser?: "try" | "require" | "none"; stdin?: string; signal?: AbortSignal; timeoutMs?: number }): Promise<T> {
+async function runBackend<T>(command: string, args: string[] = [], options?: { superuser?: "try" | "require" | "none"; stdin?: string; signal?: AbortSignal; timeoutMs?: number; gracefulCancel?: boolean }): Promise<T> {
   if (options?.signal?.aborted) throw new BackendError("Operation cancelled", "cancelled");
   const su = options?.superuser ?? "try";
   const spawnOpts: Record<string, unknown> = { err: "message" };
@@ -244,10 +249,14 @@ async function runBackend<T>(command: string, args: string[] = [], options?: { s
 
   // Handle abort signal by closing the spawn process
   controller.signal.addEventListener("abort", () => {
-    spawnPromise.close("timeout");
+    if (options?.gracefulCancel) spawnPromise.input("cancel\n", true);
+    else spawnPromise.close("timeout");
   });
 
-  const cancel = () => spawnPromise.close("cancelled");
+  const cancel = () => {
+    if (options?.gracefulCancel) spawnPromise.input("cancel\n", true);
+    else spawnPromise.close("cancelled");
+  };
   options?.signal?.addEventListener("abort", cancel, { once: true });
 
   const holdsDbLock = DB_LOCK_COMMANDS.has(command);
@@ -390,9 +399,9 @@ export async function previewRemove(name: string): Promise<TransactionPreview> {
 }
 
 /** Resolves removing the given orphans, or all of them, without committing. */
-export async function previewRemoveOrphans(names?: string[]): Promise<TransactionPreview> {
+export async function previewRemoveOrphans(names?: string[], signal?: AbortSignal): Promise<TransactionPreview> {
   const args = names && names.length > 0 ? [names.map(n => sanitizeSearchInput(n)).join(",")] : [];
-  return runBackend<TransactionPreview>("preflight-remove-orphans", args);
+  return runBackend<TransactionPreview>("preflight-remove-orphans", args, { signal });
 }
 
 export interface PreviewTotals {
@@ -494,19 +503,180 @@ export function onSystemChanged(
 ): () => void {
   const entry = { listener, kinds };
   systemChangeListeners.add(entry);
-  if (!systemWatch) {
-    systemWatch = startSystemWatch({
-      ownActivity: () => activeTransaction !== null && activeTransaction.command !== EXTERNAL_COMMAND,
-      notify: () => notifySystemChanged("system"),
-    });
-  }
+  openSystemWatch();
   return () => {
     systemChangeListeners.delete(entry);
-    if (systemChangeListeners.size === 0 && systemWatch) {
-      systemWatch.close();
-      systemWatch = null;
-    }
+    closeSystemWatchIfUnused();
   };
+}
+
+function hasOwnActivity(): boolean {
+  return ownLockCalls > 0 || (activeTransaction !== null && activeTransaction.command !== EXTERNAL_COMMAND);
+}
+
+function openSystemWatch(): void {
+  if (systemWatch) return;
+  systemWatch = startSystemWatch({
+    ownActivity: hasOwnActivity,
+    notify: () => {
+      notifySystemChanged("system");
+      outsideRunRetries = 0;
+      queueOutsideRunCheck(true);
+    },
+  });
+  if (systemWatch && newestSeenTransaction === undefined) queueOutsideRunCheck(false);
+}
+
+function closeSystemWatchIfUnused(): void {
+  if (systemChangeListeners.size > 0 || outsideRunListeners.size > 0 || !systemWatch) return;
+  systemWatch.close();
+  systemWatch = null;
+  clearTimeout(outsideRunRetry);
+  // Changes made while closed are unseen, so the next open starts a new baseline.
+  newestSeenTransaction = undefined;
+}
+
+/**
+ * Transactions observed since the last dismissal. Counts include all observed
+ * activity because log timestamps cannot identify the initiating browser session.
+ */
+export interface OutsideRun {
+  /** Log timestamp of the newest transaction start, as History lists it. */
+  startTime: string;
+  command: string | null;
+  origin: TransactionOrigin | null;
+  counts: { upgraded: number; installed: number; removed: number; downgraded: number; reinstalled: number };
+  runs: number;
+  partial?: boolean;
+  /** Log timestamp of the oldest transaction start. */
+  firstStartTime: string;
+}
+
+type OutsideRunListener = (run: OutsideRun | null) => void;
+
+const OUTSIDE_RUN_RETRY_MS = 2000;
+const OUTSIDE_RUN_MAX_RETRIES = 150;
+const OUTSIDE_RUN_READ_LIMIT = 20;
+
+const outsideRunListeners = new Set<OutsideRunListener>();
+let outsideRun: OutsideRun | null = null;
+let newestSeenTransaction: string | undefined;
+let outsideRunChain: Promise<void> = Promise.resolve();
+let outsideRunRetry: ReturnType<typeof setTimeout> | undefined;
+let outsideRunRetries = 0;
+
+export function getOutsideRun(): OutsideRun | null {
+  return outsideRun;
+}
+
+export function dismissOutsideRun(): void {
+  if (!outsideRun) return;
+  setOutsideRun(null);
+}
+
+/** Subscribes to transactions observed while this page is open. */
+export function onOutsideRun(listener: OutsideRunListener): () => void {
+  outsideRunListeners.add(listener);
+  if (systemWatch) {
+    if (newestSeenTransaction === undefined) queueOutsideRunCheck(false);
+  } else {
+    openSystemWatch();
+  }
+  return () => {
+    outsideRunListeners.delete(listener);
+    closeSystemWatchIfUnused();
+  };
+}
+
+function setOutsideRun(run: OutsideRun | null): void {
+  outsideRun = run;
+  for (const listener of [...outsideRunListeners]) {
+    try {
+      listener(run);
+    } catch (listenerError) {
+      console.error("Outside run listener error:", listenerError);
+    }
+  }
+}
+
+function queueOutsideRunCheck(publish: boolean): void {
+  outsideRunChain = outsideRunChain.then(() => checkOutsideRun(publish));
+}
+
+function transactionIdentity(group: LogGroup): string {
+  return JSON.stringify([group.id.replace(/-\d+$/, ""), group.start_time, group.command, group.origin]);
+}
+
+function toOutsideRun(group: LogGroup): OutsideRun {
+  return {
+    startTime: group.start_time,
+    command: group.command,
+    origin: group.origin,
+    counts: {
+      upgraded: group.upgraded_count,
+      installed: group.installed_count,
+      removed: group.removed_count,
+      downgraded: group.downgraded_count,
+      reinstalled: group.reinstalled_count,
+    },
+    runs: group.part === undefined || group.part === 1 ? 1 : 0,
+    partial: false,
+    firstStartTime: group.start_time,
+  };
+}
+
+function mergeOutsideRuns(newer: OutsideRun, older: OutsideRun): OutsideRun {
+  const counts = { ...newer.counts };
+  for (const key of Object.keys(counts) as (keyof OutsideRun["counts"])[]) counts[key] += older.counts[key];
+  return { ...newer, counts, runs: newer.runs + older.runs, firstStartTime: older.firstStartTime, partial: newer.partial || older.partial };
+}
+
+/** Reads completed transactions; the initial read establishes a baseline. */
+export async function checkOutsideRun(publish = true): Promise<void> {
+  if (outsideRunListeners.size === 0) return;
+  clearTimeout(outsideRunRetry);
+  try {
+    if (publish) {
+      const lock = await checkLock();
+      if (lock.locked && !lock.stale) {
+        // The run is still going; pacman logs its last line before it unlocks.
+        if (outsideRunRetries++ < OUTSIDE_RUN_MAX_RETRIES) {
+          outsideRunRetry = setTimeout(() => queueOutsideRunCheck(true), OUTSIDE_RUN_RETRY_MS);
+        }
+        return;
+      }
+    }
+    const { groups, total_groups } = await getGroupedHistory({ limit: OUTSIDE_RUN_READ_LIMIT });
+    const newest = groups[0] ? transactionIdentity(groups[0]) : "";
+    const seen = newestSeenTransaction;
+    if (seen === newest) return;
+    newestSeenTransaction = newest;
+    if (!publish || seen === undefined) return;
+    const unseen: OutsideRun[] = [];
+    const transactions = new Set<string>();
+    const parts = new Set<string>();
+    let reachedBaseline = false;
+    for (const group of groups) {
+      const identity = transactionIdentity(group);
+      if (identity === seen) {
+        reachedBaseline = true;
+        break;
+      }
+      if (parts.has(group.id)) continue;
+      parts.add(group.id);
+      const run = toOutsideRun(group);
+      run.runs = transactions.has(identity) ? 0 : 1;
+      transactions.add(identity);
+      unseen.push(run);
+    }
+    if (unseen.length === 0) return;
+    let run = unseen.reduce(mergeOutsideRuns);
+    run.partial = total_groups > groups.length && !reachedBaseline;
+    if (outsideRun) run = mergeOutsideRuns(run, outsideRun);
+    setOutsideRun(run);
+  } catch {
+    // Best effort: views were already told to refresh.
+  }
 }
 
 function notifySystemChanged(kind: SystemChangeKind): void {
@@ -568,6 +738,7 @@ function beginOwnLockCall(): void {
 function endOwnLockCall(): void {
   ownLockCalls--;
   ownRunEpoch++;
+  if (!hasOwnActivity()) queueOutsideRunCheck(true);
 }
 const activeTransactionListeners = new Set<ActiveTransactionListener>();
 
@@ -673,7 +844,7 @@ function runStreamingBackend(
     clearProgressTimer();
     if (registered) {
       ownRunEpoch++;
-          transactionOutcome = {
+      transactionOutcome = {
         command,
         target: registered.target,
         status: success ? "success" : failureCode === "cancelled" ? "stopped" : "failed",
@@ -698,7 +869,10 @@ function runStreamingBackend(
     }
 
     const changeKind = SYSTEM_CHANGE_COMMANDS[command];
-    if (changeKind) notifySystemChanged(changeKind);
+    if (changeKind) {
+      notifySystemChanged(changeKind);
+      queueOutsideRunCheck(true);
+    }
   };
 
   // A handler that returns Err (rather than emitting a complete event) makes
@@ -952,6 +1126,39 @@ export function initKeyring(callbacks: UpgradeCallbacks): StreamingHandle {
   return runStreamingBackend("init-keyring", [], callbacks, { gracefulCancel: true });
 }
 
+export function normalizeFingerprint(input: string): string | null {
+  const hex = input.replace(/\s+/g, "").replace(/^0x/i, "");
+  return /^[0-9a-f]{40}$/i.test(hex) ? hex.toUpperCase() : null;
+}
+
+export const RECEIVE_KEY_BACKEND_TIMEOUT_S = 90;
+export const RECEIVE_KEY_TIMEOUT_MS = 120_000;
+
+async function runKeyAction(command: "receive-key" | "lsign-key", args: string[], signal?: AbortSignal): Promise<KeyActionResponse> {
+  if (activeTransaction) throw new BackendError("Another package operation is still running.", "database_locked");
+  const registered: ActiveTransaction = { command, target: args[0], startedAt: Date.now() };
+  ownRunEpoch++;
+  setActiveTransaction(registered);
+  try {
+    return await runBackend<KeyActionResponse>(command, args, {
+      superuser: "require", timeoutMs: RECEIVE_KEY_TIMEOUT_MS, signal, gracefulCancel: true,
+    });
+  } finally {
+    ownRunEpoch++;
+    if (activeTransaction === registered) setActiveTransaction(null);
+    notifySystemChanged("system");
+    queueOutsideRunCheck(true);
+  }
+}
+
+export function receiveKey(fingerprint: string, keyserver?: string, signal?: AbortSignal): Promise<KeyActionResponse> {
+  return runKeyAction("receive-key", keyserver ? [fingerprint, keyserver] : [fingerprint], signal);
+}
+
+export function lsignKey(fingerprint: string, signal?: AbortSignal): Promise<KeyActionResponse> {
+  return runKeyAction("lsign-key", [fingerprint], signal);
+}
+
 export async function listOrphans(): Promise<OrphanResponse> {
   return runBackend<OrphanResponse>("list-orphans", [], { superuser: "none" });
 }
@@ -1000,6 +1207,7 @@ export async function removeIgnoredPackage(name: string): Promise<IgnoreOperatio
 }
 
 export interface CacheParams {
+  signal?: AbortSignal;
   offset?: number;
   limit?: number;
   search?: string;
@@ -1009,7 +1217,7 @@ export interface CacheParams {
 
 export async function getCacheInfo(params: CacheParams = {}): Promise<CacheInfo> {
   const { offset = 0, limit = 50, search = "", sortBy = "name", sortDir = "asc" } = params;
-  return runBackend<CacheInfo>("cache-info", [String(offset), String(limit), sanitizeSearchInput(search), sortBy, sortDir], { superuser: "none" });
+  return runBackend<CacheInfo>("cache-info", [String(offset), String(limit), sanitizeSearchInput(search), sortBy, sortDir], { superuser: "none", signal: params.signal });
 }
 
 export async function getCacheFiles(name: string, offset = 0, limit = 50): Promise<CacheFiles> {
@@ -1026,28 +1234,33 @@ export function cleanCache(callbacks: UpgradeCallbacks, keepVersions = 3, select
   return runStreamingBackend("clean-cache", [String(keepVersions), names.join(","), selection.mode], callbacks, { gracefulCancel: true });
 }
 
-export type HistoryFilterType = "all" | "upgraded" | "installed" | "removed";
+export async function previewCacheCleanup(keepVersions = 3, selection: CacheSelection = { mode: "all" }, signal?: AbortSignal): Promise<CacheCleanupPreview> {
+  const names = selection.mode === "all" ? [] : selection.names;
+  return runBackend<CacheCleanupPreview>("cache-cleanup-preview", [String(keepVersions), names.join(","), selection.mode],
+    { superuser: "none", signal });
+}
+
+export type HistoryFilterType = "all" | "upgraded" | "installed" | "removed" | "downgraded" | "reinstalled";
 
 export interface HistoryParams {
   offset?: number;
   limit?: number;
   filter?: HistoryFilterType;
   search?: string;
+  until?: string;
+  signal?: AbortSignal;
 }
 
 export async function getGroupedHistory(params: HistoryParams = {}): Promise<GroupedLogResponse> {
-  const { offset = 0, limit = 20, filter = "all", search = "" } = params;
-  return runBackend<GroupedLogResponse>("history-grouped", [
-    String(offset),
-    String(limit),
-    filter,
-    search,
-  ], { superuser: "none" });
+  const { offset = 0, limit = 20, filter = "all", search = "", until } = params;
+  return runBackend<GroupedLogResponse>("history-grouped", [String(offset), String(limit), filter, search, ...(until ? [until] : [])],
+    { superuser: "none", signal: params.signal });
 }
 
 export async function getHistory(params: HistoryParams = {}): Promise<LogResponse> {
-  const { offset = 0, limit = 20, filter = "all", search = "" } = params;
-  return runBackend<LogResponse>("history", [String(offset), String(limit), filter, search], { superuser: "none" });
+  const { offset = 0, limit = 20, filter = "all", search = "", until } = params;
+  return runBackend<LogResponse>("history", [String(offset), String(limit), filter, search, ...(until ? [until] : [])],
+    { superuser: "none", signal: params.signal });
 }
 
 export async function listDowngrades(packageName?: string): Promise<DowngradeResponse> {
@@ -1301,8 +1514,8 @@ export function testMirrors(
   });
 }
 
-export async function saveMirrorlist(mirrors: MirrorEntry[]): Promise<SaveMirrorlistResponse> {
-  return runBackend<SaveMirrorlistResponse>("save-mirrorlist", [JSON.stringify(mirrors)]);
+export async function saveMirrorlist(mirrors: MirrorEntry[], revision: string): Promise<SaveMirrorlistResponse> {
+  return runBackend<SaveMirrorlistResponse>("save-mirrorlist", [JSON.stringify(mirrors), revision], { superuser: "require" });
 }
 
 export type RefreshMirrorsSortBy = "score" | "delay" | "age";
@@ -1333,6 +1546,10 @@ export async function restoreMirrorBackup(timestamp: number): Promise<RestoreMir
   return runBackend<RestoreMirrorBackupResponse>("restore-mirror-backup", [String(timestamp)], { superuser: "require" });
 }
 
+export async function undoMirrorSave(timestamp: number, savedRevision: string): Promise<ConfigurationUndoResponse> {
+  return runBackend<ConfigurationUndoResponse>("undo-mirror-save", [String(timestamp), savedRevision], { superuser: "require" });
+}
+
 export async function deleteMirrorBackup(timestamp: number): Promise<RestoreMirrorBackupResponse> {
   return runBackend<RestoreMirrorBackupResponse>("delete-mirror-backup", [String(timestamp)], { superuser: "require" });
 }
@@ -1349,12 +1566,19 @@ export async function markNewsRead(link: string): Promise<void> {
   await runBackend<NewsReadState>("news-mark-read", [link], { superuser: "none" });
 }
 
+export async function markNewsUnread(link: string): Promise<void> {
+  await runBackend<NewsReadState>("news-mark-unread", [link], { superuser: "none" });
+}
+
 function makeDismissalApi(kind: string) {
   return {
     get: (): Promise<DismissalState> =>
       runBackend<DismissalState>("dismissal-state", [kind], { superuser: "none" }),
     mark: async (signature: string): Promise<void> => {
       await runBackend<DismissalState>("mark-dismissed", [kind, signature], { superuser: "none" });
+    },
+    restore: async (signature: string | null, expectedSignature: string): Promise<void> => {
+      await runBackend<DismissalState>("restore-dismissed", [kind, expectedSignature, ...(signature ? [signature] : [])], { superuser: "none" });
     },
   };
 }
@@ -1446,6 +1670,10 @@ export async function listRepoBackups(): Promise<RepoBackupListResponse> {
 
 export async function restoreRepoBackup(timestamp: number): Promise<RestoreRepoBackupResponse> {
   return runBackend<RestoreRepoBackupResponse>("restore-repo-backup", [String(timestamp)], { superuser: "require" });
+}
+
+export async function undoRepoSave(timestamp: number, savedRevision: string): Promise<ConfigurationUndoResponse> {
+  return runBackend<ConfigurationUndoResponse>("undo-repo-save", [String(timestamp), savedRevision], { superuser: "require" });
 }
 
 export async function deleteRepoBackup(timestamp: number): Promise<RestoreRepoBackupResponse> {

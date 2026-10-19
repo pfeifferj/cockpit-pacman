@@ -43,6 +43,8 @@ export const mockPackageListResponse: PackageListResponse = {
 };
 
 export const mockUpdatesResponse: UpdatesResponse = {
+  last_sync_at: 1792200000,
+  oldest_database_at: 1792200000,
   updates: [
     {
       name: "linux",
@@ -241,11 +243,14 @@ export const mockSyncPackageDetails: SyncPackageDetails = {
 export const mockLogGroups: LogGroup[] = [
   {
     id: "group-0",
+    origin: "pacman",
     command: "pacman -Syu",
     start_time: "2026-01-22T10:30:00+0000",
     end_time: "2026-01-22T10:30:45+0000",
     entries: [
       {
+        command: null,
+        origin: "pacman",
         timestamp: "2026-01-22T10:30:45+0000",
         action: "upgraded",
         package: "linux",
@@ -253,6 +258,8 @@ export const mockLogGroups: LogGroup[] = [
         new_version: "6.18.5-arch1-1",
       },
       {
+        command: null,
+        origin: "pacman",
         timestamp: "2026-01-22T10:30:30+0000",
         action: "upgraded",
         package: "linux-firmware",
@@ -260,6 +267,8 @@ export const mockLogGroups: LogGroup[] = [
         new_version: "20260120.abc123-1",
       },
       {
+        command: null,
+        origin: "pacman",
         timestamp: "2026-01-22T10:30:00+0000",
         action: "upgraded",
         package: "systemd",
@@ -275,11 +284,14 @@ export const mockLogGroups: LogGroup[] = [
   },
   {
     id: "group-1",
+    origin: "pacman",
     command: "pacman -S firefox",
     start_time: "2026-01-21T14:15:00+0000",
     end_time: "2026-01-21T14:15:30+0000",
     entries: [
       {
+        command: null,
+        origin: "pacman",
         timestamp: "2026-01-21T14:15:30+0000",
         action: "installed",
         package: "neovim",
@@ -287,6 +299,8 @@ export const mockLogGroups: LogGroup[] = [
         new_version: "0.10.0-1",
       },
       {
+        command: null,
+        origin: "pacman",
         timestamp: "2026-01-21T14:15:00+0000",
         action: "installed",
         package: "tree-sitter",
@@ -302,11 +316,14 @@ export const mockLogGroups: LogGroup[] = [
   },
   {
     id: "group-2",
+    origin: "pacman",
     command: null,
     start_time: "2026-01-20T09:00:00+0000",
     end_time: "2026-01-20T09:00:00+0000",
     entries: [
       {
+        command: null,
+        origin: "pacman",
         timestamp: "2026-01-20T09:00:00+0000",
         action: "removed",
         package: "deprecated-package",

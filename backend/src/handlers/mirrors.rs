@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use crate::backups::BackupStore;
+use crate::backups::{BackupStore, check_current_revision, file_revision, read_snapshot};
 use crate::models::{
     BackupSource, MirrorBackup, MirrorBackupListResponse, MirrorEntry, MirrorListResponse,
     MirrorStatus, MirrorStatusResponse, MirrorTestResult, RefreshMirrorsResponse,
@@ -26,12 +26,8 @@ const MIN_CONTENT_LENGTH: u64 = 100_000;
 pub fn list_mirrors() -> Result<()> {
     let path = Path::new(MIRRORLIST_PATH);
 
-    if !path.exists() {
-        anyhow::bail!("Mirrorlist not found at {}", MIRRORLIST_PATH);
-    }
-
-    let file = fs::File::open(path)?;
-    let reader = BufReader::new(file);
+    let (contents, revision) = read_snapshot(path)?;
+    let reader = BufReader::new(contents.as_slice());
     let mut mirrors = Vec::new();
     let mut pending_comment: Option<String> = None;
 
@@ -76,16 +72,16 @@ pub fn list_mirrors() -> Result<()> {
         }
     }
 
-    let metadata = fs::metadata(path)?;
-    let last_modified = metadata
-        .modified()
+    let last_modified = fs::metadata(path)
         .ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_secs() as i64);
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs() as i64);
 
     let enabled_count = mirrors.iter().filter(|m| m.enabled).count();
 
     let response = MirrorListResponse {
+        revision,
         total: mirrors.len(),
         enabled_count,
         mirrors,
@@ -320,7 +316,7 @@ const BACKUP_NAME_PREFIX: &str = "mirrorlist.backup.";
 const BACKUP_PREFIX: &str = "/etc/pacman.d/mirrorlist.backup.";
 const BACKUP_META_PATH: &str = "/etc/pacman.d/.mirrorlist-backups.meta.json";
 
-pub fn save_mirrorlist(mirrors: &[MirrorEntry]) -> Result<()> {
+pub fn save_mirrorlist(mirrors: &[MirrorEntry], expected_revision: &str) -> Result<()> {
     if !mirrors.iter().any(|m| m.enabled) {
         anyhow::bail!(
             "Invalid mirror list: no enabled mirrors, which would leave pacman \
@@ -355,10 +351,13 @@ pub fn save_mirrorlist(mirrors: &[MirrorEntry]) -> Result<()> {
 
     let store = backup_store();
     let result = crate::util::with_file_lock(store.lock, || {
+        check_current_revision(store.target, expected_revision)?;
         store.replace_locked(content.as_bytes(), BackupSource::Manual)
     })?;
 
     emit_json(&SaveMirrorlistResponse {
+        revision: file_revision(content.as_bytes()),
+        backup_timestamp: result.backup_timestamp,
         success: true,
         backup_path: result.backup_path,
         message: format!("Saved {} mirrors to {}", mirrors.len(), MIRRORLIST_PATH),
@@ -434,16 +433,24 @@ pub fn restore_mirror_backup(timestamp: i64) -> Result<()> {
     let result = backup_store().restore(timestamp, ensure_mirrors_restorable)?;
     emit_json(&RestoreMirrorBackupResponse {
         success: true,
+        revision: Some(result.revision),
+        backup_timestamp: result.backup_timestamp,
         backup_path: result.backup_path,
         message: format!("Restored mirrorlist from backup {BACKUP_PREFIX}{timestamp}"),
         warnings: result.warnings,
     })
 }
 
+pub fn undo_mirror_save(timestamp: i64, expected_revision: &str) -> Result<()> {
+    emit_json(&backup_store().undo(timestamp, expected_revision, ensure_mirrors_restorable)?)
+}
+
 pub fn delete_mirror_backup(timestamp: i64) -> Result<()> {
     let warnings = backup_store().delete(timestamp)?;
     emit_json(&RestoreMirrorBackupResponse {
         success: true,
+        revision: None,
+        backup_timestamp: None,
         backup_path: None,
         message: format!("Deleted backup {BACKUP_PREFIX}{timestamp}"),
         warnings,

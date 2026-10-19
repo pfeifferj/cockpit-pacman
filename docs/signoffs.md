@@ -36,6 +36,13 @@ secret-tool lookup service cockpit-pacman type archweb
 
 Should print your ArchWeb password. Once configured, reload cockpit-pacman and the Signoffs tab will appear.
 
+## Loading errors
+
+The tab stays visible when stored credentials cannot be read or ArchWeb
+rejects them. Unlock the keyring or replace the credentials, then select
+Try again. A missing credential item or unavailable Secret Service hides
+the tab at page load.
+
 ## How it works
 
 On page load, the cockpit-pacman frontend queries the Secret Service via D-Bus for an item matching `{service: "cockpit-pacman", type: "archweb"}`. If found, credentials are read from the keyring and passed to the backend over stdin, base64-encoded, on each signoff operation. Never as a command-line argument: `/proc/<pid>/cmdline` is world-readable. The backend never stores or caches credentials.

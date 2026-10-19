@@ -58,6 +58,10 @@ pub struct PackageListResponse {
 #[derive(Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct UpdatesResponse {
+    #[ts(type = "number | null")]
+    pub last_sync_at: Option<i64>,
+    #[ts(type = "number | null")]
+    pub oldest_database_at: Option<i64>,
     pub updates: Vec<UpdateInfo>,
     pub warnings: Vec<String>,
 }
@@ -541,6 +545,8 @@ pub struct CachePackage {
 #[derive(Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct CacheGroup {
+    pub installed_version: Option<String>,
+    pub downgrade_version: Option<String>,
     pub name: String,
     pub latest_version: String,
     pub file_count: usize,
@@ -551,6 +557,9 @@ pub struct CacheGroup {
 #[derive(Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct CacheInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub free_space: Option<CacheFreeSpace>,
     #[ts(type = "number")]
     pub total_size: i64,
     pub package_count: usize,
@@ -571,6 +580,8 @@ pub struct CacheFiles {
 #[derive(Serialize, Deserialize, Clone, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct LogEntry {
+    pub command: Option<String>,
+    pub origin: Option<TransactionOrigin>,
     pub timestamp: String,
     pub action: String,
     pub package: String,
@@ -592,6 +603,7 @@ pub struct LogResponse {
 #[derive(Serialize, Deserialize, Clone, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct LogGroup {
+    pub origin: Option<TransactionOrigin>,
     pub id: String,
     pub command: Option<String>,
     pub start_time: String,
@@ -753,6 +765,7 @@ pub struct MirrorEntry {
 #[derive(Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct MirrorListResponse {
+    pub revision: String,
     pub mirrors: Vec<MirrorEntry>,
     pub total: usize,
     pub enabled_count: usize,
@@ -800,6 +813,9 @@ pub struct MirrorTestResult {
 #[derive(Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct SaveMirrorlistResponse {
+    pub revision: String,
+    #[ts(type = "number | null")]
+    pub backup_timestamp: Option<i64>,
     pub success: bool,
     pub backup_path: Option<String>,
     pub message: String,
@@ -850,6 +866,9 @@ pub struct MirrorBackupListResponse {
 #[derive(Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct RestoreMirrorBackupResponse {
+    pub revision: Option<String>,
+    #[ts(type = "number | null")]
+    pub backup_timestamp: Option<i64>,
     pub success: bool,
     pub backup_path: Option<String>,
     pub message: String,
@@ -1046,6 +1065,7 @@ pub struct RepoEntry {
 #[derive(Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct ListReposResponse {
+    pub not_synced: Vec<String>,
     pub repos: Vec<RepoEntry>,
     pub revision: String,
 }
@@ -1053,6 +1073,8 @@ pub struct ListReposResponse {
 #[derive(Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct SaveReposResponse {
+    #[ts(type = "number | null")]
+    pub backup_timestamp: Option<i64>,
     pub success: bool,
     pub backup_path: Option<String>,
     pub message: String,
@@ -1078,3 +1100,100 @@ impl std::fmt::Display for InvalidInput {
 }
 
 impl std::error::Error for InvalidInput {}
+
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct ConfigurationUndoResponse {
+    pub success: bool,
+    pub revision: String,
+    #[ts(type = "number | null")]
+    pub backup_timestamp: Option<i64>,
+    pub backup_path: Option<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct KeyActionResponse {
+    pub key: KeyringKey,
+}
+
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct CacheCleanupPreview {
+    pub files: usize,
+    #[ts(type = "number")]
+    pub bytes: u64,
+}
+
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct CacheFreeSpace {
+    pub mount: String,
+    #[ts(type = "number")]
+    pub free_bytes: u64,
+}
+
+pub const RUN_LOG_PREFIX: &str = "COCKPIT-PACMAN";
+const RUN_LOG_MAX_TARGETS: usize = 5;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunOrigin {
+    Cockpit,
+    Scheduled,
+}
+
+impl RunOrigin {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RunOrigin::Cockpit => "cockpit",
+            RunOrigin::Scheduled => "scheduled",
+        }
+    }
+}
+
+pub struct RunCommand {
+    pub verb: &'static str,
+    pub targets: Vec<String>,
+    pub origin: RunOrigin,
+}
+
+impl RunCommand {
+    pub fn cockpit(verb: &'static str, targets: Vec<String>) -> Self {
+        Self {
+            verb,
+            targets,
+            origin: RunOrigin::Cockpit,
+        }
+    }
+
+    pub fn log_message(&self) -> String {
+        let mut command = format!("cockpit-pacman {}", self.verb);
+        for target in self.targets.iter().take(RUN_LOG_MAX_TARGETS) {
+            command.push(' ');
+            command.extend(target.chars().map(|c| {
+                if c.is_ascii_alphanumeric() || "@._+-:~".contains(c) {
+                    c
+                } else {
+                    '_'
+                }
+            }));
+        }
+        if self.targets.len() > RUN_LOG_MAX_TARGETS {
+            command.push_str(&format!(
+                " and {} more",
+                self.targets.len() - RUN_LOG_MAX_TARGETS
+            ));
+        }
+        format!("Running '{}' ({})", command, self.origin.as_str())
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+#[serde(rename_all = "lowercase")]
+pub enum TransactionOrigin {
+    Pacman,
+    Cockpit,
+    Scheduled,
+}

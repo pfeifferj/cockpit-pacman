@@ -8,7 +8,8 @@ export interface PackmanPage {
   page: Page;
   frame: FrameLocator;
   panel: Locator;
-  navigateToPlugin: () => Promise<void>;
+  navigateToPlugin: (route?: string) => Promise<void>;
+  tab: (tabName: string) => Locator;
   switchTab: (tabName: string) => Promise<void>;
   selectFilter: (label: string) => Promise<void>;
   waitForLoading: () => Promise<void>;
@@ -25,15 +26,19 @@ export const test = base.extend<{ pacman: PackmanPage }>({
       frame,
       panel,
 
-      async navigateToPlugin() {
+      async navigateToPlugin(route?: string) {
         await authenticate(page);
-        await page.goto(SHELL_PATH);
+        await page.goto(route ? `${SHELL_PATH}#${route}` : SHELL_PATH);
         await frame.locator('[role="tablist"]').first().waitFor({ timeout: 60000 });
       },
 
+      tab(tabName: string) {
+        const name = new RegExp(`^${tabName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\s|$)`, "i");
+        return frame.getByRole("tab", { name });
+      },
+
       async switchTab(tabName: string) {
-        const name = new RegExp(`^${tabName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i");
-        await frame.getByRole("tab", { name }).click();
+        await pacman.tab(tabName).click();
         await page.waitForTimeout(500);
       },
 

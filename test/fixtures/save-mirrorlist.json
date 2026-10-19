@@ -1,5 +1,7 @@
 {
   "success": true,
   "backup_path": "/etc/pacman.d/mirrorlist.bak",
-  "message": "Mirrorlist saved successfully"
+  "message": "Mirrorlist saved successfully",
+  "revision": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "backup_timestamp": 1704067200
 }

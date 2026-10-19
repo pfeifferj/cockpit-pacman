@@ -285,3 +285,17 @@ mod tests {
         assert!(response.results[1].success);
     }
 }
+
+#[cfg(test)]
+mod authentication_tests {
+    #[test]
+    fn rejected_credentials_keep_their_type_through_context() {
+        let rejected = anyhow::Error::from(archweb_client::AuthRejected).context("signoff-list");
+        assert_eq!(
+            crate::util::classify_error(&rejected),
+            Some("permission_denied")
+        );
+        let timeout = anyhow::Error::from(arch_http_client::Error::Timeout).context("login failed");
+        assert_eq!(crate::util::classify_error(&timeout), Some("timeout"));
+    }
+}

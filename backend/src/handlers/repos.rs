@@ -1,11 +1,10 @@
 use anyhow::Result;
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 use ts_rs::TS;
 
-use crate::backups::{BackupResult, BackupStore};
+use crate::backups::{BackupResult, BackupStore, check_revision, file_revision};
 use crate::models::{
     BackupSource, ListReposResponse, RepoDirectiveFull, RepoEntry, SaveReposResponse,
 };
@@ -327,8 +326,14 @@ pub fn list_repos() -> Result<()> {
     let conf = parse_conf(&content);
 
     let repos: Vec<RepoEntry> = conf.repos.iter().map(repo_section_to_entry).collect();
+    let sync_dir = crate::handlers::lock::db_lock_path().with_file_name("sync");
 
     emit_json(&ListReposResponse {
+        not_synced: repos
+            .iter()
+            .filter(|r| r.enabled && !sync_dir.join(format!("{}.db", r.name)).is_file())
+            .map(|r| r.name.clone())
+            .collect(),
         repos,
         revision: revision(&content),
     })
@@ -348,7 +353,7 @@ fn ensure_repos_usable(repos: &[RepoEntry]) -> Result<()> {
 }
 
 fn revision(content: &str) -> String {
-    format!("{:x}", Sha256::digest(content.as_bytes()))
+    file_revision(content.as_bytes())
 }
 
 fn backup_store() -> BackupStore<'static> {
@@ -366,6 +371,7 @@ pub fn save_repos(repos: &[RepoEntry], expected_revision: &str) -> Result<()> {
     emit_json(&SaveReposResponse {
         success: true,
         backup_path: result.backup_path,
+        backup_timestamp: result.backup_timestamp,
         message: format!("Saved {} repositories to {}", repos.len(), PACMAN_CONF_PATH),
         revision,
         warnings: result.warnings,
@@ -379,8 +385,16 @@ fn save_repos_to(
 ) -> Result<(BackupResult, String)> {
     ensure_repos_usable(repos)?;
 
+    let mut seen = std::collections::HashSet::new();
     for entry in repos {
         validate_repo_name(&entry.name)?;
+        if ["options", "local"].contains(&entry.name.as_str()) || !seen.insert(&entry.name) {
+            return Err(crate::models::InvalidInput(format!(
+                "Repository [{}] is reserved or listed more than once",
+                entry.name
+            ))
+            .into());
+        }
         if let Some(ref sig) = entry.sig_level {
             validate_directive_value(sig)?;
         }
@@ -398,10 +412,7 @@ fn save_repos_to(
 
     crate::util::with_file_lock(store.lock, || {
         let original = fs::read_to_string(store.target)?;
-        anyhow::ensure!(
-            revision(&original) == expected_revision,
-            "Repository configuration changed since it was loaded. Reload repositories before saving."
-        );
+        check_revision(original.as_bytes(), expected_revision)?;
         let mut conf = parse_conf(&original);
 
         let mut preserved: std::collections::HashMap<String, RepoSection> =
@@ -464,6 +475,9 @@ pub struct RepoBackupListResponse {
 #[derive(Serialize, TS)]
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct RestoreRepoBackupResponse {
+    pub revision: Option<String>,
+    #[ts(type = "number | null")]
+    pub backup_timestamp: Option<i64>,
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backup_path: Option<String>,
@@ -511,16 +525,24 @@ pub fn restore_repo_backup(timestamp: i64) -> Result<()> {
     let result = backup_store().restore(timestamp, ensure_repos_restorable)?;
     emit_json(&RestoreRepoBackupResponse {
         success: true,
+        revision: Some(result.revision),
+        backup_timestamp: result.backup_timestamp,
         backup_path: result.backup_path,
         message: format!("Restored pacman.conf from backup {BACKUP_PREFIX}{timestamp}"),
         warnings: result.warnings,
     })
 }
 
+pub fn undo_repo_save(timestamp: i64, expected_revision: &str) -> Result<()> {
+    emit_json(&backup_store().undo(timestamp, expected_revision, ensure_repos_restorable)?)
+}
+
 pub fn delete_repo_backup(timestamp: i64) -> Result<()> {
     let warnings = backup_store().delete(timestamp)?;
     emit_json(&RestoreRepoBackupResponse {
         success: true,
+        revision: None,
+        backup_timestamp: None,
         backup_path: None,
         message: format!("Deleted backup {BACKUP_PREFIX}{timestamp}"),
         warnings,
@@ -684,6 +706,29 @@ mod tests {
         backup_store, ensure_repos_restorable, parse_conf, repo_section_to_entry, revision,
         save_repos_to,
     };
+
+    #[test]
+    fn reserved_and_duplicate_repositories_fail_before_disk_access() {
+        for names in [vec!["options"], vec!["local"], vec!["core", "core"]] {
+            let repos: Vec<_> = names
+                .into_iter()
+                .map(|name| crate::models::RepoEntry {
+                    name: name.into(),
+                    enabled: true,
+                    sig_level: None,
+                    directives: vec![crate::models::RepoDirectiveFull {
+                        directive_type: "Include".into(),
+                        value: "/etc/pacman.d/mirrorlist".into(),
+                        enabled: true,
+                    }],
+                })
+                .collect();
+            let error = save_repos_to(&repos, "revision", &backup_store())
+                .err()
+                .unwrap();
+            assert!(error.is::<crate::models::InvalidInput>());
+        }
+    }
 
     #[test]
     fn a_stale_save_preserves_external_edits_and_a_fresh_save_can_delete_them() {

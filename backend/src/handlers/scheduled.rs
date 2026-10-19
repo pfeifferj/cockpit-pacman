@@ -721,7 +721,13 @@ pub fn scheduled_run() -> Result<()> {
 
     let _inhibitor = ShutdownInhibitor::take("Applying scheduled package upgrade");
 
-    let outcome = match run_sysupgrade(&mut handle, &_timeout_guard, Some(&flags), None) {
+    let outcome = match run_sysupgrade(
+        &mut handle,
+        &_timeout_guard,
+        Some(&flags),
+        None,
+        crate::models::RunOrigin::Scheduled,
+    ) {
         Ok(outcome) => outcome,
         Err(e) => {
             let entry = LogEntry::new(

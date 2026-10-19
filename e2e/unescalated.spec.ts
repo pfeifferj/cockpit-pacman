@@ -25,7 +25,7 @@ test.describe("unescalated session", () => {
 
     await frame.getByRole("tab", { name: "History", exact: true }).click();
     await panel.getByRole("button", { name: "Flat", exact: true }).click();
-    await panel.getByPlaceholder("Filter by package name...").fill("htop");
+    await panel.getByLabel("Filter history by package name", { exact: true }).fill("htop");
     const history = panel.getByRole("grid", { name: "Package history (flat)" });
     await expect(history.locator("tbody tr").first()).toContainText("htop");
     await expect(history.locator("tbody tr").first()).toContainText(/installed|upgraded|downgraded|reinstalled/);
@@ -62,7 +62,8 @@ test.describe("unescalated session", () => {
     for (const warning of status.warnings) await expect(frame.getByText(warning, { exact: true })).toBeVisible();
     if (status.total) {
       await expect(frame.getByText(`${status.total} keys in keyring`, { exact: true })).toBeVisible();
-      await expect(frame.getByRole("grid").locator("tbody tr").first()).toContainText(status.keys[0].fingerprint);
+      const firstKey = frame.getByRole("grid").locator("tbody tr").first();
+      await expect.poll(async () => (await firstKey.innerText()).replace(/\s/g, "")).toContain(status.keys[0].fingerprint);
     } else {
       expect(status.warnings.length).toBeGreaterThan(0);
     }

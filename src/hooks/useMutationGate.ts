@@ -40,6 +40,8 @@ export function transactionLabel({ command, target }: ActiveTransaction): string
     case "downgrade":
     case "downgrade-archive": return `Downgrading ${pkg}`;
     case "clean-cache": return "A cache clean";
+    case "receive-key": return "A key import";
+    case "lsign-key": return "Local key signing";
     case "refresh-keyring": return "A key refresh";
     case "init-keyring": return "Keyring initialization";
     default: return "A package transaction";

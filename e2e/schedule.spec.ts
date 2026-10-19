@@ -18,10 +18,28 @@ test.describe("Scheduled upgrades", () => {
     }
   });
 
+  test("keeps the draft on close until it is discarded", async ({ pacman }) => {
+    await pacman.panel.getByRole("button", { name: "Manage Schedule" }).click();
+    const modal = pacman.frame.getByRole("dialog", { name: "Scheduled upgrades" });
+    await expect(modal.locator("#schedule-preset")).toHaveValue("daily");
+    await modal.locator("#schedule-preset").selectOption("weekly");
+    await modal.getByRole("contentinfo").getByRole("button", { name: "Close", exact: true }).click();
+    await expect(modal.getByText("Discard changes to the schedule?")).toBeVisible();
+    await modal.getByRole("button", { name: "Keep editing", exact: true }).click();
+    await expect(modal.locator("#schedule-preset")).toHaveValue("weekly");
+    const unchanged = JSON.parse(await guestCommand(pacman.frame, [BACKEND, "get-schedule"])) as ScheduleConfig;
+    expect(unchanged.schedule).toBe("daily");
+    await modal.getByLabel("Close", { exact: true }).click();
+    await modal.getByRole("button", { name: "Discard changes", exact: true }).click();
+    await expect(modal).toBeHidden();
+    await pacman.panel.getByRole("button", { name: "Manage Schedule" }).click();
+    await expect(modal.locator("#schedule-preset")).toHaveValue("daily");
+  });
+
   test("loads saved settings, persists edits and shows a real scheduled run", async ({ pacman }) => {
     await pacman.panel.getByRole("button", { name: "Manage Schedule" }).click();
     let modal = pacman.frame.getByRole("dialog");
-    await expect(modal.getByRole("heading", { name: "Scheduled Upgrades" })).toBeVisible();
+    await expect(modal.getByRole("heading", { name: "Scheduled upgrades" })).toBeVisible();
     await expect(modal.locator("#schedule-enabled")).toBeChecked();
     await expect(modal.locator("#schedule-mode")).toHaveValue("check");
     await expect(modal.locator("#schedule-preset")).toHaveValue("daily");
@@ -32,10 +50,9 @@ test.describe("Scheduled upgrades", () => {
     await modal.locator("#schedule-mode").selectOption("check");
     await modal.locator("#schedule-preset").selectOption("weekly");
     await modal.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(modal.getByRole("heading", { name: /Saved/ })).toBeVisible();
+    await expect(modal).toBeHidden();
     const saved = JSON.parse(await guestCommand(pacman.frame, [BACKEND, "get-schedule"])) as ScheduleConfig;
     expect(saved).toMatchObject({ enabled: true, mode: "check", schedule: "weekly", max_packages: 5, timer_active: true });
-    await modal.getByRole("button", { name: "Close", exact: true }).last().click();
     await guestCommand(pacman.frame, ["systemctl", "start", "cockpit-pacman-scheduled.service"]);
     await pacman.panel.getByRole("button", { name: "Manage Schedule" }).click();
     modal = pacman.frame.getByRole("dialog");

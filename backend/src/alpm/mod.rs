@@ -34,7 +34,9 @@ pub fn get_handle() -> Result<Alpm> {
 
 pub fn sync_databases(handle: &mut Alpm, force: bool) -> Result<()> {
     crate::network::require_network()?;
-    handle.syncdbs_mut().update(force)?;
+    let result = handle.syncdbs_mut().update(force);
+    crate::handlers::log::log_sync_result(handle, &result);
+    result?;
     Ok(())
 }
 

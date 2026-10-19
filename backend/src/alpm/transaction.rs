@@ -60,6 +60,21 @@ impl<'a> TransactionGuard<'a> {
         })
     }
 
+    pub fn commit_logged(&mut self, run: &crate::models::RunCommand) -> Result<()> {
+        let _ = self.handle.log_action(
+            crate::models::RUN_LOG_PREFIX,
+            format!("{}\n", run.log_message()),
+        );
+        let result = self.commit();
+        if result.is_err() {
+            let _ = self.handle.log_action(
+                crate::models::RUN_LOG_PREFIX,
+                format!("{}\n", crate::handlers::log::RUN_INCOMPLETE_MESSAGE),
+            );
+        }
+        result
+    }
+
     pub fn commit(&mut self) -> Result<()> {
         if self
             .add()
@@ -98,6 +113,10 @@ impl<'a> TransactionGuard<'a> {
         self.handle.pkg_load(path, true, level)
     }
 
+    pub fn load_pkg_metadata(&self, path: &str) -> Result<alpm::LoadedPackage<'_>, alpm::Error> {
+        self.handle.pkg_load(path, false, alpm::SigLevel::NONE)
+    }
+
     pub fn add_pkg<P: alpm::IntoPkgAdd>(&self, pkg: P) -> Result<(), alpm::AddError<P>> {
         self.handle.trans_add_pkg(pkg)
     }
@@ -110,5 +129,43 @@ impl<'a> TransactionGuard<'a> {
 impl Drop for TransactionGuard<'_> {
     fn drop(&mut self) {
         let _ = self.handle.trans_release();
+    }
+}
+
+#[cfg(test)]
+mod log_tests {
+    use super::*;
+    use crate::handlers::log::{CockpitLine, cockpit_line};
+    #[test]
+    fn failed_commit_clears_its_attribution_without_changing_packages() {
+        let root = std::env::temp_dir().join(format!("transaction-origin-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("db/local")).unwrap();
+        let log = root.join("pacman.log");
+        let mut handle =
+            Alpm::new(root.to_str().unwrap(), root.join("db").to_str().unwrap()).unwrap();
+        handle.set_logfile(log.to_str().unwrap()).unwrap();
+        {
+            let mut tx = TransactionGuard::new(&mut handle, TransFlag::NONE).unwrap();
+            assert!(
+                tx.commit_logged(&crate::models::RunCommand::cockpit(
+                    "install",
+                    vec!["test".into()]
+                ))
+                .is_err()
+            );
+        }
+        let contents = std::fs::read_to_string(&log).unwrap();
+        let markers: Vec<_> = contents.lines().filter_map(cockpit_line).collect();
+        assert!(matches!(
+            markers.as_slice(),
+            [
+                CockpitLine::Run(_, crate::models::TransactionOrigin::Cockpit),
+                CockpitLine::Incomplete
+            ]
+        ));
+        assert!(!root.join("db/db.lck").exists());
+        assert!(handle.localdb().pkgs().is_empty());
+        drop(handle);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

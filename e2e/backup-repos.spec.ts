@@ -70,7 +70,7 @@ test.describe("configuration backups and stale repository saves", () => {
       await pacman.navigateToPlugin();
       const fixture = await prepare(pacman, kind);
       try {
-        const response: { success: boolean; backup_path: string; warnings: string[] } = JSON.parse(
+        const response: { success: boolean; backup_path: string; backup_timestamp: number; revision: string; warnings: string[] } = JSON.parse(
           await guestCommand(pacman.frame, ["sh", "-c", 'umask 077; exec "$@"', "restore-backup", BACKEND, `restore-${kind}-backup`, "1"]),
         );
         expect(response.success).toBe(true);
@@ -86,21 +86,10 @@ test.describe("configuration backups and stale repository saves", () => {
         expect(listing.warnings).toEqual([]);
         const undo = listing.backups.find(backup => response.backup_path.endsWith(`.${backup.timestamp}`));
         expect(undo?.source).toBe("auto");
-        if (kind === "mirror") {
-          await pacman.switchTab("Mirrors");
-          await pacman.panel.getByRole("button", { name: "Backup history", exact: true }).click();
-          const table = pacman.panel.getByRole("grid", { name: "Mirrorlist backups" });
-          await expect(table.locator("tbody tr")).toHaveCount(5);
-          const automatic = table.getByRole("row").filter({ hasText: "Automatic" });
-          await expect(automatic).toHaveCount(1);
-          await automatic.getByRole("button", { name: "Restore", exact: true }).click();
-          const dialog = pacman.frame.getByRole("dialog", { name: "Restore mirrorlist backup?" });
-          await dialog.getByRole("button", { name: "Restore", exact: true }).click();
-          await expect(dialog).not.toBeVisible();
-          await expect.poll(() => guestCommand(pacman.frame, ["cat", fixture.target])).toBe(fixture.current);
-        } else {
-          await guestCommand(pacman.frame, [BACKEND, `restore-${kind}-backup`, String(undo!.timestamp)]);
-        }
+        expect(response.backup_timestamp).toBe(undo!.timestamp);
+        const undone = JSON.parse(await guestCommand(pacman.frame, [BACKEND, `undo-${kind}-save`, String(response.backup_timestamp), response.revision]));
+        expect(undone.success).toBe(true);
+        expect(undone.revision).not.toBe(response.revision);
         expect(await guestCommand(pacman.frame, ["cat", fixture.target])).toBe(fixture.current);
       } finally {
         await cleanup(pacman, fixture);
@@ -108,20 +97,54 @@ test.describe("configuration backups and stale repository saves", () => {
     });
   }
 
+  for (const kind of ["mirror", "repo"] as const) {
+    test(`${kind} Undo preserves an intervening external edit`, async ({ pacman }) => {
+      await pacman.navigateToPlugin();
+      const fixture = await prepare(pacman, kind);
+      try {
+        const restored = JSON.parse(await guestCommand(pacman.frame, [BACKEND, `restore-${kind}-backup`, "1"]));
+        await guestCommand(pacman.frame, ["python3", "-c", "import sys; open(sys.argv[1], 'a').write('\\n# external edit\\n')", fixture.target]);
+        const changed = await guestCommand(pacman.frame, ["cat", fixture.target]);
+        const backups = await guestCommand(pacman.frame, [BACKEND, `list-${kind}-backups`]);
+        const failed = JSON.parse(await guestCommand(pacman.frame, ["python3", "-c", "import json, subprocess, sys; p = subprocess.run(sys.argv[1:], capture_output=True, text=True); print(json.dumps({'status': p.returncode, 'response': json.loads(p.stdout)}))", BACKEND, `undo-${kind}-save`, String(restored.backup_timestamp), restored.revision]));
+        expect(failed.response.code).toBe("config_changed");
+        expect(await guestCommand(pacman.frame, ["cat", fixture.target])).toBe(changed);
+        expect(await guestCommand(pacman.frame, [BACKEND, `list-${kind}-backups`])).toBe(backups);
+      } finally { await cleanup(pacman, fixture); }
+    });
+  }
+
+  test("creates an absent mirrorlist only from its missing-file revision", async ({ pacman }) => {
+    await pacman.navigateToPlugin();
+    const fixture = await prepare(pacman, "mirror");
+    try {
+      await guestCommand(pacman.frame, ["rm", fixture.target]);
+      const absent = JSON.parse(await guestCommand(pacman.frame, [BACKEND, "list-mirrors"]));
+      expect(absent.revision).toBe("missing");
+      expect(absent.mirrors).toEqual([]);
+      const mirrors = [{ url: "https://mirror.example.test/$repo/os/$arch", enabled: true, comment: null }];
+      const saved = JSON.parse(await guestCommand(pacman.frame, [BACKEND, "save-mirrorlist", JSON.stringify(mirrors), absent.revision]));
+      expect(saved.success).toBe(true);
+      expect(saved.backup_timestamp).toBeNull();
+      expect(saved.revision).not.toBe("missing");
+      const created = await guestCommand(pacman.frame, ["cat", fixture.target]);
+      const replacement = [{ ...mirrors[0], url: "https://unexpected.example.test/$repo/os/$arch" }];
+      const stale = JSON.parse(await guestCommand(pacman.frame, ["python3", "-c", "import json, subprocess, sys; p = subprocess.run(sys.argv[1:], capture_output=True, text=True); print(json.dumps({'status': p.returncode, 'response': json.loads(p.stdout)}))", BACKEND, "save-mirrorlist", JSON.stringify(replacement), absent.revision]));
+      expect(stale.response.code).toBe("config_changed");
+      expect(await guestCommand(pacman.frame, ["cat", fixture.target])).toBe(created);
+    } finally { await cleanup(pacman, fixture); }
+  });
+
   test("rejects a stale repository view and permits a fresh deliberate deletion", async ({ pacman }) => {
     await pacman.navigateToPlugin();
     const fixture = await prepare(pacman, "repo");
     try {
       await guestCommand(pacman.frame, ["chmod", "0644", fixture.target]);
-      await pacman.switchTab("Repositories");
-      const core = pacman.panel.getByLabel("Enable repository core", { exact: true });
-      await expect(core).toBeAttached();
       const stale: ListReposResponse = JSON.parse(await guestCommand(pacman.frame, [BACKEND, "list-repos"]));
       await guestCommand(pacman.frame, ["python3", "-c", "import sys; open(sys.argv[1], 'a').write('\\n[e2e-external]\\nServer = https://example.test/$repo/os/$arch\\n')", fixture.target]);
       const externallyChanged = await guestCommand(pacman.frame, ["cat", fixture.target]);
-      await pacman.panel.locator('label:has(input[aria-label="Enable repository core"])').click();
-      await pacman.panel.getByRole("button", { name: "Save Changes", exact: true }).click();
-      await expect(pacman.panel.getByRole("paragraph").filter({ hasText: /configuration changed since it was loaded/ })).toBeVisible();
+      const failure = JSON.parse(await guestCommand(pacman.frame, ["python3", "-c", "import json, subprocess, sys; p = subprocess.run(sys.argv[1:], capture_output=True, text=True); print(json.dumps({'status': p.returncode, 'response': json.loads(p.stdout)}))", BACKEND, "save-repos", JSON.stringify(stale.repos), stale.revision]));
+      expect(failure.response.code).toBe("config_changed");
       expect(await guestCommand(pacman.frame, ["cat", fixture.target])).toBe(externallyChanged);
 
       const fresh: ListReposResponse = JSON.parse(await guestCommand(pacman.frame, [BACKEND, "list-repos"]));

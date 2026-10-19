@@ -874,6 +874,7 @@ fn mirror_entry_shape() {
 #[test]
 fn mirror_list_response_last_modified_nullable() {
     let response = MirrorListResponse {
+        revision: "revision".into(),
         mirrors: vec![],
         total: 0,
         enabled_count: 0,
@@ -1049,6 +1050,8 @@ fn security_advisories_fixture_documents_absent_vs_present_fixed_version() {
 #[test]
 fn log_entry_old_new_version_nullable() {
     let installed = LogEntry {
+        command: None,
+        origin: None,
         timestamp: "2024-01-01T10:00:00+0000".into(),
         action: "installed".into(),
         package: "neovim".into(),
@@ -1060,6 +1063,8 @@ fn log_entry_old_new_version_nullable() {
     assert_string(&v, "new_version");
 
     let removed = LogEntry {
+        command: None,
+        origin: None,
         timestamp: "2024-01-01T10:01:00+0000".into(),
         action: "removed".into(),
         package: "vim".into(),
@@ -1074,6 +1079,7 @@ fn log_entry_old_new_version_nullable() {
 #[test]
 fn log_group_all_count_fields_present() {
     let group = LogGroup {
+        origin: None,
         part: None,
         parts: None,
         id: "group-0".into(),
@@ -1268,12 +1274,15 @@ fn pacnew_status_fixture_matches_struct_shape() {
 #[test]
 fn cache_info_shape() {
     let info = CacheInfo {
+        free_space: None,
         total_size: 524_288_000,
         package_count: 3,
         unique_packages: 1,
         multi_version_packages: 1,
         total: 1,
         groups: vec![CacheGroup {
+            installed_version: None,
+            downgrade_version: None,
             name: "linux".into(),
             latest_version: "6.7.0.arch1-1".into(),
             file_count: 3,
@@ -1463,6 +1472,8 @@ fn orphan_package_shape() {
 #[test]
 fn save_mirrorlist_response_shape() {
     let resp = SaveMirrorlistResponse {
+        revision: "revision".into(),
+        backup_timestamp: None,
         warnings: vec![],
         success: true,
         backup_path: Some("/etc/pacman.d/mirrorlist.bak".into()),
@@ -1474,6 +1485,8 @@ fn save_mirrorlist_response_shape() {
     assert_string(&v, "message");
 
     let failed = SaveMirrorlistResponse {
+        revision: "revision".into(),
+        backup_timestamp: None,
         warnings: vec![],
         success: false,
         backup_path: None,
@@ -1499,6 +1512,8 @@ fn refresh_mirrors_response_shape() {
 #[test]
 fn restore_mirror_backup_response_shape() {
     let resp = RestoreMirrorBackupResponse {
+        revision: None,
+        backup_timestamp: None,
         warnings: vec![],
         success: true,
         backup_path: Some("/var/backups/mirrorlist.1704067200".into()),

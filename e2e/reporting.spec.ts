@@ -106,12 +106,12 @@ test.describe("configuration and scheduled reporting faults", () => {
     await expect(pacman.frame.getByRole("checkbox", { name: /Check security advisories/ })).toHaveCount(0);
     await pacman.frame.getByRole("button", { name: "Overview settings", exact: true }).click();
     await pacman.frame.getByRole("button", { name: /Manage Ignored/i }).click();
-    const modal = pacman.frame.getByRole("dialog", { name: "Ignored Packages" });
+    const modal = pacman.frame.getByRole("dialog", { name: "Ignored packages" });
     await expect(modal.getByText("Saved package ignores are unavailable")).toBeVisible();
     await expect(modal.getByText("No ignored packages", { exact: true })).toHaveCount(0);
-    await expect(modal.getByRole("button", { name: "Ignore Package", exact: true })).toBeDisabled();
+    await expect(modal.getByRole("button", { name: "Ignore package", exact: true })).toBeDisabled();
     await command(pacman, ["chmod", "644", "/etc/cockpit-pacman/config.json"]);
-    await modal.getByRole("button", { name: "Retry", exact: true }).click();
+    await modal.getByRole("button", { name: "Try again", exact: true }).click();
     await expect(modal.getByRole("button", { name: "Unignore htop", exact: true })).toBeVisible();
     expect(JSON.parse(await command(pacman, [BACKEND, "get-settings"], false)).security_advisories).toBe(false);
     await modal.getByRole("button", { name: "Close", exact: true }).last().click();
@@ -199,7 +199,7 @@ WRITER
     expect(latest.success).toBe(true);
     expect(latest.packages_checked).toBeNull();
     await pacman.page.reload();
-    await expect(pacman.panel.getByRole("heading", { name: /Scheduled run record unavailable/ })).toBeVisible();
+    await expect(pacman.panel.getByRole("heading", { name: /Scheduled upgrade outcome was not recorded/ })).toBeVisible();
     expect((await journalSince(pacman, cursor)).filter(priority => priority === 4).length).toBeGreaterThan(0);
   });
   test("journals a failed background news refresh while showing the cached item", async ({ pacman }) => {

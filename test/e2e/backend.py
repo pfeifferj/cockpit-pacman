@@ -22,12 +22,12 @@ if proxy_marker.exists():
     for name, path in [('NEWS', '/news'), ('SECURITY', ''), ('MIRRORS', proxy_endpoints['mirrors']),
                        ('ARCHWEB', ''), ('ARCHIVE', '/archive')]:
         env[f'COCKPIT_PACMAN_TEST_{name}_URL'] = base + path
-if command in ('refresh-keyring', 'init-keyring') and (STATE / 'keyring/enabled').exists():
+if command in ('refresh-keyring', 'init-keyring', 'receive-key', 'lsign-key') and (STATE / 'keyring/enabled').exists():
     info = (STATE / 'keyring').lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
         raise SystemExit('Unsafe E2E keyring fixture directory')
     env['PATH'] = str(STATE / 'keyring/bin') + ':/usr/bin'
-if command in ('cache-info', 'cache-files', 'clean-cache'):
+if command in ('cache-info', 'cache-files', 'cache-cleanup-preview', 'clean-cache'):
     marker = STATE / 'cache-dir'
     if marker.exists():
         info = marker.lstat()

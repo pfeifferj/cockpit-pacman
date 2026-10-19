@@ -8,10 +8,11 @@ test.describe("Signoffs Tab", () => {
     await pacman.navigateToPlugin();
   });
 
-  test("hides signoffs from a session with no archweb credentials", async ({ pacman }) => {
+  test("hides Signoffs when the session has no stored credentials", async ({ pacman }) => {
     await guestCommand(pacman.frame, [FIXTURE, "secrets-disable"]);
-    await pacman.page.reload();
-    await pacman.frame.getByRole("tab", { name: "Updates", exact: true }).waitFor();
+    await pacman.page.goto("/pacman#/signoffs");
+    await expect(pacman.frame.getByRole("heading", { name: /^Info alert:\s*Signoffs are not available$/ })).toBeVisible();
+    await expect(pacman.tab("Updates")).toHaveAttribute("aria-selected", "true");
     await expect(pacman.frame.locator(SIGNOFFS_TAB)).toHaveCount(0);
   });
 
@@ -25,10 +26,10 @@ test.describe("Signoffs Tab", () => {
       await expect(row.locator('[data-label="Local"]')).toHaveText(version);
       await expect(row.locator('[data-label="Signoffs"]')).toHaveText("0 / 1");
       await expect(row.locator('[data-label="Status"]')).toHaveText("Pending");
-      await row.getByRole("button", { name: "Sign off", exact: true }).click();
+      await row.getByRole("button", { name: "Sign off htop", exact: true }).click();
       await expect(row.locator('[data-label="Signoffs"]')).toHaveText("1 / 1");
       await expect(row.locator('[data-label="Status"]')).toHaveText("Approved");
-      await row.getByRole("button", { name: "Revoke", exact: true }).click();
+      await row.getByRole("button", { name: "Revoke signoff for htop", exact: true }).click();
       await expect(row.locator('[data-label="Signoffs"]')).toHaveText("0 / 1");
       await expect(row.locator('[data-label="Status"]')).toHaveText("Pending");
       const state = JSON.parse(await guestCommand(pacman.frame, [FIXTURE, "state"])) as { signed: boolean; logins: number };
@@ -55,8 +56,9 @@ test("bulk signoff reuses a session and keeps failed packages selected", async (
       return counts.logins - counts.logouts;
     }).toBe(0);
     const before = await sessionCounts();
-    await pacman.panel.getByLabel("Select all packages").check();
+    await pacman.panel.getByLabel("Select all packages on this page").check();
     await pacman.panel.getByRole("button", { name: "Sign off 2 packages", exact: true }).click();
+    await expect(pacman.frame.getByRole("dialog")).toHaveCount(0);
     await expect(pacman.panel.getByText(/tree:.*500/)).toBeVisible();
     await expect(pacman.panel.getByRole("button", { name: "Sign off 1 package", exact: true })).toBeEnabled();
     await expect(table.locator("tbody tr").filter({ hasText: "htop" }).locator('[data-label="Status"]')).toHaveText("Approved");
@@ -65,6 +67,7 @@ test("bulk signoff reuses a session and keeps failed packages selected", async (
 
     await guestCommand(pacman.frame, [FIXTURE, "signoffs-bulk"]);
     await pacman.panel.getByRole("button", { name: "Sign off 1 package", exact: true }).click();
+    await expect(pacman.frame.getByRole("dialog")).toHaveCount(0);
     await expect(table.locator("tbody tr").filter({ hasText: "tree" }).locator('[data-label="Status"]')).toHaveText("Approved");
     await expect(pacman.panel.getByRole("button", { name: /Sign off \d+ packages?/ })).toHaveCount(0);
   } finally {

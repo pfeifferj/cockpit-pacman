@@ -1,4 +1,6 @@
 import { test, expect } from "./fixtures";
+import { guestCommand } from "./guest";
+import { withSavedConfig } from "./config-file";
 
 const REPO_ROWS = 'table[aria-label="Repository list"] > tbody > tr';
 
@@ -39,12 +41,34 @@ test.describe("Repositories Tab", () => {
     }
   });
 
-  test("does not offer to write a pacman.conf nothing has changed", async ({ pacman }) => {
-    const save = pacman.panel.getByRole("button", { name: "Save Changes" });
+  test("does not offer to write an unchanged pacman.conf", async ({ pacman }) => {
+    const save = pacman.panel.getByRole("button", { name: "Save changes" });
     await expect(save).toBeDisabled({ timeout: 30000 });
 
     const core = pacman.panel.locator(REPO_ROWS, { hasText: "[core]" }).first();
     await core.locator('label:has(input[aria-label="Enable repository core"])').click();
     await expect(save).toBeEnabled();
+  });
+});
+
+
+test("saves a repository change and undoes it on disk", async ({ pacman }) => {
+  test.skip(process.env.COCKPIT_FAULT_TESTS !== "1", "requires a disposable VM snapshot");
+  await pacman.navigateToPlugin();
+  await withSavedConfig(pacman.frame, "repo", async () => {
+    const before = await guestCommand(pacman.frame, ["sha256sum", "/etc/pacman.conf"]);
+    await pacman.switchTab("Repositories");
+    const core = pacman.panel.locator(REPO_ROWS, { hasText: "[core]" }).first();
+    const enabled = core.getByRole("switch", { name: "Enable repository core" });
+    await expect(enabled).toBeChecked();
+    await core.locator('label:has(input[aria-label="Enable repository core"])').click({ timeout: 15000 });
+    await pacman.panel.getByRole("button", { name: "Save changes", exact: true }).click({ timeout: 15000 });
+    await expect(pacman.panel.getByRole("heading", { name: /^Success alert:\s*Saved \/etc\/pacman\.conf$/ })).toBeVisible();
+    expect(await guestCommand(pacman.frame, ["sha256sum", "/etc/pacman.conf"])).not.toBe(before);
+    await expect(enabled).not.toBeChecked();
+    await pacman.panel.getByRole("button", { name: "Undo", exact: true }).click({ timeout: 15000 });
+    await expect(pacman.panel.getByRole("heading", { name: /^Success alert:\s*Undid the \/etc\/pacman\.conf change$/ })).toBeVisible();
+    expect(await guestCommand(pacman.frame, ["sha256sum", "/etc/pacman.conf"])).toBe(before);
+    await expect(enabled).toBeChecked();
   });
 });

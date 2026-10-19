@@ -10,14 +10,25 @@ export interface KeyringContext {
   retry?: () => void;
 }
 
+/** A disk-space block's shortfall, so the Cache tab can show what is left to free and lead back. */
+export interface CacheContext {
+  deficit: number;
+  mount: string;
+  /** Update names the blocked upgrade covered. */
+  selection?: string[];
+  /** Reruns the blocked upgrade's preview for `selection`; absent when its host has closed. */
+  resume?: () => void;
+}
+
 export interface NavigationHandlers {
   onViewUpdates?: () => void;
   onViewDependencies?: (packageName: string) => void;
   onViewHistory?: (packageName: string) => void;
   onViewOrphans?: () => void;
-  onViewCache?: () => void;
+  onViewCache?: (context?: CacheContext) => void;
   onViewKeyring?: (context?: KeyringContext) => void;
-  onViewSignoffs?: () => void;
+  /** Opens Signoffs; `filter` is the route form of a filter set, such as SIGNOFF_TILE_FILTER. */
+  onViewSignoffs?: (filter?: string) => void;
 }
 
 const NavigationContext = createContext<NavigationHandlers>({});

@@ -216,7 +216,7 @@ export const TransactionRisks: React.FC<TransactionRisksProps> = ({ risks, ackno
             <AlertActionLink
               onClick={() => {
                 beforeNavigate?.();
-                onViewCache();
+                onViewCache(w.disk ? { deficit: w.disk.deficit, mount: w.disk.mount } : undefined);
               }}
             >
               Open Cache

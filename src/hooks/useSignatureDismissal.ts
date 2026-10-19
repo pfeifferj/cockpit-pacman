@@ -1,29 +1,106 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { queueDismissal } from "./dismissalQueue";
 
-/** The stored signature is undefined while loading, null when nothing is dismissed. */
+export interface DismissalApi {
+  get: () => Promise<{ signature: string | null }>;
+  mark: (signature: string) => Promise<void>;
+  restore: (prev: string | null, expected: string) => Promise<void>;
+}
+
+/** Tracks dismissal by signature; failed writes preserve newer intent. */
 export function useSignatureDismissal(
-  get: () => Promise<{ signature: string | null }>,
-  mark: (signature: string) => Promise<void>,
-  label: string,
+  api: DismissalApi,
   signature: string,
-): { undismissed: boolean; dismiss: () => void } {
-  const [dismissed, setDismissed] = useState<string | null | undefined>(undefined);
+  onError?: (err: unknown) => void,
+): {
+  undismissed: boolean;
+  dismissed: boolean;
+  dismiss: () => () => void;
+  undo: () => void;
+  restore: () => void;
+} {
+  const [stored, setStoredState] = useState<string | null | undefined>(undefined);
+  const confirmed = useRef<string | null | undefined>(undefined);
+  const pending = useRef<{ id: number; value: () => string | null } | null>(null);
+  const latestId = useRef(0);
+  const mounted = useRef(false);
+  const lastUndo = useRef<() => void>(() => {});
+  const { get, mark, restore: restoreApi } = api;
+
+  const currentValue = useCallback(() => pending.current ? pending.current.value() : confirmed.current, []);
+  const publish = useCallback(() => {
+    if (mounted.current) setStoredState(currentValue());
+  }, [currentValue]);
 
   useEffect(() => {
-    get()
-      .then((d) => setDismissed(d.signature))
-      .catch(() => setDismissed(null));
-  }, [get]);
+    mounted.current = true;
+    let cancelled = false;
+    void queueDismissal(get, async () => {
+      try {
+        confirmed.current = (await get()).signature;
+      } catch {
+        confirmed.current ??= null;
+      }
+      if (!cancelled) publish();
+    });
+    return () => {
+      cancelled = true;
+      mounted.current = false;
+    };
+  }, [get, publish]);
+
+  const write = useCallback((
+    value: () => string | null,
+    persist: (value: string | null) => Promise<void>,
+    beforeWrite?: (value: string | null) => void,
+  ) => {
+    if (!mounted.current) return 0;
+    const id = ++latestId.current;
+    pending.current = { id, value };
+    publish();
+    void queueDismissal(get, async () => {
+      beforeWrite?.(confirmed.current ?? null);
+      const next = value();
+      publish();
+      try {
+        await persist(next);
+        confirmed.current = next;
+      } catch (err) {
+        if (mounted.current) onError?.(err);
+      } finally {
+        if (pending.current?.id === id) pending.current = null;
+        publish();
+      }
+    });
+    return id;
+  }, [get, publish, onError]);
 
   const dismiss = useCallback(() => {
-    setDismissed(signature);
-    mark(signature).catch((err) => {
-      console.error(`Failed to persist ${label} dismissal:`, err);
-    });
-  }, [mark, label, signature]);
+    const token = { id: 0, previous: currentValue() ?? null };
+    token.id = write(() => signature, () => mark(signature), (previous) => { token.previous = previous; });
+    const undo = () => {
+      if (!mounted.current || latestId.current !== token.id || currentValue() !== signature) return;
+      write(() => token.previous, (previous) => restoreApi(previous, signature));
+    };
+    lastUndo.current = undo;
+    return undo;
+  }, [write, mark, restoreApi, signature, currentValue]);
 
+  const undo = useCallback(() => {
+    lastUndo.current();
+  }, []);
+
+  const restore = useCallback(() => {
+    const expected = currentValue();
+    if (typeof expected === "string") write(() => null, () => restoreApi(null, expected));
+  }, [write, restoreApi, currentValue]);
+
+  const loaded = signature !== "" && stored !== undefined;
   return {
-    undismissed: signature !== "" && dismissed !== undefined && dismissed !== signature,
+    undismissed: loaded && stored !== signature,
+    dismissed: loaded && stored === signature,
     dismiss,
+    undo,
+    restore,
   };
 }

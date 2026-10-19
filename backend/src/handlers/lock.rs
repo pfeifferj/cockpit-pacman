@@ -37,6 +37,10 @@ fn db_path() -> PathBuf {
     )
 }
 
+pub(crate) fn db_lock_path() -> PathBuf {
+    db_path().join("db.lck")
+}
+
 enum Holder {
     Process(String),
     None,

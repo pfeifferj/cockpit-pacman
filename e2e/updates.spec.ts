@@ -10,11 +10,11 @@ test.describe("Updates Tab", () => {
     await expect(updatesTab).toHaveAttribute("aria-selected", "true");
   });
 
-  test("resolves to either a pending list or the up-to-date state", async ({ pacman }) => {
+  test("resolves to either a pending list or the last-check state", async ({ pacman }) => {
     await pacman.waitForLoading();
 
     const updateTable = pacman.panel.locator("table").first();
-    const upToDate = pacman.panel.locator('text="System is up to date"');
+    const upToDate = pacman.panel.getByText(/^No updates (when|in)/);
 
     await expect(updateTable.or(upToDate).first()).toBeVisible({ timeout: 60000 });
   });

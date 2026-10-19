@@ -199,6 +199,50 @@ pub fn mark_news_read_to(path: &Path, link: &str) -> Result<NewsReadState> {
     })
 }
 
+pub fn mark_news_unread_to(path: &Path, link: &str) -> Result<NewsReadState> {
+    with_state_lock(path, || {
+        let mut state = read_news_state_from(path)?;
+        state.dismissed.retain(|url| url != link);
+        write_json_atomic(path, &state)?;
+        Ok(state)
+    })
+}
+
+pub fn mark_news_unread(link: &str) -> Result<()> {
+    crate::validation::validate_mirror_url(link)?;
+    emit_json(&mark_news_unread_to(&news_state_path()?, link)?)
+}
+
+pub fn restore_dismissal_to(
+    path: &Path,
+    expected: &str,
+    previous: Option<&str>,
+) -> Result<Dismissal> {
+    with_state_lock(path, || {
+        let current = read_dismissal_from(path, "alert")?;
+        if current.signature.as_deref() != Some(expected) {
+            return Err(crate::backups::ConfigChanged.into());
+        }
+        let restored = Dismissal {
+            signature: previous.map(str::to_owned),
+        };
+        write_json_atomic(path, &restored)?;
+        Ok(restored)
+    })
+}
+
+pub fn restore_dismissed(kind: &str, expected: &str, previous: Option<&str>) -> Result<()> {
+    validate_signature(expected)?;
+    if let Some(previous) = previous {
+        validate_signature(previous)?;
+    }
+    emit_json(&restore_dismissal_to(
+        &dismissal_path(kind)?,
+        expected,
+        previous,
+    )?)
+}
+
 fn news_state_path() -> Result<PathBuf> {
     config_path("news-read.json")
 }
@@ -258,7 +302,7 @@ pub fn read_dismissal(kind: &str) -> Result<()> {
     emit_json(&state)
 }
 
-pub fn mark_dismissed(kind: &str, signature: &str) -> Result<()> {
+fn validate_signature(signature: &str) -> Result<()> {
     if signature.is_empty() {
         anyhow::bail!("Signature must not be empty");
     }
@@ -268,6 +312,11 @@ pub fn mark_dismissed(kind: &str, signature: &str) -> Result<()> {
     if signature.chars().any(|c| c.is_control()) {
         anyhow::bail!("Signature contains control characters");
     }
+    Ok(())
+}
+
+pub fn mark_dismissed(kind: &str, signature: &str) -> Result<()> {
+    validate_signature(signature)?;
     let path = dismissal_path(kind)?;
     let state = write_dismissal_to(&path, signature)?;
     emit_json(&state)
@@ -493,5 +542,42 @@ mod dismissal_kind_tests {
     fn an_unknown_kind_is_rejected() {
         assert!(super::dismissal_path("../etc/passwd").is_err());
         assert!(super::dismissal_path("news").is_err());
+    }
+}
+
+#[cfg(test)]
+mod undo_tests {
+    use super::*;
+    #[test]
+    fn undo_preserves_other_news_and_refuses_later_dismissals() {
+        let dir = std::env::temp_dir().join(format!(
+            "news-undo-{}-{}",
+            std::process::id(),
+            Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("news.json");
+        mark_news_read_to(&path, "https://example.org/one").unwrap();
+        mark_news_read_to(&path, "https://example.org/two").unwrap();
+        let state = mark_news_unread_to(&path, "https://example.org/one").unwrap();
+        assert_eq!(state.dismissed, ["https://example.org/two"]);
+        let path = dir.join("dismissed.json");
+        write_dismissal_to(&path, "later").unwrap();
+        let error = restore_dismissal_to(&path, "earlier", None).err().unwrap();
+        assert_eq!(crate::util::classify_error(&error), Some("config_changed"));
+        assert_eq!(
+            read_dismissal_from(&path, "alert")
+                .unwrap()
+                .signature
+                .as_deref(),
+            Some("later")
+        );
+        assert!(
+            restore_dismissal_to(&path, "later", None)
+                .unwrap()
+                .signature
+                .is_none()
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -46,9 +46,16 @@ def main():
     if args.action == 'setup':
         STATE.mkdir(mode=0o700)
         (STATE / 'bin').mkdir()
-        (STATE / 'bin/gpg').write_text('#!/bin/sh\nexit 0\n')
+        (STATE / 'bin/gpg').write_text('''#!/bin/sh
+case " $* " in
+  *" --list-keys "*)
+    printf '%s\n' 'pub:-:4096:1:0FA8E1BCB1F1A2C0:1704067200:::::sc:' 'fpr:::::::::3B94A80E50A477C7C8E44F8A0FA8E1BCB1F1A2C0:' 'uid:-::::::::Keyring E2E fixture:'
+    ;;
+esac
+''')
         (STATE / 'bin/pacman-key').write_text(f'''#!/bin/sh
 echo $$ > {STATE}/parent
+printf '%s\\n' \"$@\" > {STATE}/arguments
 exec flock {STATE}/lock {FIXTURE} child
 ''')
         for path in (STATE / 'bin').iterdir():

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { URL } from "node:url";
 import { test, expect, type PackmanPage } from "./fixtures";
-import type { CacheInfo, CacheFiles } from "../src/bindings";
+import type { CacheInfo, CacheFiles, CacheCleanupPreview } from "../src/bindings";
 
 const fixture = readFileSync(new URL("../test/e2e/cache-fixture.py", import.meta.url), "utf8");
 const backend = "/usr/libexec/cockpit-pacman/cockpit-pacman-backend";
@@ -30,6 +30,21 @@ test("pages cache groups and files, then cleans only selected packages", async (
     expect(summary.total).toBe(prepared.groups);
     expect(summary.groups).toHaveLength(50);
     expect(JSON.stringify(summary).length).toBeLessThan(10000);
+    expect(summary.free_space?.free_bytes).toBeGreaterThan(0);
+    expect(summary.groups.every(group => group.installed_version === null && group.downgrade_version === null)).toBe(true);
+    const project = async (keep: number, names: string, mode: string): Promise<CacheCleanupPreview> =>
+      JSON.parse(await guestCommand(pacman, [backend, "cache-cleanup-preview", String(keep), names, mode]));
+    expect(await project(0, "", "all")).toEqual({ files: prepared.files, bytes: summary.total_size });
+    const excludedGroup = summary.groups.find(group => group.name === "cache-fixture-000")!;
+    expect(await project(0, "cache-fixture-000", "except")).toEqual({
+      files: prepared.files - excludedGroup.file_count, bytes: summary.total_size - excludedGroup.total_size,
+    });
+    expect(await project(0, "cache-fixture-000", "only")).toEqual({ files: 61, bytes: excludedGroup.total_size });
+    expect((await project(1, "cache-fixture-000", "except")).files).toBe(54);
+    expect((await project(0, "cache-fixture-054", "only")).files).toBe(2);
+    expect(JSON.parse(await guestCommand(pacman, [backend, "cache-info"])).package_count).toBe(prepared.files);
+    await guestCommand(pacman, ["test", "!", "-e", "/var/lib/pacman/db.lck"]);
+
 
     await pacman.navigateToPlugin();
     await pacman.frame.getByRole("tab", { name: "Cache", exact: true }).click();
@@ -66,7 +81,7 @@ test("pages cache groups and files, then cleans only selected packages", async (
     const slider = confirmation.getByRole("slider");
     for (let index = 0; index < 3; index++) await slider.press("ArrowLeft");
     await expect(slider).toHaveAttribute("aria-valuenow", "0");
-    await confirmation.getByRole("button", { name: "Clean Cache", exact: true }).click();
+    await confirmation.getByRole("button", { name: /^Delete up to 108 files/ }).click();
     await expect(pacman.panel.getByRole("heading", { name: "Cache cleaned" })).toBeVisible({ timeout: 30000 });
 
     const remaining: CacheInfo = JSON.parse(await guestCommand(pacman, [backend, "cache-info"]));
@@ -79,8 +94,8 @@ test("pages cache groups and files, then cleans only selected packages", async (
     expect(excluded.total).toBe(61);
     expect(excluded.files).toHaveLength(50);
 
-    await pacman.panel.getByRole("button", { name: "View Cache", exact: true }).click();
-    await expect(pacman.panel.getByText("No cached packages match this filter")).toBeVisible();
+    await pacman.panel.getByRole("button", { name: "Back to cache", exact: true }).click();
+    await expect(pacman.panel.getByRole("heading", { name: "No matching packages" })).toBeVisible();
     await pacman.panel.getByLabel("Filter cached packages", { exact: true }).fill("");
     await expect(rows).toHaveCount(1);
     await expect(rows.first()).toContainText("cache-fixture-000");

@@ -15,11 +15,17 @@ Check for updates with system overview, reboot notifications, and scheduled upgr
 ![View and search installed packages](docs/img/installed.png)
 Browse installed packages with filtering by install reason and repository
 
+Press `/` to jump to a package or tab, and `?` for shortcuts. Tabs, filters
+and open packages have bookmarkable URLs and support Back.
+
+Manage third-party repositories and their signing keys in Repositories.
+Arch packagers can configure [ArchWeb signoffs](docs/signoffs.md).
+
 <details>
 <summary>More screenshots</summary>
 
 ![Package details](docs/img/details.png)
-View package details with dependencies, metadata, and downgrade options
+View package details beside the list, with reinstall and downgrade actions
 
 ![Dependency graph](docs/img/graph.png)
 Visualize package dependency relationships

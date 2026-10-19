@@ -19,5 +19,6 @@
   "total": 3,
   "enabled_count": 2,
   "path": "/etc/pacman.d/mirrorlist",
-  "last_modified": 1704067200
+  "last_modified": 1704067200,
+  "revision": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 }

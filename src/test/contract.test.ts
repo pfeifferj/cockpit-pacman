@@ -880,7 +880,7 @@ describe("listOrphans contract", () => {
 describe("saveMirrorlist contract", () => {
   it("parses save-mirrorlist fixture into SaveMirrorlistResponse shape", async () => {
     spawnReturns(saveMirrorlistFixture);
-    const result = await saveMirrorlist([]);
+    const result = await saveMirrorlist([], "current-revision");
 
     expect(typeof result.success).toBe("boolean");
     expect(typeof result.backup_path).toBe("string");
@@ -889,13 +889,13 @@ describe("saveMirrorlist contract", () => {
 
   it("backup_path is null when no backup was created", async () => {
     spawnReturns({ ...saveMirrorlistFixture, backup_path: null });
-    const result = await saveMirrorlist([]);
+    const result = await saveMirrorlist([], "current-revision");
     expect(result.backup_path).toBeNull();
   });
 
   it("success false with null backup_path on failure", async () => {
     spawnReturns({ success: false, backup_path: null, message: "Failed to write" });
-    const result = await saveMirrorlist([]);
+    const result = await saveMirrorlist([], "current-revision");
     expect(result.success).toBe(false);
     expect(result.backup_path).toBeNull();
     expect(typeof result.message).toBe("string");

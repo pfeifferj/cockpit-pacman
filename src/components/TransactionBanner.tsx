@@ -1,24 +1,34 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useSyncExternalStore } from "react";
 import { Alert, AlertActionCloseButton, AlertActionLink, Progress, ProgressSize } from "@patternfly/react-core";
 import { TimeAgo } from "./TimeAgo";
 import {
+  OWNER_ROUTES,
   transactionLabel,
   transactionOwner,
   useActiveTransaction,
+  useMutationGate,
+  useOwnTransactionRunning,
   useTransactionOutcome,
   useTransactionProgress,
-  OWNER_ROUTES,
   type TransactionOwner,
 } from "../hooks/useMutationGate";
 import {
+  dismissOutsideRun,
   dismissTransactionOutcome,
   getActiveTransaction,
+  getOutsideRun,
   getTransactionOutcome,
   onActiveTransactionChanged,
+  onOutsideRun,
+  type OutsideRun,
   type TransactionOutcome,
 } from "../api";
+import { parseTimestamp } from "../timeFormat";
 import { useAnnounce } from "../contexts/AnnouncerContext";
 import type { RouteOptions } from "../hooks/useRoute";
+import { useAdminPermission } from "../hooks/useAdminPermission";
+import { GatedButton } from "./GatedButton";
+import { formatAtLeast } from "./TransactionRisks";
 
 const OUTCOME_SUBJECTS: Record<string, string> = {
   "upgrade": "Upgrade",
@@ -35,6 +45,91 @@ const OUTCOMES: Record<TransactionOutcome["status"], { variant: "success" | "cus
   failed: { variant: "danger", suffix: "failed", action: "View details" },
 };
 
+const HISTORY_SLUG = "history";
+
+const UPGRADE_WAITING_HIDDEN = new Set(["cache", "updates"]);
+
+/** A space-blocked upgrade that can be resumed once there is room. */
+export interface UpgradeWaiting {
+  deficit: number;
+  mount: string;
+}
+
+export const upgradeWaitingText = ({ deficit, mount }: UpgradeWaiting) =>
+  `An upgrade is waiting for ${formatAtLeast(deficit)} on ${mount}`;
+
+const showsUpgradeWaiting = (waiting: UpgradeWaiting | null | undefined, slug: string, ownRunning: boolean) =>
+  !!waiting && !ownRunning && !UPGRADE_WAITING_HIDDEN.has(slug);
+
+const OUTSIDE_RUN_COUNTS: [keyof OutsideRun["counts"], string][] = [
+  ["upgraded", "upgraded"],
+  ["installed", "installed"],
+  ["removed", "removed"],
+  ["downgraded", "downgraded"],
+  ["reinstalled", "reinstalled"],
+];
+
+/** A log timestamp as a clock time today, or a date and time otherwise. */
+export function formatRunTime(startTime: string): string {
+  const date = parseTimestamp(startTime);
+  if (!date) return startTime;
+  const today = date.toDateString() === new Date().toDateString();
+  return today
+    ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
+const RUN_VERBS: Record<string, string> = {
+  install: "Installed",
+  remove: "Removed",
+  upgrade: "Upgraded",
+  "remove-orphans": "Removed orphan packages",
+};
+
+function listTargets(targets: string[], more: string | null): string {
+  if (more) return `${targets.join(", ")} and ${more} more`;
+  if (targets.length < 2) return targets.join("");
+  return `${targets.slice(0, -1).join(", ")} and ${targets[targets.length - 1]}`;
+}
+
+/** Describes the action recorded in a Cockpit transaction marker. */
+export function describeRun(command: string | null): string {
+  const words = (command ?? "").split(" ").filter(Boolean);
+  if (words[0] !== "cockpit-pacman" || words.length < 2) return "Changed packages";
+  const [, verb, ...rest] = words;
+  const capped = rest.length >= 3 && rest[rest.length - 3] === "and" && rest[rest.length - 1] === "more";
+  const targets = capped ? rest.slice(0, -3) : rest;
+  const more = capped ? rest[rest.length - 2] : null;
+  if (verb === "downgrade" && targets.length === 2) return `Downgraded ${targets[0]} to ${targets[1]}`;
+  const head = RUN_VERBS[verb];
+  if (!head) return "Changed packages";
+  return targets.length > 0 ? `${head} ${listTargets(targets, more)}` : head;
+}
+
+export function outsideRunText(run: OutsideRun): string {
+  const counts = OUTSIDE_RUN_COUNTS
+    .filter(([key]) => run.counts[key] > 0)
+    .map(([key, label]) => `${run.counts[key]} ${label}`)
+    .join(", ");
+  const time = formatRunTime(run.startTime);
+  let head: string;
+  if (run.runs > 1) {
+    head = `${run.runs} transactions were recorded since ${formatRunTime(run.firstStartTime)}`;
+  } else if (run.origin === "scheduled") {
+    head = `Scheduled upgrade ran at ${time}`;
+  } else if (run.origin === "cockpit") {
+    const action = describeRun(run.command);
+    head = `A Cockpit session ${action.charAt(0).toLowerCase()}${action.slice(1)} at ${time}`;
+  } else {
+    head = `${run.command ?? "A transaction"} ran in a terminal or another session at ${time}`;
+  }
+  return counts ? `${head}: ${run.partial ? "at least " : ""}${counts}` : head;
+}
+
+function useOutsideRun(): OutsideRun | null {
+  return useSyncExternalStore(onOutsideRun, getOutsideRun);
+}
+
 /** The banner's "View progress" link, focused when a dialog moves its run to the background. */
 export const TRANSACTION_BANNER_ACTION_ID = "transaction-banner-view-progress";
 
@@ -48,8 +143,12 @@ function outcomeTitle({ command, status }: TransactionOutcome): string | undefin
   return subject && `${subject} ${OUTCOMES[status].suffix}`;
 }
 
-/** Mount once above the tabs. Announces off-screen runs and dismisses outcomes when their owner becomes visible. */
-export function useTransactionAnnouncements(activeSlug: string, activeOptions: RouteOptions): void {
+/** Announces off-screen transaction progress. Mount once above the tabs. */
+export function useTransactionAnnouncements(
+  activeSlug: string,
+  activeOptions: RouteOptions,
+  upgradeWaiting?: UpgradeWaiting | null,
+): void {
   const announce = useAnnounce();
   const viewRef = useRef({ slug: activeSlug, options: activeOptions });
   useEffect(() => {
@@ -86,18 +185,53 @@ export function useTransactionAnnouncements(activeSlug: string, activeOptions: R
     });
   }, [announce]);
 
+  const announcedRunRef = useRef<OutsideRun | null>(null);
+  useEffect(() => {
+    const announceOutsideRun = () => {
+      const run = getOutsideRun();
+      const own = getActiveTransaction();
+      if (!run || run === announcedRunRef.current || (own && own.command !== "external")) return;
+      announcedRunRef.current = run;
+      if (viewRef.current.slug !== HISTORY_SLUG) announce(outsideRunText(run));
+    };
+    const unsubscribeRun = onOutsideRun(announceOutsideRun);
+    const unsubscribeTransaction = onActiveTransactionChanged(announceOutsideRun);
+    return () => {
+      unsubscribeRun();
+      unsubscribeTransaction();
+    };
+  }, [announce]);
+
   const outcome = useTransactionOutcome();
   useEffect(() => {
     if (outcome && isOwnerView(transactionOwner(outcome.command), activeSlug, activeOptions)) {
       dismissTransactionOutcome();
     }
   }, [outcome, activeSlug, activeOptions]);
+
+  const ownRunning = useOwnTransactionRunning();
+  const announcedWaitingRef = useRef<UpgradeWaiting | null>(null);
+  useEffect(() => {
+    if (!upgradeWaiting || announcedWaitingRef.current === upgradeWaiting) return;
+    if (!showsUpgradeWaiting(upgradeWaiting, activeSlug, ownRunning)) return;
+    announcedWaitingRef.current = upgradeWaiting;
+    announce(upgradeWaitingText(upgradeWaiting));
+  }, [upgradeWaiting, activeSlug, ownRunning, announce]);
+
+  const outsideRun = useOutsideRun();
+  useEffect(() => {
+    if (outsideRun && activeSlug === HISTORY_SLUG) dismissOutsideRun();
+  }, [outsideRun, activeSlug]);
 }
 
 interface TransactionBannerProps {
   activeSlug: string;
   activeOptions: RouteOptions;
   onNavigate: (slug: string, options?: RouteOptions) => void;
+  upgradeWaiting?: UpgradeWaiting | null;
+  /** Reruns the blocked upgrade's preview; it never commits by itself. */
+  onBackToUpgrade?: () => void;
+  onDismissUpgradeWaiting?: () => void;
 }
 
 const OutcomeBanner: React.FC<TransactionBannerProps & { outcome: TransactionOutcome }> = ({
@@ -139,18 +273,78 @@ const BannerProgress: React.FC = () => {
   );
 };
 
-/**
- * Points back to a running transaction from every tab except the one showing
- * its progress, names an outside lock holder, and keeps a finished run's
- * outcome until dismissed. Not a live region; see useTransactionAnnouncements.
- */
-export const TransactionBanner: React.FC<TransactionBannerProps> = ({ activeSlug, activeOptions, onNavigate }) => {
+const OutsideRunLine: React.FC<{ run: OutsideRun; onNavigate: TransactionBannerProps["onNavigate"] }> = ({
+  run,
+  onNavigate,
+}) => (
+  <Alert
+    variant="info"
+    isInline
+    isPlain
+    title={outsideRunText(run)}
+    className="pf-v6-u-mb-md"
+    actionClose={<AlertActionCloseButton onClose={dismissOutsideRun} />}
+    actionLinks={<AlertActionLink onClick={() => onNavigate(HISTORY_SLUG, { at: run.firstStartTime })}>View in History</AlertActionLink>}
+  />
+);
+
+const UpgradeWaitingLine: React.FC<{
+  waiting: UpgradeWaiting;
+  onBack?: () => void;
+  onDismiss?: () => void;
+}> = ({ waiting, onBack, onDismiss }) => {
+  const gate = useMutationGate("upgrade packages", { permission: useAdminPermission() });
+  return (
+    <Alert
+      variant="info"
+      isInline
+      isPlain
+      title={upgradeWaitingText(waiting)}
+      className="pf-v6-u-mb-md"
+      actionClose={onDismiss && (
+        <AlertActionCloseButton aria-label="Dismiss the waiting upgrade" onClose={onDismiss} />
+      )}
+      actionLinks={onBack && (
+        <GatedButton gate={gate} variant="link" isInline onClick={onBack}>
+          Back to upgrade
+        </GatedButton>
+      )}
+    />
+  );
+};
+
+/** Shows running work, its outcome, and blocked upgrades across tabs. Announcements use useTransactionAnnouncements. */
+export const TransactionBanner: React.FC<TransactionBannerProps> = ({
+  activeSlug,
+  activeOptions,
+  onNavigate,
+  upgradeWaiting,
+  onBackToUpgrade,
+  onDismissUpgradeWaiting,
+}) => {
   const transaction = useActiveTransaction();
   const outcome = useTransactionOutcome();
+  const outsideRun = useOutsideRun();
+  const ownRunning = useOwnTransactionRunning();
+  const outsideLine = (
+    <>
+      {outsideRun && !ownRunning && activeSlug !== HISTORY_SLUG && (
+        <OutsideRunLine run={outsideRun} onNavigate={onNavigate} />
+      )}
+      {upgradeWaiting && showsUpgradeWaiting(upgradeWaiting, activeSlug, ownRunning) && (
+        <UpgradeWaitingLine waiting={upgradeWaiting} onBack={onBackToUpgrade} onDismiss={onDismissUpgradeWaiting} />
+      )}
+    </>
+  );
   if (!transaction) {
-    return outcome ? (
-      <OutcomeBanner outcome={outcome} activeSlug={activeSlug} activeOptions={activeOptions} onNavigate={onNavigate} />
-    ) : null;
+    return (
+      <>
+        {outcome && (
+          <OutcomeBanner outcome={outcome} activeSlug={activeSlug} activeOptions={activeOptions} onNavigate={onNavigate} />
+        )}
+        {outsideLine}
+      </>
+    );
   }
 
   const external = transaction.command === "external";
@@ -160,6 +354,7 @@ export const TransactionBanner: React.FC<TransactionBannerProps> = ({ activeSlug
   const viewProgress = transaction.reopen ?? (route && (() => onNavigate(route.slug, route.options)));
 
   return (
+    <>
     <Alert
       variant="info"
       isInline
@@ -175,5 +370,7 @@ export const TransactionBanner: React.FC<TransactionBannerProps> = ({ activeSlug
       {!external && <>Started <TimeAgo timestamp={transaction.startedAt / 1000} />. </>}
       Other package changes are unavailable until it finishes.
     </Alert>
+    {outsideLine}
+    </>
   );
 };

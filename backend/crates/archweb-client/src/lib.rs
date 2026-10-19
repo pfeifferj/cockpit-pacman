@@ -12,6 +12,16 @@ struct SignoffResponse {
     signoff_groups: Vec<SignoffGroup>,
 }
 
+#[derive(Debug)]
+pub struct AuthRejected;
+
+impl std::fmt::Display for AuthRejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Authentication failed: invalid credentials")
+    }
+}
+impl std::error::Error for AuthRejected {}
+
 pub struct SignoffSession {
     client: Session,
     base_url: String,
@@ -66,7 +76,7 @@ impl SignoffSession {
             )?
             .is_none()
         {
-            anyhow::bail!("authentication failed: invalid credentials");
+            return Err(AuthRejected.into());
         }
         Ok(())
     }

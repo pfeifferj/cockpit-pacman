@@ -12,6 +12,57 @@ use crate::util::{
     EntryCounts, with_file_lock, write_bytes_atomic_with_mode, write_json_atomic_with_mode,
 };
 
+#[derive(Debug)]
+pub struct ConfigChanged;
+
+impl std::fmt::Display for ConfigChanged {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Configuration changed. Reload it before saving or undoing.")
+    }
+}
+
+impl std::error::Error for ConfigChanged {}
+
+pub fn file_revision(contents: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(contents))
+}
+
+pub fn check_revision(contents: &[u8], expected: &str) -> Result<()> {
+    if expected.is_empty() {
+        return Err(
+            crate::models::InvalidInput("A configuration revision is required".into()).into(),
+        );
+    }
+    if file_revision(contents) != expected {
+        return Err(ConfigChanged.into());
+    }
+    Ok(())
+}
+
+pub fn read_snapshot(path: &Path) -> Result<(Vec<u8>, String)> {
+    match fs::read(path) {
+        Ok(bytes) => {
+            let revision = file_revision(&bytes);
+            Ok((bytes, revision))
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok((Vec::new(), "missing".into())),
+        Err(error) => Err(error.into()),
+    }
+}
+
+pub fn check_current_revision(path: &Path, expected: &str) -> Result<()> {
+    if expected.is_empty() {
+        return Err(
+            crate::models::InvalidInput("A configuration revision is required".into()).into(),
+        );
+    }
+    if read_snapshot(path)?.1 != expected {
+        return Err(ConfigChanged.into());
+    }
+    Ok(())
+}
+
 pub struct BackupStore<'a> {
     pub target: &'a Path,
     pub lock: &'a Path,
@@ -21,6 +72,8 @@ pub struct BackupStore<'a> {
 }
 
 pub struct BackupResult {
+    pub revision: String,
+    pub backup_timestamp: Option<i64>,
     pub backup_path: Option<String>,
     pub warnings: Vec<String>,
 }
@@ -156,9 +209,28 @@ impl BackupStore<'_> {
         write_bytes_atomic_with_mode(self.target, contents, 0o644)?;
         let warnings = self.maintain(backup.as_ref().map(|(_, timestamp)| (*timestamp, source)));
         Ok(BackupResult {
+            revision: file_revision(contents),
+            backup_timestamp: backup.as_ref().map(|(_, timestamp)| *timestamp),
             backup_path: backup.map(|(path, _)| path.to_string_lossy().into_owned()),
             warnings,
         })
+    }
+
+    fn restore_locked(
+        &self,
+        timestamp: i64,
+        validate: impl Fn(&Path) -> Result<()>,
+    ) -> Result<BackupResult> {
+        let path = self.path(timestamp);
+        anyhow::ensure!(
+            fs::symlink_metadata(&path)
+                .with_context(|| format!("Cannot open backup {}", path.display()))?
+                .is_file(),
+            "Backup is not a regular file: {}",
+            path.display()
+        );
+        validate(&path)?;
+        self.replace_locked(&fs::read(&path)?, BackupSource::Auto)
     }
 
     pub fn restore(
@@ -166,17 +238,25 @@ impl BackupStore<'_> {
         timestamp: i64,
         validate: impl Fn(&Path) -> Result<()>,
     ) -> Result<BackupResult> {
+        with_file_lock(self.lock, || self.restore_locked(timestamp, validate))
+    }
+
+    pub fn undo(
+        &self,
+        timestamp: i64,
+        expected_revision: &str,
+        validate: impl Fn(&Path) -> Result<()>,
+    ) -> Result<crate::models::ConfigurationUndoResponse> {
         with_file_lock(self.lock, || {
-            let path = self.path(timestamp);
-            anyhow::ensure!(
-                fs::symlink_metadata(&path)
-                    .with_context(|| format!("Cannot open backup {}", path.display()))?
-                    .is_file(),
-                "Backup is not a regular file: {}",
-                path.display()
-            );
-            validate(&path)?;
-            self.replace_locked(&fs::read(&path)?, BackupSource::Auto)
+            check_current_revision(self.target, expected_revision)?;
+            let result = self.restore_locked(timestamp, validate)?;
+            Ok(crate::models::ConfigurationUndoResponse {
+                success: true,
+                revision: result.revision,
+                backup_timestamp: result.backup_timestamp,
+                backup_path: result.backup_path,
+                warnings: result.warnings,
+            })
         })
     }
 
@@ -397,5 +477,83 @@ mod tests {
         assert!(!provenance.contains_key(&300));
         store.delete(200).unwrap();
         assert!(!store.read_manifest(&mut Vec::new()).contains_key(&200));
+    }
+    #[test]
+    fn stale_undo_leaves_config_and_backups_untouched() {
+        let fixture = TestStore::new();
+        let store = fixture.store();
+        fs::write(store.target, b"before").unwrap();
+        let saved = store
+            .replace_locked(b"saved", BackupSource::Manual)
+            .unwrap();
+        let stamp = saved.backup_timestamp.unwrap();
+        fs::write(store.target, b"external edit").unwrap();
+        let before = fs::read(store.manifest).unwrap();
+        let count_before = fs::read_dir(&fixture.dir).unwrap().count();
+        let error = store
+            .undo(stamp, &file_revision(b"saved"), |_| Ok(()))
+            .err()
+            .unwrap();
+        assert_eq!(crate::util::classify_error(&error), Some("config_changed"));
+        assert_eq!(fs::read(store.target).unwrap(), b"external edit");
+        assert_eq!(fs::read(store.manifest).unwrap(), before);
+        assert_eq!(
+            fs::read_dir(&fixture.dir).unwrap().count(),
+            count_before + 1
+        );
+        assert_eq!(fs::read(saved.backup_path.unwrap()).unwrap(), b"before");
+    }
+
+    #[test]
+    fn concurrent_undo_only_accepts_the_current_revision_once() {
+        let fixture = TestStore::new();
+        let store = fixture.store();
+        fs::write(store.target, b"before").unwrap();
+        let stamp = store
+            .replace_locked(b"saved", BackupSource::Manual)
+            .unwrap()
+            .backup_timestamp
+            .unwrap();
+        let barrier = std::sync::Barrier::new(2);
+        let results = std::thread::scope(|scope| {
+            let a = scope.spawn(|| {
+                barrier.wait();
+                store.undo(stamp, &file_revision(b"saved"), |_| Ok(()))
+            });
+            let b = scope.spawn(|| {
+                barrier.wait();
+                store.undo(stamp, &file_revision(b"saved"), |_| Ok(()))
+            });
+            [a.join().unwrap(), b.join().unwrap()]
+        });
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        let restored = results.into_iter().find_map(Result::ok).unwrap();
+        assert_eq!(restored.revision, file_revision(b"before"));
+        assert_eq!(fs::read(store.target).unwrap(), b"before");
+        assert_eq!(fs::read(restored.backup_path.unwrap()).unwrap(), b"saved");
+    }
+    #[test]
+    fn missing_revision_is_distinct_from_empty_and_detects_concurrent_creation() {
+        let fixture = TestStore::new();
+        let store = fixture.store();
+        assert_eq!(read_snapshot(store.target).unwrap().1, "missing");
+        assert!(check_current_revision(store.target, "missing").is_ok());
+        assert!(check_current_revision(store.target, "").is_err());
+        fs::write(store.target, b"").unwrap();
+        assert_ne!(read_snapshot(store.target).unwrap().1, "missing");
+        assert!(
+            check_current_revision(store.target, "missing")
+                .unwrap_err()
+                .is::<ConfigChanged>()
+        );
+        fs::remove_file(store.target).unwrap();
+        let result = with_file_lock(store.lock, || {
+            check_current_revision(store.target, "missing")?;
+            store.replace_locked(b"created", BackupSource::Manual)
+        })
+        .unwrap();
+        assert!(result.backup_timestamp.is_none());
+        assert_eq!(result.revision, file_revision(b"created"));
+        assert_eq!(fs::read(store.target).unwrap(), b"created");
     }
 }

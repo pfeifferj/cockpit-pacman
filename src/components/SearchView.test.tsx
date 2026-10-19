@@ -6,6 +6,7 @@ import * as api from "../api";
 import { mockPackageDetails, mockSyncPackageDetails, createMockStreamingProcess } from "../test/mocks";
 import { sweepA11y } from "../test/a11ySweep";
 import { mockSpawn } from "../test/setup";
+import { SEARCH_DEBOUNCE_MS } from "../constants";
 
 const completeStream = (run: (cb: api.UpgradeCallbacks) => void) => {
   const proc = createMockStreamingProcess();
@@ -809,18 +810,36 @@ describe("SearchView", () => {
 
   describe("result announcements", () => {
     it("announces one settled count per debounced search, and nothing on mount", async () => {
-      mockSearchPackages.mockResolvedValue({ ...mockSearchResponse, results: mockSearchResponse.results.slice(0, 2), total: 2 });
-      render(<AnnouncerProvider><SearchView /></AnnouncerProvider>);
-      const seen = recordAnnouncements();
-      const input = screen.getByPlaceholderText(/Search Arch repositories/i);
-      fireEvent.change(input, { target: { value: "l" } });
-      fireEvent.change(input, { target: { value: "li" } });
-      fireEvent.change(input, { target: { value: "lin" } });
+      vi.useFakeTimers();
+      try {
+        let resolveSearch!: (response: api.SearchResponse) => void;
+        mockSearchPackages.mockReturnValueOnce(new Promise((resolve) => { resolveSearch = resolve; }));
+        await act(async () => { render(<AnnouncerProvider><SearchView /></AnnouncerProvider>); });
+        const seen = recordAnnouncements();
+        expect(screen.getByRole("status")).toHaveTextContent(/^$/);
+        const input = screen.getByPlaceholderText(/Search Arch repositories/i);
+        fireEvent.change(input, { target: { value: "l" } });
+        fireEvent.change(input, { target: { value: "li" } });
+        fireEvent.change(input, { target: { value: "lin" } });
 
-      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("2 packages found"));
-      await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
-      expect(mockSearchPackages).toHaveBeenCalledTimes(1);
-      expect(seen).toEqual(["2 packages found"]);
+        await act(async () => { await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS - 1); });
+        expect(mockSearchPackages).not.toHaveBeenCalled();
+        await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+        expect(mockSearchPackages).toHaveBeenCalledTimes(1);
+        expect(mockSearchPackages).toHaveBeenCalledWith(expect.objectContaining({ query: "lin" }));
+        expect(seen).toEqual([]);
+
+        await act(async () => {
+          resolveSearch({ ...mockSearchResponse, results: mockSearchResponse.results.slice(0, 2), total: 2 });
+        });
+        expect(screen.getByRole("status")).toHaveTextContent("2 packages found");
+        await act(async () => { await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS); });
+        expect(mockSearchPackages).toHaveBeenCalledTimes(1);
+        expect(seen).toEqual(["2 packages found"]);
+      } finally {
+        cleanup();
+        vi.useRealTimers();
+      }
     });
 
     it("names the query when nothing matches", async () => {

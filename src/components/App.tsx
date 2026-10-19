@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from "react"
 import {
   Alert,
   AlertActionLink,
+  Badge,
   Flex,
   FlexItem,
   Page,
@@ -10,11 +11,12 @@ import {
   Tab,
   TabTitleText,
 } from "@patternfly/react-core";
-import { UpdatesView } from "./UpdatesView";
+import { ExclamationTriangleIcon } from "@patternfly/react-icons";
+import { UpdatesView, type UpdateStatus } from "./UpdatesView";
 import { PackageList } from "./PackageList";
 import { SearchView } from "./SearchView";
 import { KeyringView } from "./KeyringView";
-import { CacheView } from "./CacheView";
+import { CacheView, type UpgradeSpaceNeed } from "./CacheView";
 import { HistoryView } from "./HistoryView";
 import { MirrorsView } from "./MirrorsView";
 import { RepositoriesView } from "./RepositoriesView";
@@ -31,13 +33,18 @@ import { useShortcuts } from "../hooks/useShortcuts";
 import { useExternalLockWatch, useOwnTransactionRunning } from "../hooks/useMutationGate";
 import { TabActiveContext } from "../hooks/useRefreshOnActivate";
 import type { InstallReason, KeyringCredentials } from "../api";
-import { getCredentials } from "../keyring";
-import { NavigationProvider } from "../contexts/NavigationContext";
+import { CredentialError, getCredentials, type CredentialErrorReason } from "../keyring";
+import { NavigationProvider, type CacheContext, type KeyringContext } from "../contexts/NavigationContext";
 import { DowngradeProvider } from "../contexts/DowngradeContext";
 import { bundleVersion, mismatchedBackendVersion } from "../version";
-import { onSystemChanged } from "../api";
+import { onActiveTransactionChanged, onSystemChanged } from "../api";
 import { useAnnounce } from "../contexts/AnnouncerContext";
 import { currentTab, useRoute, type RouteOptions } from "../hooks/useRoute";
+
+export type SignoffAvailability =
+  | { state: "hidden" }
+  | { state: "available"; credentials: KeyringCredentials }
+  | { state: "unavailable"; reason: CredentialErrorReason; message: string };
 
 const TABS: (JumpTab & { key: number })[] = [
   { key: 0, slug: "updates", title: "Updates" },
@@ -53,9 +60,13 @@ const TABS: (JumpTab & { key: number })[] = [
 
 const TABS_ID = "cockpit-pacman-tabs";
 
-const VIEW_DETAILS_TABS = new Set(["installed", "search"]);
+const VIEW_DETAILS_TABS = new Set(["updates", "installed", "search", "history", "cache", "signoffs"]);
 
 const JUMP_WAIT_MS = 10_000;
+
+type SpaceReturn = CacheContext & UpgradeSpaceNeed;
+
+const ENDS_SPACE_RETURN = new Set(["sync-database", "upgrade"]);
 
 const textOf = (el: Element) => el.textContent?.trim() ?? "";
 
@@ -120,9 +131,15 @@ const withoutDetails = ({ pkg: _pkg, repo: _repo, ...rest }: RouteOptions): Rout
 export const App: React.FC = () => {
   const route = useRoute();
   const { navigate, setOptions } = route;
-  const [signoffAvailable, setSignoffAvailable] = useState(false);
-  const [signoffCredentials, setSignoffCredentials] = useState<KeyringCredentials | null>(null);
-  const signoffTabShown = signoffAvailable;
+  const [signoffs, setSignoffs] = useState<SignoffAvailability>({ state: "hidden" });
+  const [credentialsSettled, setCredentialsSettled] = useState(false);
+  const [toSignOff, setToSignOff] = useState<number | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ count: null, security: 0, failed: false });
+  // SignoffsView reloads after every sign-off; the Updates load only seeds the count.
+  const seedToSignOff = useCallback((count: number) => setToSignOff((prev) => prev ?? count), []);
+  const signoffAvailable = signoffs.state === "available";
+  const signoffTabShown = signoffs.state !== "hidden";
+  const signoffCredentials = signoffs.state === "available" ? signoffs.credentials : null;
   const [staleBundle, setStaleBundle] = useState<string | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const jumpInputRef = useRef<HTMLInputElement | null>(null);
@@ -161,6 +178,8 @@ export const App: React.FC = () => {
     setVisitedTabs(new Set(visitedTabs).add(activeTab));
   }
 
+  // Focus follows a tab change made by anything other than the tab itself;
+  // a view that already focused something in its panel keeps it.
   const tabClickedRef = useRef(false);
   const focusedTabRef = useRef(activeTab);
   useEffect(() => {
@@ -268,16 +287,75 @@ export const App: React.FC = () => {
     return onSystemChanged(check, ["system"]);
   }, []);
 
-  useEffect(() => {
-    getCredentials().then((credentials) => {
-      setSignoffCredentials(credentials);
-      setSignoffAvailable(true);
-    }).catch(() => setSignoffAvailable(false));
-  }, []);
+  const loadCredentials = useCallback(
+    (hideWhenAbsent: boolean) =>
+      getCredentials()
+        .then((credentials) => setSignoffs({ state: "available", credentials }))
+        .catch((err: unknown) => {
+          const reason = err instanceof CredentialError ? err.reason : "failed";
+          const message = err instanceof Error ? err.message : String(err);
+          // Keep retry failures in the tab that requested them.
+          if (reason === "absent" && hideWhenAbsent) {
+            setSignoffs({ state: "hidden" });
+          } else {
+            setSignoffs({ state: "unavailable", reason, message });
+          }
+        })
+        .finally(() => setCredentialsSettled(true)),
+    [],
+  );
 
-  useTransactionAnnouncements(activeSlug, route.options);
-  const historySearch = useMemo(() => route.options.q && activeSlug === "history"
-    ? { query: route.options.q, key: 0 } : undefined, [activeSlug, route.options.q]);
+  useEffect(() => {
+    loadCredentials(true);
+  }, [loadCredentials]);
+
+  const retryCredentials = useCallback(() => loadCredentials(false), [loadCredentials]);
+
+  const [keyringReturn, setKeyringReturn] = useState<{ context: KeyringContext; slug: string } | null>(null);
+  const [cacheReturn, setCacheReturn] = useState<SpaceReturn | null>(null);
+  const activeSlugRef = useRef(activeSlug);
+  useEffect(() => {
+    if (activeSlugRef.current === "keyring" && activeSlug !== "keyring") setKeyringReturn(null);
+    if (activeSlugRef.current === "cache" && activeSlug !== "cache") {
+      setCacheReturn((current) => (current?.resume ? current : null));
+    }
+    activeSlugRef.current = activeSlug;
+  }, [activeSlug]);
+  useEffect(() => onActiveTransactionChanged((transaction) => {
+    if (transaction && ENDS_SPACE_RETURN.has(transaction.command)) setCacheReturn(null);
+  }), []);
+
+  const viewKeyring = useCallback((context?: KeyringContext) => {
+    // Plain click handlers pass their event here.
+    setKeyringReturn(context?.origin ? { context, slug: activeSlugRef.current } : null);
+    goTab("keyring");
+  }, [goTab]);
+
+  const retryFromKeyring = () => {
+    if (!keyringReturn) return;
+    setKeyringReturn(null);
+    goTab(keyringReturn.slug);
+    keyringReturn.context.retry?.();
+  };
+
+  const viewCache = useCallback((context?: CacheContext) => {
+    // Plain click handlers pass their event here. TransactionRisks offers Open
+    // Cache only for a shortfall on the filesystem that holds the cache.
+    setCacheReturn(context?.mount ? { ...context, holds_cache: true } : null);
+    goTab("cache");
+  }, [goTab]);
+
+  const backToUpgrade = () => {
+    if (!cacheReturn) return;
+    setCacheReturn(null);
+    goTab("updates");
+    cacheReturn.resume?.();
+  };
+
+  const dismissCacheReturn = () => setCacheReturn(null);
+
+  const upgradeWaiting = cacheReturn?.resume ? cacheReturn : null;
+  useTransactionAnnouncements(activeSlug, route.options, upgradeWaiting);
 
   const handleSearchInstalled = (query: string) => goTab("installed", { q: query });
 
@@ -289,20 +367,24 @@ export const App: React.FC = () => {
       onViewDependencies: (packageName: string) => goTab("installed", { graph: packageName }),
       onViewHistory: (packageName: string) => goTab("history", { q: packageName }),
       onViewOrphans: () => goTab("installed", { filter: "orphan" }),
-      onViewCache: () => goTab("cache"),
-      onViewKeyring: () => goTab("keyring"),
+      onViewCache: viewCache,
+      onViewKeyring: viewKeyring,
       onViewSignoffs: signoffAvailable
         ? (filter?: string) => goTab("signoffs", filter ? { filter } : undefined)
         : undefined,
     }),
-    [signoffAvailable, goTab],
+    [signoffAvailable, goTab, viewKeyring, viewCache],
   );
 
+  // Inside the active panel, below the tab bar, so the bar does not move when it appears.
   const transactionBanner = (
     <TransactionBanner
       activeSlug={activeSlug}
       activeOptions={route.options}
       onNavigate={goTab}
+      upgradeWaiting={upgradeWaiting}
+      onBackToUpgrade={backToUpgrade}
+      onDismissUpgradeWaiting={dismissCacheReturn}
     />
   );
 
@@ -325,6 +407,12 @@ export const App: React.FC = () => {
             This page was loaded from version {bundleVersion} of cockpit-pacman
             but is talking to version {staleBundle}. Reload the page to pick up
             the new version; the current tab and search are kept.
+          </Alert>
+        )}
+        {signoffsBlocked && credentialsSettled && (
+          <Alert variant="info" isInline title="Signoffs are not available" className="pf-v6-u-mb-md">
+            No ArchWeb credentials were found in the login keyring, so the
+            Signoffs tab is hidden. Showing Updates instead.
           </Alert>
         )}
         <Flex
@@ -357,12 +445,43 @@ export const App: React.FC = () => {
         >
           <Tab
             eventKey={0}
-            title={<TabTitleText>Updates</TabTitleText>}
+            title={
+              <TabTitleText>
+                Updates
+                {updateStatus.failed ? (
+                  <>
+                    {" "}
+                    <Badge isRead screenReaderText="Update check failed">
+                      <ExclamationTriangleIcon aria-hidden="true" color="var(--pf-t--global--icon--color--status--warning--default)" />
+                    </Badge>
+                  </>
+                ) : !!updateStatus.count && (
+                  <>
+                    {" "}
+                    <Badge
+                      isRead={updateStatus.security === 0}
+                      screenReaderText={updateStatus.security > 0
+                        ? `updates available, ${updateStatus.security} security`
+                        : "updates available"}
+                    >
+                      {updateStatus.count}
+                    </Badge>
+                  </>
+                )}
+              </TabTitleText>
+            }
           >
             <TabActiveContext.Provider value={activeTab === 0}>
               {activeTab === 0 && transactionBanner}
               <ErrorBoundary fallbackTitle="Error loading updates">
-                <UpdatesView signoffCredentials={signoffCredentials} />
+                <UpdatesView
+                  signoffCredentials={signoffCredentials}
+                  toSignOff={toSignOff}
+                  onToSignOffCount={seedToSignOff}
+                  onUpdateStatus={setUpdateStatus}
+                  routeOptions={routeOptionsFor("updates")}
+                  onRouteChange={routeChangeHandlers.updates}
+                />
               </ErrorBoundary>
             </TabActiveContext.Provider>
           </Tab>
@@ -394,7 +513,7 @@ export const App: React.FC = () => {
             <TabActiveContext.Provider value={activeTab === 3}>
               {activeTab === 3 && transactionBanner}
               <ErrorBoundary fallbackTitle="Error loading history">
-                <HistoryView initialSearch={historySearch} />
+                <HistoryView routeOptions={routeOptionsFor("history")} onRouteChange={routeChangeHandlers.history} />
               </ErrorBoundary>
             </TabActiveContext.Provider>
           </Tab>
@@ -402,7 +521,13 @@ export const App: React.FC = () => {
             <TabActiveContext.Provider value={activeTab === 4}>
               {activeTab === 4 && transactionBanner}
               <ErrorBoundary fallbackTitle="Error loading cache">
-                <CacheView />
+                <CacheView
+                  routeOptions={routeOptionsFor("cache")}
+                  onRouteChange={routeChangeHandlers.cache}
+                  upgradeNeed={cacheReturn}
+                  onBackToUpgrade={cacheReturn?.resume ? backToUpgrade : undefined}
+                  onDismissUpgradeNeed={dismissCacheReturn}
+                />
               </ErrorBoundary>
             </TabActiveContext.Provider>
           </Tab>
@@ -410,7 +535,11 @@ export const App: React.FC = () => {
             <TabActiveContext.Provider value={activeTab === 5}>
               {activeTab === 5 && transactionBanner}
               <ErrorBoundary fallbackTitle="Error loading keyring">
-                <KeyringView />
+                <KeyringView
+                  signatureFailure={keyringReturn?.context}
+                  onRetryFailed={retryFromKeyring}
+                  onDismissFailure={() => setKeyringReturn(null)}
+                />
               </ErrorBoundary>
             </TabActiveContext.Provider>
           </Tab>
@@ -435,13 +564,31 @@ export const App: React.FC = () => {
           {signoffTabShown && (
             <Tab
               eventKey={7}
-              title={<TabTitleText>Signoffs</TabTitleText>}
+              title={
+                <TabTitleText>
+                  Signoffs
+                  {signoffAvailable && !!toSignOff && (
+                    <>
+                      {" "}
+                      <Badge isRead screenReaderText="to sign off">{toSignOff}</Badge>
+                    </>
+                  )}
+                </TabTitleText>
+              }
             >
               <TabActiveContext.Provider value={activeTab === 7}>
                 {activeTab === 7 && transactionBanner}
                 {visitedTabs.has(7) && (
                   <ErrorBoundary fallbackTitle="Error loading signoffs">
-                    <SignoffsView credentials={signoffCredentials!} />
+                    <SignoffsView
+                      key={signoffs.state}
+                      credentials={signoffCredentials}
+                      unavailable={signoffs.state === "unavailable" ? signoffs : undefined}
+                      onRetryCredentials={retryCredentials}
+                      routeOptions={routeOptionsFor("signoffs")}
+                      onRouteChange={routeChangeHandlers.signoffs}
+                      onToSignOffCount={setToSignOff}
+                    />
                   </ErrorBoundary>
                 )}
               </TabActiveContext.Provider>
