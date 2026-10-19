@@ -4327,7 +4327,7 @@ describe("UpdatesView", () => {
 
       expect((screen.getByLabelText(/^Select all \d+ updates?$/) as HTMLInputElement).checked).toBe(true);
       expect(screen.queryByRole("heading", { name: /Partial upgrade/ })).not.toBeInTheDocument();
-      expect(screen.getByText("1 package held by IgnorePkg")).toBeInTheDocument();
+      expect(screen.getByText("1 package ignored")).toBeInTheDocument();
 
       fireEvent.click(screen.getByLabelText(/^Select all \d+ updates?$/));
       await screen.findByText(/0 of 2 updates selected/);
@@ -4338,7 +4338,7 @@ describe("UpdatesView", () => {
       mockCheckUpdates.mockResolvedValue({ updates: [update("linux", true), update("firefox", true)], warnings: [], ...SYNC_TIMES });
       render(<UpdatesView />);
 
-      expect(await screen.findByRole("heading", { name: "All updates are held" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "All available updates are ignored" })).toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: /Partial upgrade/ })).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Manage ignored packages" }));
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
@@ -4575,11 +4575,11 @@ describe("UpdatesView", () => {
         expect(document.activeElement).toBe(screen.getByRole("button", { name: "Actions for firefox" }));
       });
 
-      it("renders the update list before the system overview", async () => {
+      it("renders the system overview before the update list", async () => {
         render(<UpdatesView />);
         const apply = await screen.findByRole("button", { name: /Apply 1 update/ });
         const overview = await screen.findByRole("region", { name: "System overview" });
-        expect(apply.compareDocumentPosition(overview) & document.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(overview.compareDocumentPosition(apply) & document.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         expect(screen.getByText(/^Download size .+ · Net size/)).toBeInTheDocument();
       });
 
@@ -5185,7 +5185,7 @@ describe("UpdatesView", () => {
       it("has no skipped step when only held updates were left out", async () => {
         mockCheckUpdates.mockResolvedValue({ updates: [mockUpdatesResponse.updates[0], held], warnings: [], ...SYNC_TIMES });
         await finishUpgrade();
-        expect(screen.getByText(/held by IgnorePkg/)).toBeInTheDocument();
+        expect(screen.getByText(/1 package is ignored/)).toBeInTheDocument();
         const steps = await screen.findByRole("list", { name: "Next steps" });
         expect(within(steps).queryByRole("button", { name: /skipped/ })).not.toBeInTheDocument();
         expect(within(steps).queryByText(/Skipped:/)).not.toBeInTheDocument();

@@ -734,8 +734,6 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
     [sortedUpdates, offset, perPage]
   );
 
-  // Held rows are skipped by pacman.conf IgnorePkg; deselected rows by the user.
-  // Only the latter make this run a partial upgrade.
   const heldPackages = useMemo(
     () => updates.filter((u) => u.ignored).map((u) => u.name),
     [updates],
@@ -2593,7 +2591,7 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
               ) : held > 0 ? (
                 <>
                   {done}.{" "}
-                  {plural(held, "package is", "packages are")} held by IgnorePkg.
+                  {plural(held, "package is", "packages are")} ignored.
                 </>
               ) : `${done}.`}
             </EmptyStateBody>
@@ -2746,13 +2744,32 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
           Skipping {plural(deselectedPackages.length, "package")}. Partial upgrades are unsupported and may cause dependency issues.
         </Alert>
       )}
+      <SystemOverviewCard
+        updates={updates}
+        securityCount={securityUpdateCount}
+        securityLoading={securityLoading}
+        securityUnavailable={securityUnavailable}
+        orphanCount={orphanCount}
+        cacheSize={cacheSize}
+        keyringStatus={keyringStatus}
+        summaryLoading={summaryLoading}
+        pendingSignoffs={signoffCredentials ? toSignOff : null}
+        securityFilterActive={securityFilterOn}
+        onToggleSecurityFilter={() => setSecurityFilterActive((v) => !v)}
+        securityEnabled={securityEnabled}
+        onSetSecurityEnabled={handleSetSecurityEnabled}
+        securityToggleBusy={savingSecurityToggle}
+        securityToggleError={securityToggleError}
+        key="overview"
+      />
+
       {heldPackages.length > 0 && !allHeld && (
         <Flex
           spaceItems={{ default: "spaceItemsSm" }}
           alignItems={{ default: "alignItemsCenter" }}
           className="pf-v6-u-mb-md pf-v6-u-font-size-sm"
         >
-          <FlexItem>{plural(heldPackages.length, "package", "packages")} held by IgnorePkg</FlexItem>
+          <FlexItem>{plural(heldPackages.length, "package", "packages")} ignored</FlexItem>
           <FlexItem>{manageIgnoredLink}</FlexItem>
         </Flex>
       )}
@@ -2760,10 +2777,10 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
       {allHeld ? withDetails(
         <Card>
           <CardBody>
-            <EmptyState headingLevel="h2" icon={ExclamationTriangleIcon} titleText="All updates are held">
+            <EmptyState headingLevel="h2" icon={ExclamationTriangleIcon} titleText="All available updates are ignored">
               <EmptyStateBody>
-                {plural(heldPackages.length, "pending update is", "pending updates are")} held by IgnorePkg in
-                pacman.conf, so there is nothing to apply.
+                {plural(heldPackages.length, "pending update is", "pending updates are")} excluded by your ignore settings.
+                Unignore a package to include it in an upgrade.
               </EmptyStateBody>
               <EmptyStateFooter>
                 <EmptyStateActions>
@@ -2790,8 +2807,9 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
             </Content>
           </CardHeader>
         </div>
-        {withDetails(
         <CardBody>
+        {withDetails(
+        <>
           <Toolbar className="pf-v6-u-px-0">
             <ToolbarContent>
               <ToolbarItem>
@@ -2991,29 +3009,11 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
             onPerPageSelect={onPerPageSelect}
           />
         )}
-        </CardBody>
+        </>
         )}
+        </CardBody>
       </Card>
       )}
-
-      <SystemOverviewCard
-        updates={updates}
-        securityCount={securityUpdateCount}
-        securityLoading={securityLoading}
-        securityUnavailable={securityUnavailable}
-        orphanCount={orphanCount}
-        cacheSize={cacheSize}
-        keyringStatus={keyringStatus}
-        summaryLoading={summaryLoading}
-        pendingSignoffs={signoffCredentials ? toSignOff : null}
-        securityFilterActive={securityFilterOn}
-        onToggleSecurityFilter={() => setSecurityFilterActive((v) => !v)}
-        securityEnabled={securityEnabled}
-        onSetSecurityEnabled={handleSetSecurityEnabled}
-        securityToggleBusy={savingSecurityToggle}
-        securityToggleError={securityToggleError}
-        key="overview"
-      />
 
       <NavigationProvider value={confirmNavigation}>
         <PreflightConfirmModal
