@@ -280,7 +280,6 @@ const OutsideRunLine: React.FC<{ run: OutsideRun; onNavigate: TransactionBannerP
   <Alert
     variant="info"
     isInline
-    isPlain
     title={outsideRunText(run)}
     className="pf-v6-u-mb-md"
     actionClose={<AlertActionCloseButton onClose={dismissOutsideRun} />}
@@ -298,7 +297,6 @@ const UpgradeWaitingLine: React.FC<{
     <Alert
       variant="info"
       isInline
-      isPlain
       title={upgradeWaitingText(waiting)}
       className="pf-v6-u-mb-md"
       actionClose={onDismiss && (
