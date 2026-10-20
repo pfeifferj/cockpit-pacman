@@ -13,7 +13,7 @@ use crate::config::{AppConfig, ScheduleConfigResponse, ScheduleMode, ScheduleSet
 use crate::inhibit::ShutdownInhibitor;
 use crate::models::{ScheduledCurrentRun, ScheduledRunEntry, ScheduledRunsResponse};
 use crate::util::{
-    CheckResult, TimeoutGuard, check_cancel, emit_json, setup_signal_handler, with_file_lock,
+    CheckResult, TimeoutGuard, check_cancel, emit_json, setup_signal_handler, with_file_lock_mode,
     with_file_read_lock, write_bytes_atomic_with_mode,
 };
 use crate::validation::{validate_max_packages, validate_schedule};
@@ -132,7 +132,8 @@ fn write_run(entry: &LogEntry) -> Result<()> {
     // Hold the lock across the rotate-check and the append: otherwise a
     // concurrent writer can interleave a half-written line, or lose an append
     // into a file being rotated out from under it.
-    with_file_lock(Path::new(LOG_LOCK_PATH), || {
+    // Readable so Cockpit users can take the shared lock.
+    with_file_lock_mode(Path::new(LOG_LOCK_PATH), 0o644, || {
         rotate_if_needed()?;
 
         let mut file = OpenOptions::new()

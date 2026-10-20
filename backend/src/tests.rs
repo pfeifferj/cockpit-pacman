@@ -1320,9 +1320,7 @@ fn test_update_info_ignored_serde_default() {
 #[test]
 fn test_news_dismissal_roundtrip() {
     use crate::handlers::news::{mark_news_read_to, read_news_state_from};
-    let dir = std::env::temp_dir().join("cockpit-pacman-test-dismissal-roundtrip");
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("news-read.json");
+    let path = dismissal_test_path("dismissal-roundtrip", "news-read.json");
     let url = "https://archlinux.org/news/grub-212/";
     mark_news_read_to(&path, url).unwrap();
     let state = read_news_state_from(&path).unwrap();
@@ -1332,9 +1330,7 @@ fn test_news_dismissal_roundtrip() {
 #[test]
 fn test_news_dismissal_dedupe() {
     use crate::handlers::news::{mark_news_read_to, read_news_state_from};
-    let dir = std::env::temp_dir().join("cockpit-pacman-test-dismissal-dedupe");
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("news-read.json");
+    let path = dismissal_test_path("dismissal-dedupe", "news-read.json");
     let url = "https://archlinux.org/news/grub-212/";
     mark_news_read_to(&path, url).unwrap();
     mark_news_read_to(&path, url).unwrap();
@@ -1345,9 +1341,7 @@ fn test_news_dismissal_dedupe() {
 #[test]
 fn test_news_dismissal_atomicity() {
     use crate::handlers::news::{mark_news_read_to, read_news_state_from};
-    let dir = std::env::temp_dir().join("cockpit-pacman-test-dismissal-atomicity");
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("news-read.json");
+    let path = dismissal_test_path("dismissal-atomicity", "news-read.json");
     let handles: Vec<_> = (0..20)
         .map(|i| {
             let p = path.clone();
@@ -1370,7 +1364,7 @@ const DISMISSAL_KINDS: &[&str] = &["services", "reboot", "pacnew"];
 
 fn dismissal_test_path(label: &str, file: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("cockpit-pacman-test-{label}"));
-    std::fs::create_dir_all(&dir).unwrap();
+    crate::util::private_dir(&dir);
     let path = dir.join(file);
     let _ = std::fs::remove_file(&path);
     path

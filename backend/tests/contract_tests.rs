@@ -12,13 +12,13 @@ use cockpit_pacman_backend::models::{
     GroupedLogResponse, KeyInfo, KeyringKey, KeyringStatusResponse, LogEntry, LogGroup,
     MirrorEntry, MirrorListResponse, MirrorStatus, MirrorStatusResponse, MirrorTestResult,
     NewsItem, NewsResponse, OrphanPackage, OrphanResponse, Package, PackageDetails,
-    PackageListResponse, PackageSecurityAdvisory, PacnewFile, PacnewStatus, PreflightResponse,
-    PreflightWarning, ProviderChoice, RebootStatus, RefreshMirrorsResponse, ReplacementInfo,
-    RestartBlocked, RestoreMirrorBackupResponse, SaveMirrorlistResponse, ScheduledRunEntry,
-    ScheduledRunsResponse, SearchResponse, SearchResult, SecurityInfoAdvisory, SecurityInfoGroup,
-    SecurityInfoIssue, SecurityInfoResponse, SecurityResponse, ServiceRestart, ServicesStatus,
-    StreamEvent, SyncPackageDetails, UpdateInfo, UpdateStats, UpdatesResponse, VersionMatch,
-    WarningSeverity,
+    PackageListResponse, PackageSecurityAdvisory, PacnewFile, PacnewPreview, PacnewResolution,
+    PacnewResolveRequest, PacnewResolveResponse, PacnewStatus, PreflightResponse, PreflightWarning,
+    ProviderChoice, RebootStatus, RefreshMirrorsResponse, ReplacementInfo, RestartBlocked,
+    RestoreMirrorBackupResponse, SaveMirrorlistResponse, ScheduledRunEntry, ScheduledRunsResponse,
+    SearchResponse, SearchResult, SecurityInfoAdvisory, SecurityInfoGroup, SecurityInfoIssue,
+    SecurityInfoResponse, SecurityResponse, ServiceRestart, ServicesStatus, StreamEvent,
+    SyncPackageDetails, UpdateInfo, UpdateStats, UpdatesResponse, VersionMatch, WarningSeverity,
 };
 use serde_json::Value;
 
@@ -1237,10 +1237,11 @@ fn pacnew_status_shape() {
         has_pacnew: true,
         files: vec![PacnewFile {
             path: "/etc/pacman.conf.pacnew".into(),
-            package: "pacman".into(),
+            package: Some("pacman".into()),
             kind: "pacnew".into(),
             mtime: 1750000000,
         }],
+        warnings: None,
     };
     let v = to_json(&status);
 
@@ -1262,6 +1263,7 @@ fn pacnew_status_empty_shape() {
     let status = PacnewStatus {
         has_pacnew: false,
         files: vec![],
+        warnings: None,
     };
     let v = to_json(&status);
 
@@ -1281,6 +1283,53 @@ fn pacnew_status_fixture_matches_struct_shape() {
     assert_string(file, "path");
     assert_string(file, "package");
     assert_string(file, "kind");
+
+    let status: PacnewStatus = serde_json::from_value(fixture).unwrap();
+    assert!(status.files.iter().any(|file| file.package.is_none()));
+    assert_eq!(status.warnings.map(|warnings| warnings.len()), Some(1));
+}
+
+#[test]
+fn pacnew_preview_and_resolution_contract() {
+    let preview = PacnewPreview {
+        path: "/etc/removed.conf.pacsave".into(),
+        current_path: "/etc/removed.conf".into(),
+        kind: "pacsave".into(),
+        revision: "opaque-revision".into(),
+        current_content: None,
+        pending_content: "saved = true\n".into(),
+    };
+    let value = to_json(&preview);
+    assert!(value["current_content"].is_null());
+    assert_eq!(value["pending_content"], "saved = true\n");
+    for (resolution, name) in [
+        (PacnewResolution::KeepCurrent, "keep_current"),
+        (PacnewResolution::UsePending, "use_pending"),
+        (PacnewResolution::SaveMerged, "save_merged"),
+    ] {
+        let request = PacnewResolveRequest {
+            path: preview.path.clone(),
+            revision: preview.revision.clone(),
+            resolution,
+            merged_content: (resolution == PacnewResolution::SaveMerged).then(|| "merged".into()),
+        };
+        let value = to_json(&request);
+        assert_eq!(value["resolution"], name);
+        assert_eq!(
+            value.get("merged_content").is_some(),
+            resolution == PacnewResolution::SaveMerged
+        );
+        serde_json::from_value::<PacnewResolveRequest>(value).unwrap();
+    }
+    let response = to_json(&PacnewResolveResponse {
+        success: true,
+        message: "Reviewed /etc/removed.conf".into(),
+        backup_paths: vec!["/etc/.cockpit-pacman-backup.example".into()],
+        warnings: vec!["The pending file was kept.".into()],
+    });
+    assert_bool(&response, "success");
+    assert_array(&response, "backup_paths");
+    assert_array(&response, "warnings");
 }
 
 // CacheInfo

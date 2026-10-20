@@ -15,7 +15,7 @@ const PACMAN_CONF_PATH: &str = "/etc/pacman.conf";
 const BACKUP_PREFIX: &str = "/etc/pacman.conf.backup.";
 const BACKUP_NAME_PREFIX: &str = "pacman.conf.backup.";
 const BACKUP_META_PATH: &str = "/etc/.pacman-conf-backups.meta.json";
-const LOCK_PATH: &str = "/etc/pacman.conf.lock";
+pub(crate) const LOCK_PATH: &str = "/etc/pacman.conf.lock";
 const MAX_BACKUPS: usize = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -733,7 +733,7 @@ mod tests {
     #[test]
     fn a_stale_save_preserves_external_edits_and_a_fresh_save_can_delete_them() {
         let directory = std::env::temp_dir().join(format!("cpac-repos-cas-{}", std::process::id()));
-        std::fs::create_dir(&directory).unwrap();
+        crate::util::private_dir(&directory);
         let target = directory.join("pacman.conf");
         let lock = directory.join("lock");
         let manifest = directory.join("meta.json");

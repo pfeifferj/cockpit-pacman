@@ -118,9 +118,17 @@ export type PackageListResponse = { packages: Array<Package>, total: number, tot
 
 export type PackageSecurityAdvisory = { package: string, severity: string, advisory_type: string, avg_name: string, cve_ids: Array<string>, fixed_version: string | null, fix_available: boolean, affected_version: string, installed_version: string, status: string, };
 
-export type PacnewFile = { path: string, package: string, kind: string, mtime: number, };
+export type PacnewFile = { path: string, package: string | null, kind: string, mtime: number, };
 
-export type PacnewStatus = { has_pacnew: boolean, files: Array<PacnewFile>, };
+export type PacnewPreview = { path: string, current_path: string, kind: string, revision: string, current_content: string | null, pending_content: string, };
+
+export type PacnewResolution = "keep_current" | "use_pending" | "save_merged";
+
+export type PacnewResolveRequest = { path: string, revision: string, resolution: PacnewResolution, merged_content?: string, };
+
+export type PacnewResolveResponse = { success: boolean, message: string, backup_paths: Array<string>, warnings: Array<string>, };
+
+export type PacnewStatus = { has_pacnew: boolean, files: Array<PacnewFile>, warnings?: Array<string>, };
 
 export type PreflightKeyInfo = { fingerprint: string, uid: string, };
 

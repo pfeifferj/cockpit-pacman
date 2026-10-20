@@ -32,7 +32,50 @@ import {
   listMirrorBackups,
   testMirrors,
   refreshMirrors,
+  getPacnewStatus,
+  previewPacnew,
+  resolvePacnew,
 } from "./api";
+
+it("requires administrative access to preview configuration contents", async () => {
+  mockSpawn.mockReturnValue(createMockSpawnPromise("{}"));
+  await previewPacnew("/etc/example.conf.pacnew");
+  expect(mockSpawn).toHaveBeenLastCalledWith(
+    ["/usr/libexec/cockpit-pacman/cockpit-pacman-backend", "preview-pacnew", "/etc/example.conf.pacnew"],
+    { superuser: "require", err: "message" },
+  );
+});
+
+it("sends merged configuration over stdin without exposing contents in arguments", async () => {
+  const process = createMockSpawnPromise("{}");
+  const input = vi.spyOn(process, "input");
+  mockSpawn.mockReturnValue(process);
+  const request = { path: "/etc/example.conf.pacnew", revision: "pair", resolution: "save_merged" as const, merged_content: "password=secret-ä\n" };
+  await resolvePacnew(request);
+  expect(mockSpawn).toHaveBeenLastCalledWith(
+    ["/usr/libexec/cockpit-pacman/cockpit-pacman-backend", "resolve-pacnew"],
+    { superuser: "require", err: "message" },
+  );
+  expect(input).toHaveBeenCalledWith(JSON.stringify(request));
+});
+
+it("scans pending files with administrative access when the session has it", async () => {
+  mockSpawn.mockReturnValue(createMockSpawnPromise('{"has_pacnew":false,"files":[]}'));
+  await getPacnewStatus();
+  expect(mockSpawn).toHaveBeenLastCalledWith(
+    ["/usr/libexec/cockpit-pacman/cockpit-pacman-backend", "pacnew-status"],
+    { superuser: "try", err: "message" },
+  );
+});
+
+it("can complete the pending-file scan with administrative access", async () => {
+  mockSpawn.mockReturnValue(createMockSpawnPromise('{"has_pacnew":false,"files":[]}'));
+  await getPacnewStatus(true);
+  expect(mockSpawn).toHaveBeenLastCalledWith(
+    ["/usr/libexec/cockpit-pacman/cockpit-pacman-backend", "pacnew-status"],
+    { superuser: "require", err: "message" },
+  );
+});
 
 it("reads protected mirror undo backups with administrative access", async () => {
   mockSpawn.mockClear();

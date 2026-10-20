@@ -15,12 +15,13 @@ use cockpit_pacman_backend::handlers::{
     get_services_status, get_settings, init_keyring, install_package, keyring_status,
     list_archive_versions, list_downgrades, list_ignored, list_installed, list_mirror_backups,
     list_mirrors, list_orphans, list_repo_backups, list_repos, local_package_info, mark_dismissed,
-    mark_news_read, parse_signoff_batch, preflight_upgrade, read_credentials_from_stdin,
-    read_dismissal, read_news_state, record_interrupted, refresh_keyring, refresh_mirrors,
-    remove_ignored, remove_orphans, remove_package, remove_stale_lock, restore_mirror_backup,
-    restore_repo_backup, run_upgrade, save_mirrorlist, save_repos, scheduled_run, search,
-    security_info, set_schedule_config, set_settings, signoff_batch, signoff_list, signoff_revoke,
-    signoff_sign, sync_database, sync_package_info, test_mirrors, validate_cache_selection,
+    mark_news_read, parse_signoff_batch, preflight_upgrade, preview_pacnew,
+    read_credentials_from_stdin, read_dismissal, read_news_state, record_interrupted,
+    refresh_keyring, refresh_mirrors, remove_ignored, remove_orphans, remove_package,
+    remove_stale_lock, resolve_pacnew, restore_mirror_backup, restore_repo_backup, run_upgrade,
+    save_mirrorlist, save_repos, scheduled_run, search, security_info, set_schedule_config,
+    set_settings, signoff_batch, signoff_list, signoff_revoke, signoff_sign, sync_database,
+    sync_package_info, test_mirrors, validate_cache_selection,
 };
 use cockpit_pacman_backend::models::{MirrorEntry, RepoEntry, StructuredError};
 use cockpit_pacman_backend::util::{classify_error, emit_json, shutdown_event_writer};
@@ -114,6 +115,8 @@ const COMMANDS: &[&str] = &[
     "reboot-status",
     "services-status",
     "pacnew-status",
+    "preview-pacnew",
+    "resolve-pacnew",
     "list-mirrors",
     "fetch-mirror-status",
     "refresh-mirrors",
@@ -272,7 +275,10 @@ Commands:
   scheduled-record-interrupted   Record a systemd-killed run (ExecStopPost)
   reboot-status          Check if system reboot is recommended
   services-status        List running services whose binaries were replaced
-  pacnew-status          List .pacnew/.pacsave config files needing manual merge
+  pacnew-status          List pending .pacnew/.pacsave configuration files
+  preview-pacnew PATH    Read a pending configuration and its current file (requires root)
+  resolve-pacnew         Keep, replace or merge a pending configuration (requires root)
+                         request: JSON on stdin with path, revision, resolution and optional merged_content
   list-mirrors           List mirrors from /etc/pacman.d/mirrorlist
   fetch-mirror-status    Fetch mirror status from archlinux.org API
   refresh-mirrors [count] [country] [protocol] [sort_by]
@@ -799,6 +805,8 @@ fn main() {
         "reboot-status" => get_reboot_status(),
         "services-status" => get_services_status(),
         "pacnew-status" => get_pacnew_status(),
+        "preview-pacnew" => required_arg(&args, 2).and_then(preview_pacnew),
+        "resolve-pacnew" => resolve_pacnew(),
         "list-mirrors" => list_mirrors(),
         "fetch-mirror-status" => fetch_mirror_status(),
         "refresh-mirrors" => {

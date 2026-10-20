@@ -348,7 +348,7 @@ mod tests {
                 std::process::id(),
                 NEXT_DIR.fetch_add(1, Ordering::Relaxed)
             ));
-            fs::create_dir(&dir).unwrap();
+            crate::util::private_dir(&dir);
             Self {
                 target: dir.join("config"),
                 lock: dir.join("lock"),

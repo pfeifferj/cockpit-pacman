@@ -56,8 +56,19 @@ pub fn resolve_file_owners(handle: &Alpm, wanted: &HashSet<String>) -> HashMap<S
         })
         .collect();
 
+    // Most file entries sit outside the wanted top-level directories; skip them before hashing.
+    let mut prefixes: Vec<&[u8]> = by_relative.keys().map(|path| top_level(path)).collect();
+    prefixes.sort_unstable();
+    prefixes.dedup();
+
     for pkg in handle.localdb().pkgs() {
         for file in pkg.files().files() {
+            if !prefixes
+                .iter()
+                .any(|prefix| file.name().starts_with(prefix))
+            {
+                continue;
+            }
             if let Some(absolute) = by_relative.get(file.name())
                 && !owners.contains_key(*absolute)
             {
@@ -69,6 +80,12 @@ pub fn resolve_file_owners(handle: &Alpm, wanted: &HashSet<String>) -> HashMap<S
         }
     }
     owners
+}
+
+fn top_level(path: &[u8]) -> &[u8] {
+    path.iter()
+        .position(|byte| *byte == b'/')
+        .map_or(path, |end| &path[..=end])
 }
 
 pub fn find_upgrade_candidate<'a>(handle: &'a Alpm, name: &str) -> Option<&'a Package> {

@@ -35,7 +35,7 @@ pub use mutation::{
     install_package, preflight_upgrade, remove_orphans, remove_package, run_upgrade, sync_database,
 };
 pub use news::{fetch_news, mark_dismissed, mark_news_read, read_dismissal, read_news_state};
-pub use pacnew::get_pacnew_status;
+pub use pacnew::{get_pacnew_status, preview_pacnew, resolve_pacnew};
 pub use query::{
     check_updates, list_installed, list_orphans, local_package_info, search, sync_package_info,
 };

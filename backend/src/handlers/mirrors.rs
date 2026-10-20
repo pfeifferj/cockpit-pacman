@@ -17,7 +17,7 @@ use crate::util::{
 use crate::validation::{validate_directive_value, validate_mirror_url};
 
 const MIRRORLIST_PATH: &str = "/etc/pacman.d/mirrorlist";
-const LOCK_PATH: &str = "/etc/pacman.d/.mirrorlist.lock";
+pub(crate) const LOCK_PATH: &str = "/etc/pacman.d/.mirrorlist.lock";
 const TEST_FILE: &str = "core.db";
 const MIN_COMPLETION: f64 = 0.9;
 // core.db should be at least 100KB (100,000 bytes) to be valid

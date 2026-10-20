@@ -711,7 +711,7 @@ pub struct RebootStatus {
 #[ts(export, export_to = "../../src/bindings/index.ts")]
 pub struct PacnewFile {
     pub path: String,
-    pub package: String,
+    pub package: Option<String>,
     pub kind: String,
     #[ts(type = "number")]
     pub mtime: i64,
@@ -722,6 +722,50 @@ pub struct PacnewFile {
 pub struct PacnewStatus {
     pub has_pacnew: bool,
     pub files: Vec<PacnewFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub warnings: Option<Vec<String>>,
+}
+
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct PacnewPreview {
+    pub path: String,
+    pub current_path: String,
+    pub kind: String,
+    pub revision: String,
+    pub current_content: Option<String>,
+    pub pending_content: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub enum PacnewResolution {
+    KeepCurrent,
+    UsePending,
+    SaveMerged,
+}
+
+#[derive(Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct PacnewResolveRequest {
+    pub path: String,
+    pub revision: String,
+    pub resolution: PacnewResolution,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub merged_content: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/index.ts")]
+pub struct PacnewResolveResponse {
+    pub success: bool,
+    pub message: String,
+    pub backup_paths: Vec<String>,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, TS)]

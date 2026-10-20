@@ -2,6 +2,8 @@
   "has_pacnew": true,
   "files": [
     { "path": "/etc/pacman.conf.pacnew", "package": "pacman", "kind": "pacnew", "mtime": 1750000000 },
+    { "path": "/etc/removed.conf.pacsave", "package": null, "kind": "pacsave", "mtime": 1750000250 },
     { "path": "/etc/ssh/sshd_config.pacsave", "package": "openssh", "kind": "pacsave", "mtime": 1750000500 }
-  ]
+  ],
+  "warnings": ["Skipped a non-UTF-8 filename under /etc."]
 }

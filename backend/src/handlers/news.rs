@@ -471,7 +471,7 @@ mod fetch_tests {
             std::process::id(),
             super::Utc::now().timestamp_nanos_opt().unwrap()
         ));
-        std::fs::create_dir(&directory).unwrap();
+        crate::util::private_dir(&directory);
         let path = directory.join("news.json");
         assert!(!super::news_with_cache(&url, &path, 1, false).unwrap().stale);
         assert!(
@@ -555,7 +555,7 @@ mod undo_tests {
             std::process::id(),
             Utc::now().timestamp_nanos_opt().unwrap()
         ));
-        std::fs::create_dir(&dir).unwrap();
+        crate::util::private_dir(&dir);
         let path = dir.join("news.json");
         mark_news_read_to(&path, "https://example.org/one").unwrap();
         mark_news_read_to(&path, "https://example.org/two").unwrap();

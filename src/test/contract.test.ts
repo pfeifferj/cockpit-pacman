@@ -632,6 +632,14 @@ describe("getPacnewStatus contract", () => {
     expect(typeof result.files[0].kind).toBe("string");
   });
 
+  it("allows files no package owns and carries scan warnings", async () => {
+    spawnReturns(pacnewStatusFixture);
+    const result = await getPacnewStatus();
+
+    expect(result.files.some((file) => file.package === null)).toBe(true);
+    expect(result.warnings).toEqual(["Skipped a non-UTF-8 filename under /etc."]);
+  });
+
   it("empty status has no files", async () => {
     const empty: PacnewStatus = { has_pacnew: false, files: [] };
     spawnReturns(empty);

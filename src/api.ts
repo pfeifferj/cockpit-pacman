@@ -35,6 +35,9 @@ import type {
   OrphanResponse,
   PackageDetails,
   PackageListResponse,
+  PacnewPreview,
+  PacnewResolveRequest,
+  PacnewResolveResponse,
   PacnewStatus,
   PreflightResponse,
   RebootStatus,
@@ -1423,8 +1426,19 @@ export async function getRebootStatus(): Promise<RebootStatus> {
 
 export type PacnewKind = "pacnew" | "pacsave";
 
-export async function getPacnewStatus(): Promise<PacnewStatus> {
-  return runBackend<PacnewStatus>("pacnew-status", [], { superuser: "none" });
+export async function getPacnewStatus(administrative = false): Promise<PacnewStatus> {
+  return runBackend<PacnewStatus>("pacnew-status", [], { superuser: administrative ? "require" : "try" });
+}
+
+export async function previewPacnew(path: string, signal?: AbortSignal): Promise<PacnewPreview> {
+  return runBackend<PacnewPreview>("preview-pacnew", [path], { superuser: "require", signal });
+}
+
+export async function resolvePacnew(request: PacnewResolveRequest): Promise<PacnewResolveResponse> {
+  return runBackend<PacnewResolveResponse>("resolve-pacnew", [], {
+    superuser: "require",
+    stdin: JSON.stringify(request),
+  });
 }
 
 export async function getBackendVersion(): Promise<string> {

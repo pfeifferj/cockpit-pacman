@@ -328,31 +328,142 @@ pub fn config_path(file: &str) -> Result<std::path::PathBuf> {
 /// same on-disk file. The lock is a dedicated sidecar file, never the data file
 /// itself: the data file is replaced via rename, so a lock on its inode would
 /// not cover a second writer that opens the path fresh. The sidecar is created
-/// if absent and left in place between runs.
+/// if absent and left in place between runs, readable only by its owner so
+/// other users cannot hold it.
 pub fn with_file_lock<F, R>(lock_path: &Path, f: F) -> Result<R>
 where
     F: FnOnce() -> Result<R>,
 {
-    use std::fs::OpenOptions;
+    with_file_lock_mode(lock_path, 0o600, f)
+}
 
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory for lock {:?}", lock_path))?;
-    }
-
-    let lock_file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(lock_path)
-        .with_context(|| format!("Failed to open lock file {:?}", lock_path))?;
-
+/// [`with_file_lock`] with a lock file of `mode`; `0o644` lets other users take
+/// [`with_file_read_lock`].
+pub fn with_file_lock_mode<F, R>(lock_path: &Path, mode: u32, f: F) -> Result<R>
+where
+    F: FnOnce() -> Result<R>,
+{
+    let lock_file = open_lock_file(lock_path, mode)?;
     lock_file
         .lock()
         .with_context(|| format!("Failed to acquire lock on {:?}", lock_path))?;
-
-    // Lock is released when lock_file is dropped, including on early return.
     f()
+}
+
+fn open_lock_file(lock_path: &Path, mode: u32) -> Result<File> {
+    use std::fs::OpenOptions;
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+
+    let parent = lock_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o755)
+        .create(parent)
+        .with_context(|| format!("Failed to create directory for lock {:?}", lock_path))?;
+    let directory = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(parent)
+        .with_context(|| format!("Failed to open lock directory {}", parent.display()))?;
+    let euid = unsafe { libc::geteuid() };
+    if !owned_without_group_write(&directory, euid)? {
+        return Err(crate::models::InvalidInput(format!(
+            "Unsafe lock directory {}",
+            parent.display()
+        ))
+        .into());
+    }
+    let name = lock_path
+        .file_name()
+        .ok_or_else(|| crate::models::InvalidInput("A lock filename is required".into()))?;
+    let name = std::ffi::CString::new(name.as_encoded_bytes())?;
+    let fd = unsafe {
+        libc::openat(
+            directory.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK,
+            mode,
+        )
+    };
+    if fd < 0 {
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::ELOOP) {
+            return Err(crate::models::InvalidInput(format!(
+                "Lock file {} is a symbolic link",
+                lock_path.display()
+            ))
+            .into());
+        }
+        return Err(error)
+            .with_context(|| format!("Failed to open lock file {}", lock_path.display()));
+    }
+    let lock_file = unsafe { File::from_raw_fd(fd) };
+    let metadata = lock_file.metadata()?;
+    if !(metadata.is_file()
+        && metadata.nlink() == 1
+        && owned_without_group_write(&lock_file, euid)?)
+    {
+        return Err(crate::models::InvalidInput(format!(
+            "Unsafe lock file {}",
+            lock_path.display()
+        ))
+        .into());
+    }
+    if metadata.mode() & 0o777 != mode {
+        lock_file.set_permissions(std::fs::Permissions::from_mode(mode))?;
+    }
+    Ok(lock_file)
+}
+
+// Per-user state from releases without these checks can be group-writable under a
+// 002 umask; the user may tighten their own files, root refuses them.
+fn owned_without_group_write(file: &File, euid: u32) -> Result<bool> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let metadata = file.metadata()?;
+    if metadata.uid() != euid {
+        return Ok(false);
+    }
+    if metadata.mode() & 0o022 != 0 {
+        if euid == 0 {
+            return Ok(false);
+        }
+        file.set_permissions(std::fs::Permissions::from_mode(metadata.mode() & 0o7755))?;
+    }
+    Ok(true)
+}
+
+pub fn with_file_lock_timeout<F, R>(lock_path: &Path, timeout: Duration, f: F) -> Result<R>
+where
+    F: FnOnce() -> Result<R>,
+{
+    let lock_file = open_lock_file(lock_path, 0o600)?;
+    let started = Instant::now();
+    loop {
+        match lock_file.try_lock() {
+            Ok(()) => return f(),
+            Err(std::fs::TryLockError::WouldBlock) => {}
+            Err(std::fs::TryLockError::Error(error)) => {
+                return Err(error)
+                    .with_context(|| format!("Failed to acquire lock on {}", lock_path.display()));
+            }
+        }
+        let remaining = timeout.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!(
+                    "Timed out waiting for configuration lock {}; try again when the other program finishes",
+                    lock_path.display()
+                ),
+            )
+            .into());
+        }
+        std::thread::sleep(remaining.min(Duration::from_millis(10)));
+    }
 }
 
 /// Shared lock for readers. Opens read-only and never creates anything, so an
@@ -777,6 +888,187 @@ macro_rules! check_cancel_early {
             return Ok(());
         }
     }};
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod file_lock_tests {
+    use super::*;
+    use std::fs::{self, OpenOptions};
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt, symlink};
+    use std::path::PathBuf;
+
+    struct Fixture(PathBuf);
+
+    impl Fixture {
+        fn new() -> Self {
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let path = std::env::temp_dir().join(format!(
+                "cpac-file-lock-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, AtomicOrdering::Relaxed)
+            ));
+            fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
+            Self(path)
+        }
+
+        fn lock(&self) -> PathBuf {
+            self.0.join("config.lock")
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn a_readonly_flock_times_out_without_running_the_writer() {
+        let fixture = Fixture::new();
+        with_file_lock(&fixture.lock(), || Ok(())).unwrap();
+        let held = File::open(fixture.lock()).unwrap();
+        held.lock().unwrap();
+        let ran = AtomicBool::new(false);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let completed = std::thread::scope(|scope| {
+            let worker = scope.spawn(|| {
+                sender
+                    .send(with_file_lock_timeout(
+                        &fixture.lock(),
+                        Duration::from_millis(20),
+                        || {
+                            ran.store(true, AtomicOrdering::SeqCst);
+                            Ok(())
+                        },
+                    ))
+                    .unwrap();
+            });
+            let completed = receiver.recv_timeout(Duration::from_secs(2));
+            held.unlock().unwrap();
+            worker.join().unwrap();
+            completed
+        });
+        let error = completed
+            .expect("the writer must stop waiting")
+            .unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<io::Error>().unwrap().kind(),
+            io::ErrorKind::TimedOut
+        );
+        assert_eq!(classify_error(&error), Some("timeout"));
+        assert!(!ran.load(AtomicOrdering::SeqCst));
+        with_file_lock_timeout(&fixture.lock(), Duration::ZERO, || {
+            ran.store(true, AtomicOrdering::SeqCst);
+            Ok(())
+        })
+        .unwrap();
+        assert!(ran.load(AtomicOrdering::SeqCst));
+    }
+
+    #[test]
+    fn lock_writers_reject_symlinks_hardlinks_nonregular_and_writable_files() {
+        for unsafe_kind in ["symlink", "hardlink", "fifo", "directory"] {
+            let fixture = Fixture::new();
+            let target = fixture.0.join("target");
+            fs::write(&target, "unchanged").unwrap();
+            let lock = fixture.lock();
+            match unsafe_kind {
+                "symlink" => symlink("target", &lock).unwrap(),
+                "hardlink" => fs::hard_link(&target, &lock).unwrap(),
+                "fifo" => {
+                    let path = std::ffi::CString::new(lock.as_os_str().as_encoded_bytes()).unwrap();
+                    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+                }
+                "directory" => fs::create_dir(&lock).unwrap(),
+                _ => unreachable!(),
+            }
+            let ran = AtomicBool::new(false);
+            assert!(
+                with_file_lock_timeout(&lock, Duration::ZERO, || {
+                    ran.store(true, AtomicOrdering::SeqCst);
+                    Ok(())
+                })
+                .is_err(),
+                "accepted {unsafe_kind} lock"
+            );
+            assert!(!ran.load(AtomicOrdering::SeqCst));
+            assert_eq!(fs::read_to_string(&target).unwrap(), "unchanged");
+        }
+    }
+
+    #[test]
+    fn lock_writers_reject_unsafe_or_symlinked_parent_directories() {
+        let fixture = Fixture::new();
+        let directory = fixture.0.join("directory");
+        fs::create_dir(&directory).unwrap();
+        let alias = fixture.0.join("alias");
+        symlink("directory", &alias).unwrap();
+        assert!(with_file_lock(&alias.join("config.lock"), || Ok(())).is_err());
+        assert!(!directory.join("config.lock").exists());
+    }
+
+    #[test]
+    fn writable_lock_state_is_tightened_for_users_and_refused_for_root() {
+        let fixture = Fixture::new();
+        let directory = fixture.0.join("directory");
+        fs::create_dir(&directory).unwrap();
+        let lock = directory.join("config.lock");
+        fs::write(&lock, "").unwrap();
+        for path in [&directory, &lock] {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o777)).unwrap();
+        }
+        let result = with_file_lock(&lock, || Ok(()));
+        if unsafe { libc::geteuid() } == 0 {
+            assert_eq!(
+                classify_error(&result.unwrap_err()),
+                Some("validation_error")
+            );
+        } else {
+            result.unwrap();
+            for path in [&directory, &lock] {
+                assert_eq!(fs::metadata(path).unwrap().permissions().mode() & 0o022, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn writer_locks_are_private_unless_readers_share_them() {
+        let fixture = Fixture::new();
+        let lock = fixture.lock();
+        let mode = || fs::metadata(&lock).unwrap().permissions().mode() & 0o777;
+        with_file_lock(&lock, || Ok(())).unwrap();
+        assert_eq!(mode(), 0o600);
+        fs::set_permissions(&lock, fs::Permissions::from_mode(0o644)).unwrap();
+        with_file_lock_timeout(&lock, Duration::ZERO, || Ok(())).unwrap();
+        assert_eq!(mode(), 0o600);
+        with_file_lock_mode(&lock, 0o644, || Ok(())).unwrap();
+        assert_eq!(mode(), 0o644);
+    }
+
+    #[test]
+    fn shared_lock_readers_keep_shared_exclusion_and_busy_or_missing_fallbacks() {
+        let fixture = Fixture::new();
+        let lock = fixture.lock();
+        assert_eq!(
+            with_file_read_lock(&lock, || Ok("missing")).unwrap(),
+            "missing"
+        );
+        with_file_lock(&lock, || {
+            assert_eq!(with_file_read_lock(&lock, || Ok("busy"))?, "busy");
+            Ok(())
+        })
+        .unwrap();
+        with_file_read_lock(&lock, || {
+            let writer = OpenOptions::new().write(true).open(&lock)?;
+            assert!(matches!(
+                writer.try_lock(),
+                Err(std::fs::TryLockError::WouldBlock)
+            ));
+            Ok(())
+        })
+        .unwrap();
+    }
 }
 
 #[cfg(test)]
