@@ -1,13 +1,31 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.0] - 2026-10-20
 
 ### Added
-- Installing a package while system updates are pending warns about partial upgrades and offers to open the Updates tab first
+- Package previews show dependencies, removals and disk space before confirmation.
+- Installing while system updates are pending warns about partial upgrades.
+- Package drawers, row actions, reinstall and install-reason controls.
+- Bookmarkable views, keyboard shortcuts and a searchable package jump.
+- Background transactions with shared progress and result notices.
+- Repository and mirror editing with checked Undo and outside-change recovery.
+- Repository key import by fingerprint, with a separate local-signing step.
+- Cache cleanup estimates, filtered selection and recovery for upgrades short on space.
+- History origins and date filters; scheduled run details and post-upgrade tidy-up.
+- Reversible notice dismissals and recovery for unavailable ArchWeb credentials.
+- HTTP, HTTPS and SOCKS proxy support for interactive and scheduled operations.
 
 ### Fixed
-- Updates, advisory settings and the ignored-package list use defaults when legacy config permissions deny access. Updates warn when saved cockpit-pacman package ignores are unavailable
-- Show a dismissible alert when the security advisories setting cannot be saved
+- Cancellation waits for package writes and post-transaction hooks to finish.
+- Failed or partially applied transactions retain their error and applied state.
+- Package conflicts require removal consent; saved package ignores survive refreshes.
+- Page opening reads existing databases without starting a root database sync.
+- Config saves and Undo reject stale revisions; restore backups remain recoverable.
+- Scheduled failures and missing run records remain visible.
+- Keyring timeouts and cancellation terminate child processes and release locks.
+- Cache and history reads are paged or cached; inactive tabs load on demand.
+- Unreadable settings, failed advisory writes and local connection errors keep their diagnostics.
+- Development installation leaves package-owned system files alone.
 
 ## [0.3.8] - 2026-08-30
 
