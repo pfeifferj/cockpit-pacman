@@ -3552,6 +3552,50 @@ describe("UpdatesView", () => {
   });
 
   describe("Pacnew alerts", () => {
+    it("offers an administrative review when an incomplete scan finds no pending files", async () => {
+      mockGetPacnewStatus.mockResolvedValue({ has_pacnew: false, files: [], warnings: ["Could not inspect a protected directory"] });
+      await act(async () => { render(<UpdatesView />); });
+      expect(screen.getByText("Configuration files could not be fully checked")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Review configuration files" })).toBeInTheDocument();
+    });
+
+    it("lists files without an owning package and counts those past the first five", async () => {
+      const files = Array.from({ length: 7 }, (_, index) => ({ path: `/etc/file${index}.pacsave`, package: null, kind: "pacsave", mtime: 1 }));
+      mockGetPacnewStatus.mockResolvedValue({ has_pacnew: true, files });
+      await act(async () => { render(<UpdatesView />); });
+      expect(screen.getByText("/etc/file0.pacsave").closest("li")).toHaveTextContent(/^\/etc\/file0\.pacsave$/);
+      expect(screen.queryByText("/etc/file5.pacsave")).not.toBeInTheDocument();
+      expect(screen.getByText("And 2 more.")).toBeInTheDocument();
+    });
+
+    it.each([false, true])("resurfaces changed scan warnings with pending files: %s", async (hasFiles) => {
+      const incomplete = (warning: string) => ({
+        has_pacnew: hasFiles,
+        files: hasFiles ? [{ path: "/etc/pacman.conf.pacnew", package: "pacman", kind: "pacnew", mtime: 1 }] : [],
+        warnings: [warning],
+      });
+      const title = hasFiles ? "Configuration files need review" : "Configuration files could not be fully checked";
+      mockGetPacnewStatus.mockResolvedValue(incomplete("first"));
+      render(<UpdatesView />);
+      expect(await screen.findByText(title)).toBeInTheDocument();
+      const close = screen.getAllByRole("button").filter((btn) => btn.getAttribute("aria-label")?.includes(title));
+      await act(async () => { fireEvent.click(close[0]); });
+      await waitFor(() => expect(mockMarkPacnewDismissed).toHaveBeenCalled());
+      const dismissedSignature = mockMarkPacnewDismissed.mock.calls[0][0];
+      expect(dismissedSignature).not.toMatch(/\p{Cc}/u);
+
+      cleanup();
+      mockGetPacnewDismissal.mockResolvedValue({ signature: dismissedSignature });
+      render(<UpdatesView />);
+      fireEvent.click(await screen.findByRole("button", { name: "1 dismissed notice" }));
+      expect(screen.getByRole("button", { name: `Show again: ${title}` })).toBeInTheDocument();
+
+      cleanup();
+      mockGetPacnewStatus.mockResolvedValue(incomplete("second"));
+      render(<UpdatesView />);
+      expect(await screen.findByText(title)).toBeInTheDocument();
+    });
+
     const pacnewStatus = (mtime: number) => ({
       has_pacnew: true,
       files: [{ path: "/etc/pacman.conf", package: "pacman", kind: "pacnew", mtime }],
@@ -3560,10 +3604,10 @@ describe("UpdatesView", () => {
     it("resurfaces a dismissed alert when the same file changes again", async () => {
       mockGetPacnewStatus.mockResolvedValue(pacnewStatus(1700000000));
       render(<UpdatesView />);
-      expect(await screen.findByText("Configuration files need merging")).toBeInTheDocument();
+      expect(await screen.findByText("Configuration files need review")).toBeInTheDocument();
 
       const closeButtons = screen.getAllByRole("button").filter(
-        (btn) => btn.getAttribute("aria-label")?.includes("Configuration files need merging"),
+        (btn) => btn.getAttribute("aria-label")?.includes("Configuration files need review"),
       );
       expect(closeButtons.length).toBeGreaterThan(0);
       await act(async () => {
@@ -3573,7 +3617,7 @@ describe("UpdatesView", () => {
       await waitFor(() => {
         expect(mockMarkPacnewDismissed).toHaveBeenCalled();
       });
-      expect(screen.queryByText("Configuration files need merging")).not.toBeInTheDocument();
+      expect(screen.queryByText("Configuration files need review")).not.toBeInTheDocument();
       const dismissedSignature = mockMarkPacnewDismissed.mock.calls[0][0];
 
       cleanup();
@@ -3581,7 +3625,7 @@ describe("UpdatesView", () => {
       mockGetPacnewStatus.mockResolvedValue(pacnewStatus(1700009999));
       render(<UpdatesView />);
 
-      expect(await screen.findByText("Configuration files need merging")).toBeInTheDocument();
+      expect(await screen.findByText("Configuration files need review")).toBeInTheDocument();
     });
   });
 
@@ -5017,10 +5061,10 @@ describe("UpdatesView", () => {
       const steps = await screen.findByRole("list", { name: "Next steps" });
       await waitFor(() => expect(within(steps).getByText("System reboot recommended.")).toBeVisible());
       expect(await within(steps).findByText("Running services need to be restarted.")).toBeVisible();
-      expect(await within(steps).findByText("Configuration files need merging.")).toBeVisible();
+      expect(await within(steps).findByText("Configuration files need review.")).toBeVisible();
       expect(stepRows(steps)).toHaveLength(4);
       expect(within(steps).getByRole("button", { name: "Restart 2 services" })).toBeInTheDocument();
-      expect(within(steps).getByRole("button", { name: "Copy pacdiff" })).toBeInTheDocument();
+      expect(within(steps).getByRole("button", { name: "Review configuration files" })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /notices$/ })).not.toBeInTheDocument();
 
       const checkAgain = screen.getByRole("button", { name: "Check again" });
@@ -5035,6 +5079,15 @@ describe("UpdatesView", () => {
       fireEvent.click(reboot);
       expect(await screen.findByRole("dialog", { name: /Reboot the system\?$/ })).toBeInTheDocument();
       expect(mockRebootSystem).not.toHaveBeenCalled();
+    });
+
+    it("reports an incomplete configuration scan after an upgrade instead of a clear result", async () => {
+      mockGetPacnewStatus.mockResolvedValue({ has_pacnew: false, files: [], warnings: ["Skipped a non-UTF-8 filename under /etc."] });
+      await finishUpgrade();
+      const steps = await screen.findByRole("list", { name: "Next steps" });
+      expect(await within(steps).findByText("Configuration files could not be fully checked.")).toBeVisible();
+      expect(within(steps).queryByText("No configuration files to merge.")).not.toBeInTheDocument();
+      expect(within(steps).getByRole("button", { name: "Review configuration files" })).toBeInTheDocument();
     });
 
     it("keeps one fixed row per check, so services resolving first are not pushed down by reboot", async () => {

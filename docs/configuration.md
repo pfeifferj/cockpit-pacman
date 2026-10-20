@@ -66,6 +66,30 @@ list that would read as a clean bill of health.
 The setting fails open: a config that cannot be read or parsed leaves
 advisories on, so a broken file cannot quietly suppress security data.
 
+## Pending configuration files
+
+When Updates reports pending configuration files, choose **Review configuration
+files**. With administrative access, compare a `.pacnew` or `.pacsave` file
+(including older `.pacsave.1`, `.pacsave.2` and so on) under `/etc` with the
+current file, then keep the current version, use the new version, restore a
+saved version, or edit and save a merge. If the current file is missing,
+**Keep current** leaves it missing.
+
+Using the new or saved version also takes that file's owner, mode, modification
+time and extended attributes, as `pacdiff` does. A saved merge keeps your local
+file's owner, mode and attributes: the current file for a `.pacnew` (the new
+file if there is none) and the saved file for a `.pacsave`. Replaced and removed
+files are copied to `/etc/.cockpit-pacman-backups`, which mirrors the layout of
+`/etc`, and stay there until you remove them. The result lists their paths.
+
+Linked files, binary or non-UTF-8 files, files larger than 1 MiB, and merges of
+files that mix CRLF and LF line endings need manual review, for example with
+`pacdiff`. So do files that are not owned by root or are writable by group or
+others, files in such directories, and pending files outside `/etc`. The review
+lists those that belong to installed packages but does not open them. Package
+operations must finish and `pacman.conf` must be valid before a choice is
+applied.
+
 ## Proxies
 
 Create `/etc/cockpit-pacman/proxy.json` to route Arch service requests, mirror

@@ -48,6 +48,33 @@ describe("useSignatureDismissal", () => {
     expect(hook.result.current.undismissed).toBe(false);
   });
 
+  it.each(["files\nwarning", "x".repeat(5000), "é".repeat(2100)])("stores a signature the backend would reject as a digest that still matches", async (raw) => {
+    const { hook, api } = mount(raw, null);
+    await waitFor(() => expect(hook.result.current.undismissed).toBe(true));
+    act(() => { hook.result.current.dismiss(); });
+    await waitFor(() => expect(api.mark).toHaveBeenCalledOnce());
+    const sent: string = api.mark.mock.calls[0][0];
+    expect(sent).not.toMatch(/\p{Cc}/u);
+    expect(sent.length).toBeLessThanOrEqual(4096);
+    const again = mount(raw, sent);
+    await waitFor(() => expect(again.hook.result.current.dismissed).toBe(true));
+  });
+
+  it("resurfaces changed warnings that collided with the old digest", async () => {
+    const first = "\nscan-incomplete:/etc/example-1284iaj30fh: Permission denied";
+    const next = "\nscan-incomplete:/etc/example-1ne7vdm37x6: Permission denied";
+    const { hook, api } = mount(first, null);
+    await waitFor(() => expect(hook.result.current.undismissed).toBe(true));
+    act(() => { hook.result.current.dismiss(); });
+    await waitFor(() => expect(api.mark).toHaveBeenCalledOnce());
+    const dismissed: string = api.mark.mock.calls[0][0];
+    const changed = mount(next, dismissed);
+    await waitFor(() => expect(changed.hook.result.current.undismissed).toBe(true));
+    act(() => { changed.hook.result.current.dismiss(); });
+    await waitFor(() => expect(changed.api.mark).toHaveBeenCalledOnce());
+    expect(changed.api.mark.mock.calls[0][0]).not.toBe(dismissed);
+  });
+
   it("hides when there is nothing to report", async () => {
     const { hook } = mount("", null);
     await waitFor(() => expect(hook.result.current.undismissed).toBe(false));

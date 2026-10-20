@@ -35,6 +35,7 @@ import {
   getPacnewStatus,
   previewPacnew,
   resolvePacnew,
+  refreshExternalLockHolder,
 } from "./api";
 
 it("requires administrative access to preview configuration contents", async () => {
@@ -75,6 +76,21 @@ it("can complete the pending-file scan with administrative access", async () => 
     ["/usr/libexec/cockpit-pacman/cockpit-pacman-backend", "pacnew-status"],
     { superuser: "require", err: "message" },
   );
+});
+
+it("does not report reconciliation's database lock as an outside operation", async () => {
+  mockSpawn.mockClear();
+  let finish!: (value: string) => void;
+  const process = Object.assign(new Promise<string>(resolve => { finish = resolve; }), {
+    input: vi.fn(), close: vi.fn(), stream: vi.fn(),
+  });
+  mockSpawn.mockReturnValue(createMockSpawnPromise('{"locked":false,"stale":false}'));
+  mockSpawn.mockReturnValueOnce(process);
+  const request = resolvePacnew({ path: "/etc/example.conf.pacnew", revision: "pair", resolution: "keep_current" });
+  await refreshExternalLockHolder();
+  expect(mockSpawn).toHaveBeenCalledTimes(1);
+  finish('{"success":true,"message":"Reviewed","backup_paths":[],"warnings":[]}');
+  await request;
 });
 
 it("reads protected mirror undo backups with administrative access", async () => {

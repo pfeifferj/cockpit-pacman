@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.1] - 2026-10-20
+
+### Added
+- Review and merge `.pacnew` and `.pacsave` files under `/etc` from Updates, with automatic backups.
+
+### Fixed
+- Only count security fixes available in configured repositories, and refresh their availability when updates change.
+- Correct application version metadata so older pages detect upgrades and prompt for a reload.
+- Flag pending updates that fix an advisory the tracker has already marked fixed.
+
 ## [0.4.0] - 2026-10-20
 
 ### Added

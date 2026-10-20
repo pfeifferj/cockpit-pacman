@@ -51,12 +51,12 @@ import {
 	Content,
 	ContentVariants,
 	Checkbox,
-	ClipboardCopy,
 	Tooltip,
 } from '@patternfly/react-core';
 import { ExpandableLogViewer, LogViewer } from './LogViewer';
 import { ConfirmModal } from './ConfirmModal';
 import { TidyUpModal } from './TidyUpModal';
+import { ConfigReconciliationModal } from './ConfigReconciliationModal';
 import { DEFAULT_KEEP_VERSIONS, type CleanupProjection } from '../cacheProjection';
 import { KeyringWarnings, WarningsAlert } from './KeyringView';
 import { initialProgress, progressPercent, progressValueText, reduceProgress, ProgressPlan, ProgressState } from '../progress';
@@ -274,8 +274,31 @@ type PostRunChecks = Record<PostRunCheck, CheckState>;
 const NOTICE_TITLE = {
   reboot: "System reboot recommended",
   services: "Running services need to be restarted",
-  pacnew: "Configuration files need merging",
+  pacnew: "Configuration files need review",
 } as const;
+
+const pacnewNeedsReview = (status: PacnewStatus | null): status is PacnewStatus =>
+  !!status && (status.has_pacnew || !!status.warnings?.length);
+
+const pacnewTitle = (status: PacnewStatus) =>
+  status.has_pacnew ? NOTICE_TITLE.pacnew : "Configuration files could not be fully checked";
+
+const pacnewSummary = (status: PacnewStatus) => status.has_pacnew
+  ? `${plural(status.files.length, "configuration file")} left by package changes ${status.files.length === 1 ? "needs" : "need"} review.`
+  : "Some configuration paths could not be checked. The review lists them.";
+
+const PacnewFileList: React.FC<{ files: PacnewStatus["files"] }> = ({ files }) => (
+  <>
+    <List>
+      {files.slice(0, 5).map((f) => (
+        <ListItem key={f.path}>
+          <strong>{f.path}</strong>{f.package && ` (${f.package})`}
+        </ListItem>
+      ))}
+    </List>
+    {files.length > 5 && <p>And {files.length - 5} more.</p>}
+  </>
+);
 
 const CHECK_COPY: Record<PostRunCheck, { checking: string; clear: string; failed: string }> = {
   reboot: {
@@ -443,6 +466,7 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
   const rebootMutation = useMutationGate("reboot the system", { permission: adminAllowed });
   const restartMutation = useMutationGate("restart services", { permission: adminAllowed });
   const tidyMutation = useMutationGate("remove orphan packages and clean the cache", { permission: adminAllowed });
+  const reconciliationMutation = useMutationGate("review configuration files", { permission: adminAllowed });
   const { hasBeenVisible } = usePageVisible();
   const hasBeenVisibleRef = useRef(hasBeenVisible);
   const stateRef = useRef(state);
@@ -570,6 +594,7 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
     optInRef.current = { reboot: rebootOnComplete, restart: restartServicesOnComplete };
   });
   const [pacnewStatus, setPacnewStatus] = useState<PacnewStatus | null>(null);
+  const [reconciliationOpen, setReconciliationOpen] = useState(false);
   const [latestScheduledRun, setLatestScheduledRun] = useState<ScheduledRunEntry | null>(null);
 
   const servicesSignature = useMemo(
@@ -586,10 +611,11 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
     }
     return "";
   }, [rebootStatus]);
-  const pacnewSignature = useMemo(
-    () => (pacnewStatus?.files ?? []).map((f) => `${f.path}@${f.mtime}`).sort().join(","),
-    [pacnewStatus],
-  );
+  const pacnewSignature = useMemo(() => {
+    const files = (pacnewStatus?.files ?? []).map((f) => `${f.path}@${f.mtime}`).sort().join(",");
+    const warnings = pacnewStatus?.warnings ?? [];
+    return warnings.length ? `${files}\nscan-incomplete:${[...warnings].sort().join("\n")}` : files;
+  }, [pacnewStatus]);
   const scheduledSignature = latestScheduledRun?.invocation_id ?? latestScheduledRun?.timestamp ?? "";
   const [scheduledHistoryWarning, setScheduledHistoryWarning] = useState<string | null>(null);
 
@@ -1767,10 +1793,10 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
     </Alert>
   ) : null;
 
-  const pacnewAlert = pacnewStatus?.has_pacnew && pacnewUndismissed ? (
+  const pacnewAlert = pacnewNeedsReview(pacnewStatus) && pacnewUndismissed ? (
     <Alert
       variant="warning"
-      title={NOTICE_TITLE.pacnew}
+      title={pacnewTitle(pacnewStatus)}
       className="pf-v6-u-mb-md"
       actionClose={
         <AlertActionCloseButton
@@ -1778,18 +1804,9 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
         />
       }
     >
-      <Content component={ContentVariants.p}>
-        A package upgrade left{" "}
-        {plural(pacnewStatus.files.length, "configuration file that differs", "configuration files that differ")} from your local edits.
-        Review and merge them manually (e.g. with <code>pacdiff</code>).
-      </Content>
-      <List>
-        {pacnewStatus.files.map((f) => (
-          <ListItem key={f.path}>
-            <strong>{f.path}</strong> ({f.package})
-          </ListItem>
-        ))}
-      </List>
+      <Content component={ContentVariants.p}>{pacnewSummary(pacnewStatus)}</Content>
+      <PacnewFileList files={pacnewStatus.files} />
+      <GatedButton gate={reconciliationMutation} variant="link" isInline onClick={() => setReconciliationOpen(true)}>Review configuration files</GatedButton>
     </Alert>
   ) : null;
 
@@ -1956,8 +1973,8 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
     ...(servicesStatus?.restart_required && servicesNotice.dismissed
       ? [{ key: "services", label: NOTICE_TITLE.services, showAgain: servicesNotice.restore }]
       : []),
-    ...(pacnewStatus?.has_pacnew && pacnewNotice.dismissed
-      ? [{ key: "pacnew", label: NOTICE_TITLE.pacnew, showAgain: pacnewNotice.restore }]
+    ...(pacnewNeedsReview(pacnewStatus) && pacnewNotice.dismissed
+      ? [{ key: "pacnew", label: pacnewTitle(pacnewStatus), showAgain: pacnewNotice.restore }]
       : []),
     ...((latestScheduledRun?.status === "failed" || latestScheduledRun?.status === "skipped" || latestScheduledRun?.status === "unrecorded") && scheduledNotice.dismissed
       ? [{
@@ -2125,6 +2142,7 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
         initialHistoryExpanded={scheduleHistoryOnOpen}
       />
       {rebootConfirmModal}
+      {reconciliationOpen && <ConfigReconciliationModal files={pacnewStatus?.files ?? []} onClose={() => setReconciliationOpen(false)} onScanned={setPacnewStatus} />}
     </>
   );
 
@@ -2481,19 +2499,15 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
             ),
           } : null;
         case "pacnew":
-          return pacnewStatus?.has_pacnew && pacnewStatus.files.length > 0 ? {
+          return pacnewNeedsReview(pacnewStatus) ? {
             text: (
               <>
-                <strong>{NOTICE_TITLE.pacnew}.</strong>{" "}
-                {plural(pacnewStatus.files.length, ".pacnew file differs", ".pacnew files differ")} from your local edits. Merge them, for example with{" "}
-                <ClipboardCopy variant="inline-compact" hoverTip="Copy" clickTip="Copied" copyAriaLabel="Copy pacdiff">
-                  pacdiff
-                </ClipboardCopy>
-                <List>
-                  {pacnewStatus.files.map((f) => <ListItem key={f.path}>{f.path} ({f.package})</ListItem>)}
-                </List>
+                <strong>{pacnewTitle(pacnewStatus)}.</strong>{" "}
+                {pacnewSummary(pacnewStatus)}
+                <PacnewFileList files={pacnewStatus.files} />
               </>
             ),
+            action: <GatedButton gate={reconciliationMutation} variant="secondary" onClick={() => setReconciliationOpen(true)}>Review configuration files</GatedButton>,
           } : null;
         case "orphans": {
           const before = new Set(orphansBefore ?? []);

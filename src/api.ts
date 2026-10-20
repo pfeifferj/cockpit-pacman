@@ -731,6 +731,7 @@ const DB_LOCK_COMMANDS = new Set([
   "preflight-remove-orphans",
   "preflight-downgrade",
   "set-install-reason",
+  "resolve-pacnew",
 ]);
 
 function beginOwnLockCall(): void {

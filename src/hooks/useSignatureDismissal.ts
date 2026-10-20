@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { queueDismissal } from "./dismissalQueue";
 
 export interface DismissalApi {
@@ -7,10 +7,19 @@ export interface DismissalApi {
   restore: (prev: string | null, expected: string) => Promise<void>;
 }
 
+// mark-dismissed rejects control characters and signatures over 4096 bytes.
+function storable(signature: string): string {
+  const bytes = new TextEncoder().encode(signature);
+  if (!/\p{Cc}/u.test(signature) && bytes.length <= 4096) return signature;
+  let hash = 0xcbf29ce484222325n;
+  for (const byte of bytes) hash = BigInt.asUintN(64, (hash ^ BigInt(byte)) * 0x100000001b3n);
+  return `digest:${hash.toString(16)}`;
+}
+
 /** Tracks dismissal by signature; failed writes preserve newer intent. */
 export function useSignatureDismissal(
   api: DismissalApi,
-  signature: string,
+  rawSignature: string,
   onError?: (err: unknown) => void,
 ): {
   undismissed: boolean;
@@ -19,6 +28,7 @@ export function useSignatureDismissal(
   undo: () => void;
   restore: () => void;
 } {
+  const signature = useMemo(() => storable(rawSignature), [rawSignature]);
   const [stored, setStoredState] = useState<string | null | undefined>(undefined);
   const confirmed = useRef<string | null | undefined>(undefined);
   const pending = useRef<{ id: number; value: () => string | null } | null>(null);

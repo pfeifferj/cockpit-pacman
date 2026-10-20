@@ -128,8 +128,9 @@ To turn the panel off, see `security_advisories` in
 | `~/.config/cockpit-pacman/` | Per-user caches and dismissals. Deleting it costs the dismissals; the caches rebuild. |
 | `/etc/pacman.conf.backup.<epoch>` | Taken before each repository save. |
 | `/etc/pacman.d/mirrorlist.backup.<epoch>` | Taken before each mirrorlist save. |
+| `/etc/.cockpit-pacman-backups/` | Copies of configuration files replaced or removed by Review configuration files, in the layout of `/etc`. Never pruned. |
 
-Five backups of each are kept. The newest backup is protected so a restore can
+Five repository backups and five mirror backups are kept. The newest backup is protected so a restore can
 be undone; remaining slots prefer manual backups. The Origin column identifies
 manual and automatic backups.
 
