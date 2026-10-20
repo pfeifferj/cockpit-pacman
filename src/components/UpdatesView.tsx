@@ -72,6 +72,7 @@ import {
 import { Table, Thead, Tr, Th, Tbody, Td } from "@patternfly/react-table";
 import {
   UpdateInfo,
+  type SystemChangeKind,
   PreflightResponse,
   StreamEvent,
   RebootStatus,
@@ -218,7 +219,7 @@ type ViewState =
 export interface UpdateStatus {
   /** Pending updates the user can select (held rows excluded), or null while that is not known. */
   count: number | null;
-  /** Selectable updates with a fixed security advisory. */
+  /** Selectable updates that install a security advisory's fixed version. */
   security: number;
   /** The last check or sync failed, so the count is unknown. */
   failed: boolean;
@@ -336,6 +337,9 @@ const LATE_ARRIVAL_MS = 2000;
 function arrivedRecently(arrivedAt: number): boolean {
   return Date.now() - arrivedAt < LATE_ARRIVAL_MS;
 }
+
+const offeredVersions = (updates: UpdateInfo[]) =>
+  updates.map((u) => `${u.name}@${u.current_version}:${u.new_version}`).sort().join(",");
 
 // Treat held rows as unseen so releasing a hold selects the update.
 function selectionAfterReload(prev: Set<string>, seen: Set<string>, updates: UpdateInfo[], initialized: boolean): Set<string> {
@@ -857,7 +861,7 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
     }
   }, [loadSecurityData, failWith, announce]);
 
-  const readUpdatesQuietly = useCallback(async (announceArrivals: boolean): Promise<UpdateInfo[] | null> => {
+  const readUpdatesQuietly = useCallback(async (announceArrivals: boolean, installedChanged = false): Promise<UpdateInfo[] | null> => {
     let response;
     try {
       response = await checkUpdates();
@@ -866,6 +870,7 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
       return null;
     }
     const next = response.updates.length > 0 ? "available" : "uptodate";
+    const versionsChanged = offeredVersions(response.updates) !== offeredVersions(updatesRef.current);
     if (stateRef.current === "available" || stateRef.current === "uptodate") {
       const known = new Set(updatesRef.current.map((u) => u.name));
       const arrived = response.updates.filter((u) => !u.ignored && !known.has(u.name)).map((u) => u.name);
@@ -883,9 +888,10 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
     setLastCheckedAt(Math.floor(Date.now() / 1000));
     setQuietReloadFailed(false);
     setState((s) => (s === "available" || s === "uptodate" ? next : s));
+    if ((versionsChanged || installedChanged) && hasBeenVisibleRef.current) void loadSecurityData();
     return response.updates;
-  }, [announce]);
-  const reloadUpdatesQuietly = useCallback(() => readUpdatesQuietly(true), [readUpdatesQuietly]);
+  }, [announce, loadSecurityData]);
+  const reloadUpdatesQuietly = useCallback((installedChanged = false) => readUpdatesQuietly(true, installedChanged), [readUpdatesQuietly]);
 
   const failSync = useCallback((err: string, code?: ErrorCode, details?: string) => {
     lastGoodRef.current = null;
@@ -1292,7 +1298,7 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
           requestReboot();
           return;
         }
-        reloadUpdatesQuietly();
+        reloadUpdatesQuietly(true);
         postRunRef.current += 1;
         const run = postRunRef.current;
         setPostChecks({ reboot: "pending", services: "pending", pacnew: "pending", orphans: "pending" });
@@ -1487,7 +1493,7 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
     await reloadAndRefocus(name);
   };
 
-  const refreshQuietly = () => {
+  const refreshQuietly = (kind?: SystemChangeKind) => {
     const current = stateRef.current;
     if (current === "loading" || current === "checking" || current === "applying") return;
     if (confirmModalOpen || rebootConfirmOpen || preflightLoading) {
@@ -1495,7 +1501,7 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
       if (preflightLoading) changedDuringPreflightRef.current = true;
       return;
     }
-    reloadUpdatesQuietly();
+    reloadUpdatesQuietly(kind !== "sync");
     void refreshDetails();
     loadRebootStatus();
     loadServicesStatus();
@@ -1506,18 +1512,18 @@ const UpdatesViewContent: React.FC<UpdatesViewProps> = ({
   useRefreshOnActivate(refreshQuietly, { kinds: ["system", "sync"] });
 
   const tabActive = useTabActive();
-  const refreshListWhileHidden = () => {
+  const refreshListWhileHidden = (kind: SystemChangeKind) => {
     if (tabActive) return;
     const current = stateRef.current;
     if (current !== "available" && current !== "uptodate" && current !== "success") return;
     if (confirmModalOpen || rebootConfirmOpen || preflightLoading || resuming) return;
-    void readUpdatesQuietly(false);
+    void readUpdatesQuietly(false, kind === "system");
   };
   const refreshListWhileHiddenRef = useRef(refreshListWhileHidden);
   useEffect(() => {
     refreshListWhileHiddenRef.current = refreshListWhileHidden;
   });
-  useEffect(() => onSystemChanged(() => refreshListWhileHiddenRef.current(), ["system", "sync"]), []);
+  useEffect(() => onSystemChanged((kind) => refreshListWhileHiddenRef.current(kind), ["system", "sync"]), []);
   const refreshQuietlyRef = useRef(refreshQuietly);
   useEffect(() => {
     refreshQuietlyRef.current = refreshQuietly;

@@ -23,6 +23,15 @@ pub fn reset_cancelled() {
     CANCELLED.store(false, AtomicOrdering::SeqCst);
 }
 
+// libalpm briefly sets the process umask to 0, so a parallel test's default-mode
+// directory can come out 0777 and fail the lock checks.
+#[cfg(test)]
+pub(crate) fn private_dir(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(path).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+}
+
 /// Requests cancellation at the next safe checkpoint.
 pub fn request_cancel() {
     CANCELLED.store(true, AtomicOrdering::SeqCst);

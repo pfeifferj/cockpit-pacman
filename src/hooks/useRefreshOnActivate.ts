@@ -17,7 +17,7 @@ interface RefreshOptions {
  * system change arrives while it is active. Not on first mount: the view's
  * own load covers that.
  */
-export function useRefreshOnActivate(reload: () => void, { kinds = ["system"] }: RefreshOptions = {}): void {
+export function useRefreshOnActivate(reload: (kind?: SystemChangeKind) => void, { kinds = ["system"] }: RefreshOptions = {}): void {
   const active = useTabActive();
   const reloadRef = useRef(reload);
   const activeRef = useRef(active);
@@ -37,8 +37,8 @@ export function useRefreshOnActivate(reload: () => void, { kinds = ["system"] }:
 
   useEffect(() => {
     const subscribed = kindsKey.split(",") as SystemChangeKind[];
-    return onSystemChanged(() => {
-      if (activeRef.current) reloadRef.current();
+    return onSystemChanged((kind) => {
+      if (activeRef.current) reloadRef.current(kind);
     }, subscribed);
   }, [kindsKey]);
 }

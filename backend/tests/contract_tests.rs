@@ -980,6 +980,7 @@ fn security_advisory_fixed_version_absent_when_none() {
         avg_name: "AVG-2024-1234".into(),
         cve_ids: vec!["CVE-2024-0001".into()],
         fixed_version: None,
+        fix_available: false,
         affected_version: "3.0.0-1".into(),
         installed_version: "3.2.1-1".into(),
         status: "Vulnerable".into(),
@@ -996,6 +997,7 @@ fn security_advisory_fixed_version_absent_when_none() {
     assert_string(&v, "installed_version");
     // When None, fixed_version is ABSENT (not null) due to skip_serializing_if
     assert_absent(&v, "fixed_version");
+    assert_eq!(v["fix_available"], false);
 }
 
 #[test]
@@ -1007,6 +1009,7 @@ fn security_advisory_fixed_version_present_when_some() {
         avg_name: "AVG-2024-5678".into(),
         cve_ids: vec![],
         fixed_version: Some("8.5.0-1".into()),
+        fix_available: true,
         affected_version: "8.4.0-1".into(),
         installed_version: "8.4.0-2".into(),
         status: "Fixed".into(),
@@ -1014,6 +1017,17 @@ fn security_advisory_fixed_version_present_when_some() {
     let v = to_json(&advisory);
     assert_string(&v, "fixed_version");
     assert_eq!(v["fixed_version"], "8.5.0-1");
+    assert_eq!(v["fix_available"], true);
+}
+
+#[test]
+fn security_availability_defaults_to_false_for_an_older_response() {
+    let fixture = parse_fixture(include_str!("../../test/fixtures/security-advisories.json"));
+    let mut value = fixture["advisories"][1].clone();
+    value.as_object_mut().unwrap().remove("fix_available");
+    let advisory: PackageSecurityAdvisory = serde_json::from_value(value).unwrap();
+    assert!(!advisory.fix_available);
+    assert_eq!(advisory.fixed_version.as_deref(), Some("8.5.0-1"));
 }
 
 #[test]

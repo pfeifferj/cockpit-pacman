@@ -485,6 +485,7 @@ describe("checkSecurity contract", () => {
     expect(typeof advisory.avg_name).toBe("string");
     expect(Array.isArray(advisory.cve_ids)).toBe(true);
     expect(typeof advisory.status).toBe("string");
+    expect(advisory.fix_available).toBe(false);
   });
 
   it("DRIFT: fixed_version is undefined (not null) when backend omits it via skip_serializing_if", async () => {
@@ -508,6 +509,14 @@ describe("checkSecurity contract", () => {
     const fixedAdvisory = result.advisories[1]; // has fixed_version in fixture
     expect(typeof fixedAdvisory.fixed_version).toBe("string");
     expect(fixedAdvisory.fixed_version).toBe("8.5.0-1");
+    expect(fixedAdvisory.fix_available).toBe(true);
+  });
+
+  it("preserves a tracker fix while reporting it unavailable", async () => {
+    spawnReturns(securityFixture);
+    const result = await checkSecurity();
+    expect(result.advisories[2].fixed_version).toBe("1.6.44-1");
+    expect(result.advisories[2].fix_available).toBe(false);
   });
 });
 

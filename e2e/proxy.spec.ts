@@ -79,7 +79,7 @@ test.describe("Proxy routing", () => {
     await pacman.switchTab("Signoffs");
     await expect(pacman.panel.getByText("htop", { exact: true }).first()).toBeVisible();
     const metadata = await state(pacman);
-    for (const path of ["/news", "/issues/vulnerable.json", "/package/htop.json", "/mirrors", "/archive/h/htop/", "/login/", "/packages/signoffs/json/", "/logout/"]) {
+    for (const path of ["/news", "/issues/all.json", "/package/htop.json", "/mirrors", "/archive/h/htop/", "/login/", "/packages/signoffs/json/", "/logout/"]) {
       expect(metadata.records.some(record => record.kind === "origin" && record.path === path)).toBe(true);
     }
     expect(metadata.blocked).toBe(0);

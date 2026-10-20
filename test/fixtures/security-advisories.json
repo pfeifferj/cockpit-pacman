@@ -11,7 +11,8 @@
       ],
       "status": "Fixed",
       "affected_version": "3.0.0-1",
-      "installed_version": "3.2.1-1"
+      "installed_version": "3.2.1-1",
+      "fix_available": false
     },
     {
       "package": "curl",
@@ -24,7 +25,8 @@
       "fixed_version": "8.5.0-1",
       "status": "Fixed",
       "affected_version": "8.4.0-1",
-      "installed_version": "8.4.0-2"
+      "installed_version": "8.4.0-2",
+      "fix_available": true
     },
     {
       "package": "libpng",
@@ -34,7 +36,9 @@
       "cve_ids": [],
       "status": "Vulnerable",
       "affected_version": "1.6.40-1",
-      "installed_version": "1.6.43-1"
+      "installed_version": "1.6.43-1",
+      "fix_available": false,
+      "fixed_version": "1.6.44-1"
     },
     {
       "package": "linux",
@@ -47,7 +51,8 @@
       ],
       "affected_version": "5.15.8.arch1-1",
       "installed_version": "7.1.8.arch1-3",
-      "status": "Vulnerable"
+      "status": "Vulnerable",
+      "fix_available": false
     }
   ]
 }

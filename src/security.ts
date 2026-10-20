@@ -1,7 +1,7 @@
 import type { PackageSecurityAdvisory } from "./bindings";
 
 export function isActionable(advisory: PackageSecurityAdvisory): boolean {
-  return advisory.fixed_version != null;
+  return advisory.fix_available === true;
 }
 
 export interface PartitionedAdvisories {
@@ -34,6 +34,11 @@ export function highestOf(advisories: PackageSecurityAdvisory[]): PackageSecurit
     (SEVERITY_ORDER[b.severity] ?? 0) > (SEVERITY_ORDER[a.severity] ?? 0) ? b : a
   );
 }
+
+export const UNOFFERED_FIX_CAVEAT =
+  "The repositories did not offer the fixed version at the last sync. Checking " +
+  "for updates with administrative access refreshes them; a fix only in a testing repository needs that " +
+  "repository enabled.";
 
 export const NO_FIX_CAVEAT =
   "Arch's tracker lists no fixed version for these. Records can stay open after " +

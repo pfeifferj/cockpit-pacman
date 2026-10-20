@@ -991,6 +991,8 @@ pub struct PackageSecurityAdvisory {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fixed_version: Option<String>,
     #[serde(default)]
+    pub fix_available: bool,
+    #[serde(default)]
     pub affected_version: String,
     #[serde(default)]
     pub installed_version: String,

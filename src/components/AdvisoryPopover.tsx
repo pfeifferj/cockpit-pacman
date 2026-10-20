@@ -3,7 +3,7 @@ import { Label, Popover } from "@patternfly/react-core";
 import { ShieldAltIcon } from "@patternfly/react-icons";
 import { PackageSecurityAdvisory } from "../api";
 import { severityColor } from "../severity";
-import { NO_FIX_CAVEAT, PartitionedAdvisories, highestOf } from "../security";
+import { NO_FIX_CAVEAT, PartitionedAdvisories, UNOFFERED_FIX_CAVEAT, highestOf } from "../security";
 
 const subtleText: React.CSSProperties = {
   color: "var(--pf-t--global--text--color--subtle)",
@@ -34,6 +34,8 @@ const AdvisoryLine: React.FC<{ advisory: PackageSecurityAdvisory }> = ({ advisor
 
 export const AdvisoryPopover: React.FC<{ partition: PartitionedAdvisories }> = ({ partition }) => {
   const { actionable, unresolved } = partition;
+  const unavailable = unresolved.filter((advisory) => advisory.fixed_version != null);
+  const unfixed = unresolved.filter((advisory) => advisory.fixed_version == null);
   const total = actionable.length + unresolved.length;
   const highest = highestOf(actionable);
   return (
@@ -49,10 +51,21 @@ export const AdvisoryPopover: React.FC<{ partition: PartitionedAdvisories }> = (
               ))}
             </div>
           )}
-          {unresolved.length > 0 && (
+          {unavailable.length > 0 && (
+            <div style={{ marginBottom: "0.75rem" }}>
+              <strong>Fix not offered by the configured repositories</strong>
+              {unavailable.map((a) => (
+                <AdvisoryLine key={a.avg_name} advisory={a} />
+              ))}
+              <div style={{ ...subtleText, marginTop: "0.25rem" }}>
+                {UNOFFERED_FIX_CAVEAT}
+              </div>
+            </div>
+          )}
+          {unfixed.length > 0 && (
             <div>
               <strong>No fix recorded</strong>
-              {unresolved.map((a) => (
+              {unfixed.map((a) => (
                 <AdvisoryLine key={a.avg_name} advisory={a} />
               ))}
               <div style={{ ...subtleText, marginTop: "0.25rem" }}>
@@ -71,7 +84,7 @@ export const AdvisoryPopover: React.FC<{ partition: PartitionedAdvisories }> = (
         style={{ cursor: "pointer" }}
         onClick={(e) => e.stopPropagation()}
       >
-        {highest ? highest.severity : "No fix"}
+        {highest ? highest.severity : unavailable.length > 0 ? "Fix not offered" : "No fix"}
         {total > 1 && ` +${total - 1}`}
       </Label>
     </Popover>

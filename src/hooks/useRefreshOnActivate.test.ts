@@ -20,7 +20,7 @@ const emit = (kind: string) => {
   }
 };
 
-const renderInTab = (reload: () => void, active: boolean, kinds?: ("system" | "sync")[]) => {
+const renderInTab = (reload: (kind?: "system" | "sync") => void, active: boolean, kinds?: ("system" | "sync")[]) => {
   const tab = { active };
   const result = renderHook(() => useRefreshOnActivate(reload, kinds ? { kinds } : undefined), {
     wrapper: ({ children }: { children: React.ReactNode }) =>
@@ -63,6 +63,20 @@ describe("useRefreshOnActivate", () => {
 
     act(() => emit("system"));
     expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes the change kind and leaves activation without one", () => {
+    const reload = vi.fn();
+    const { setActive } = renderInTab(reload, true, ["system", "sync"]);
+    act(() => emit("system"));
+    expect(reload).toHaveBeenLastCalledWith("system");
+    act(() => emit("sync"));
+    expect(reload).toHaveBeenLastCalledWith("sync");
+    setActive(false);
+    act(() => emit("system"));
+    expect(reload).toHaveBeenCalledTimes(2);
+    setActive(true);
+    expect(reload).toHaveBeenLastCalledWith();
   });
 
   it("ignores kinds it did not subscribe to", () => {

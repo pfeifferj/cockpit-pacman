@@ -14,13 +14,13 @@ fn dead_url() -> String {
 async fn a_404_from_the_security_tracker_is_an_error_not_an_empty_answer() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/issues/vulnerable.json"))
+        .and(path("/issues/all.json"))
         .respond_with(ResponseTemplate::new(404))
         .mount(&server)
         .await;
 
     let client = arch_security_client::SecurityClient::with_base_url(&server.uri());
-    let err = client.fetch_vulnerable().expect_err("404 is a failure");
+    let err = client.fetch_issues().expect_err("404 is a failure");
 
     assert_eq!(
         classify_error(&err),
@@ -32,7 +32,7 @@ async fn a_404_from_the_security_tracker_is_an_error_not_an_empty_answer() {
 #[tokio::test]
 async fn a_refused_connection_reads_as_a_network_error() {
     let client = arch_security_client::SecurityClient::with_base_url(&dead_url());
-    let err = client.fetch_vulnerable().expect_err("nothing is listening");
+    let err = client.fetch_issues().expect_err("nothing is listening");
 
     assert_eq!(classify_error(&err), Some("network_error"), "{err:#}");
 }
@@ -65,25 +65,25 @@ async fn a_body_past_the_cap_fails_instead_of_parsing_a_truncated_feed() {
 
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/issues/vulnerable.json"))
+        .and(path("/issues/all.json"))
         .respond_with(ResponseTemplate::new(200).set_body_string(huge))
         .mount(&server)
         .await;
 
     let client = arch_security_client::SecurityClient::with_base_url(&server.uri());
     client
-        .fetch_vulnerable()
+        .fetch_issues()
         .expect_err("a capped read truncates the body mid-element");
 
     // The same shape under the cap parses, so only the truncation can fail it.
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/issues/vulnerable.json"))
+        .and(path("/issues/all.json"))
         .respond_with(ResponseTemplate::new(200).set_body_string(under))
         .mount(&server)
         .await;
     let client = arch_security_client::SecurityClient::with_base_url(&server.uri());
-    assert!(!client.fetch_vulnerable().expect("parses").is_empty());
+    assert!(!client.fetch_issues().expect("parses").is_empty());
 }
 
 #[tokio::test]
@@ -93,13 +93,13 @@ async fn a_well_formed_feed_parses() {
         "type":"arbitrary code execution","affected":"5.0-1","fixed":"5.1-1",
         "issues":["CVE-2024-1"],"advisories":[]}]"#;
     Mock::given(method("GET"))
-        .and(path("/issues/vulnerable.json"))
+        .and(path("/issues/all.json"))
         .respond_with(ResponseTemplate::new(200).set_body_string(body))
         .mount(&server)
         .await;
 
     let client = arch_security_client::SecurityClient::with_base_url(&server.uri());
-    let avgs = client.fetch_vulnerable().expect("parses");
+    let avgs = client.fetch_issues().expect("parses");
 
     assert_eq!(avgs.len(), 1);
     assert_eq!(avgs[0].name, "AVG-1");

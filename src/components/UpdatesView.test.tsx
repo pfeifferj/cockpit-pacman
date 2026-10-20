@@ -2180,6 +2180,7 @@ describe("UpdatesView", () => {
       avg_name: "AVG-1",
       cve_ids: ["CVE-1"],
       fixed_version: "1.1-1",
+      fix_available: true,
       affected_version: "1.0-1",
       installed_version: "1.0-1",
       status: "Vulnerable",
@@ -2293,6 +2294,77 @@ describe("UpdatesView", () => {
         screen.queryByRole("button", { name: "Filter to security updates" })
       ).not.toBeInTheDocument();
     });
+
+    it("does not count a tracker fix that configured repositories cannot supply", async () => {
+      const onUpdateStatus = vi.fn();
+      mockCheckUpdates.mockResolvedValue(twoPackages);
+      mockCheckSecurity.mockResolvedValue({ advisories: [{ ...advisory, fix_available: false }] });
+      render(<UpdatesView onUpdateStatus={onUpdateStatus} />);
+
+      expect(await screen.findByText("Fix not offered")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Filter to security updates" })).not.toBeInTheDocument();
+      await waitFor(() => expect(onUpdateStatus).toHaveBeenLastCalledWith({ count: 2, security: 0, failed: false }));
+    });
+
+    it("rechecks fix availability on quiet refresh and ignores an older advisory response", async () => {
+      const onUpdateStatus = vi.fn();
+      const available = { ...advisory, fixed_version: "3.0-1" };
+      const withVersion = (version: string) => ({
+        ...twoPackages,
+        updates: twoPackages.updates.map(update => update.name === available.package
+          ? { ...update, current_version: "1.0-1", new_version: version }
+          : update),
+      });
+      mockCheckUpdates.mockResolvedValue(withVersion("3.0-1"));
+      mockCheckSecurity.mockResolvedValue({ advisories: [available] });
+      render(<UpdatesView onUpdateStatus={onUpdateStatus} />);
+      await waitFor(() => expect(onUpdateStatus).toHaveBeenLastCalledWith({ count: 2, security: 1, failed: false }));
+      const initialChecks = mockCheckSecurity.mock.calls.length;
+
+      let finishOlder!: (response: api.SecurityResponse) => void;
+      mockCheckSecurity.mockReturnValueOnce(new Promise(resolve => { finishOlder = resolve; }));
+      mockCheckUpdates.mockResolvedValue(withVersion("3.1-1"));
+      await act(async () => emitSystemChange());
+      await waitFor(() => expect(mockCheckSecurity).toHaveBeenCalledTimes(initialChecks + 1));
+
+      mockCheckSecurity.mockResolvedValue({ advisories: [{ ...available, fix_available: false }] });
+      mockCheckUpdates.mockResolvedValue(withVersion("2.0-1"));
+      await act(async () => emitSystemChange("sync"));
+      await waitFor(() => expect(onUpdateStatus).toHaveBeenLastCalledWith({ count: 2, security: 0, failed: false }));
+      expect(screen.getByText("Fix not offered")).toBeInTheDocument();
+
+      await act(async () => finishOlder({ advisories: [available] }));
+      expect(onUpdateStatus).toHaveBeenLastCalledWith({ count: 2, security: 0, failed: false });
+      expect(screen.getByText("Fix not offered")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Filter to security updates" })).not.toBeInTheDocument();
+      expect(mockCheckSecurity).toHaveBeenLastCalledWith(false);
+      expect(mockSyncDatabase).not.toHaveBeenCalled();
+    });
+
+    it.each([true, false])("refreshes advisories after installed packages change without changing offered updates (active: %s)", async active => {
+      mockCheckUpdates.mockResolvedValue(twoPackages);
+      mockCheckSecurity.mockResolvedValue({ advisories: [{ ...advisory, package: "unoffered-vulnerable", fixed_version: null, fix_available: false }] });
+      render(<TabActiveContext.Provider value={active}><UpdatesView /></TabActiveContext.Provider>);
+      await waitFor(() => expect(mockCheckSecurity).toHaveBeenCalled());
+      const checks = mockCheckSecurity.mock.calls.length;
+      const reads = mockCheckUpdates.mock.calls.length;
+      mockCheckSecurity.mockResolvedValue({ advisories: [] });
+      await act(async () => emitSystemChange());
+      await waitFor(() => expect(mockCheckUpdates).toHaveBeenCalledTimes(reads + 1));
+      await waitFor(() => expect(mockCheckSecurity).toHaveBeenCalledTimes(checks + 1));
+    });
+
+    it("keeps advisories when a sync refresh offers the same versions", async () => {
+      mockCheckUpdates.mockResolvedValue(twoPackages);
+      mockCheckSecurity.mockResolvedValue({ advisories: [advisory] });
+      render(<UpdatesView />);
+      await waitFor(() => expect(mockCheckSecurity).toHaveBeenCalled());
+      const checks = mockCheckSecurity.mock.calls.length;
+      const reads = mockCheckUpdates.mock.calls.length;
+      await act(async () => emitSystemChange("sync"));
+      await waitFor(() => expect(mockCheckUpdates).toHaveBeenCalledTimes(reads + 1));
+      expect(mockCheckSecurity).toHaveBeenCalledTimes(checks);
+    });
   });
 
   describe("Advisory popover", () => {
@@ -2303,6 +2375,7 @@ describe("UpdatesView", () => {
       avg_name: "AVG-1",
       cve_ids: ["CVE-1"],
       fixed_version: "1.1-1",
+      fix_available: true,
       affected_version: "1.0-1",
       installed_version: "1.0-1",
       status: "Vulnerable",
@@ -2346,6 +2419,7 @@ describe("UpdatesView", () => {
       avg_name: "AVG-1879",
       cve_ids: ["CVE-2021-43976"],
       fixed_version: null,
+      fix_available: false,
       affected_version: "5.15.8.arch1-1",
       installed_version: "7.1.8.arch1-3",
       status: "Vulnerable",
@@ -3854,6 +3928,7 @@ describe("UpdatesView", () => {
       avg_name: `AVG-${pkg}`,
       cve_ids: [],
       fixed_version: "1.1-1",
+      fix_available: true,
       affected_version: "1.0-1",
       installed_version: "1.0-1",
       status: "Vulnerable",
@@ -5303,7 +5378,7 @@ describe("UpdatesView", () => {
       });
       const advisory = (pkg: string) => ({
         package: pkg, severity: "High", advisory_type: "security", avg_name: "AVG-1", cve_ids: ["CVE-1"],
-        fixed_version: "2-1", affected_version: "1-1", installed_version: "1-1", status: "Vulnerable",
+        fixed_version: "2-1", fix_available: true, affected_version: "1-1", installed_version: "1-1", status: "Vulnerable",
       });
       mockCheckSecurity.mockResolvedValue({ advisories: [advisory("glibc"), advisory("held")] });
       render(<UpdatesView onUpdateStatus={onUpdateStatus} />);

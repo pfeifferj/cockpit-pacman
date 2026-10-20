@@ -108,7 +108,7 @@ class Origin(HTTP):
         elif self.path == '/news':
             body = f'<rss version="2.0"><channel><title>Proxy fixture</title><link>https://archlinux.org</link><description>News</description><item><title>Proxy news</title><link>https://archlinux.org/news/proxy-fixture/</link><pubDate>{formatdate(usegmt=True)}</pubDate><description>Recorded request</description></item></channel></rss>'
             self.reply(200, body.encode())
-        elif self.path == '/issues/vulnerable.json':
+        elif self.path == '/issues/all.json':
             self.reply(200, b'[]')
         elif self.path.startswith('/package/'):
             self.reply(200, json.dumps({'name': 'htop', 'versions': [], 'advisories': [], 'groups': [], 'issues': []}).encode())
@@ -320,7 +320,7 @@ def prepare_resources():
     caches = []
     for user in ('root', 'dev'):
         home_dir = Path(pwd.getpwnam(user).pw_dir)
-        for name in ('news-cache.json', 'security-feed.json'):
+        for name in ('news-cache.json', 'security-issues.json'):
             path = home_dir / '.config/cockpit-pacman' / name
             backup = STATE / f'{user}-{name}'
             info = path.stat() if path.exists() else None

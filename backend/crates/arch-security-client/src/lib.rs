@@ -12,8 +12,8 @@ pub struct SecurityClient {
     base_url: String,
 }
 
-pub fn parse_vulnerable(body: &str) -> Result<Vec<Avg>> {
-    serde_json::from_str(body).context("failed to parse vulnerable issues JSON")
+pub fn parse_issues(body: &str) -> Result<Vec<Avg>> {
+    serde_json::from_str(body).context("failed to parse security issues JSON")
 }
 
 impl Default for SecurityClient {
@@ -39,13 +39,13 @@ impl SecurityClient {
         }
     }
 
-    pub fn fetch_vulnerable(&self) -> Result<Vec<Avg>> {
-        parse_vulnerable(&self.fetch_vulnerable_raw()?)
+    pub fn fetch_issues(&self) -> Result<Vec<Avg>> {
+        parse_issues(&self.fetch_issues_raw()?)
     }
 
-    pub fn fetch_vulnerable_raw(&self) -> Result<String> {
-        self.get_json(&format!("{}/issues/vulnerable.json", self.base_url))
-            .context("failed to fetch vulnerable issues")
+    pub fn fetch_issues_raw(&self) -> Result<String> {
+        self.get_json(&format!("{}/issues/all.json", self.base_url))
+            .context("failed to fetch security issues")
     }
 
     pub fn fetch_package(&self, name: &str) -> Result<PackageInfo> {

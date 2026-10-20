@@ -116,7 +116,7 @@ export type PackageDetails = { name: string, version: string, description: strin
 
 export type PackageListResponse = { packages: Array<Package>, total: number, total_explicit: number, total_dependency: number, repositories: Array<string>, warnings: Array<string>, };
 
-export type PackageSecurityAdvisory = { package: string, severity: string, advisory_type: string, avg_name: string, cve_ids: Array<string>, fixed_version: string | null, affected_version: string, installed_version: string, status: string, };
+export type PackageSecurityAdvisory = { package: string, severity: string, advisory_type: string, avg_name: string, cve_ids: Array<string>, fixed_version: string | null, fix_available: boolean, affected_version: string, installed_version: string, status: string, };
 
 export type PacnewFile = { path: string, package: string, kind: string, mtime: number, };
 

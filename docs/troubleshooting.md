@@ -112,9 +112,11 @@ The Security panel reads Arch's security tracker, whose records stay open
 until someone closes them, often long after a fix ships, so an old advisory
 keeps matching current versions.
 
-Advisories are split by whether updating resolves them; "no fix recorded"
-means the tracker names no version to upgrade to. To turn the panel off, see
-`security_advisories` in [configuration.md](configuration.md).
+Advisories are split by whether updating resolves them. "Fix not offered"
+means the tracker names a fixed version that no configured repository offered at
+the last sync; "no fix recorded" means the tracker names no version to upgrade to.
+To turn the panel off, see `security_advisories` in
+[configuration.md](configuration.md).
 
 ## Where things live
 

@@ -7,7 +7,7 @@ pub(crate) use sysupgrade::check_approved_removals;
 pub use sysupgrade::{InterventionFlags, SysupgradeOutcome, run_sysupgrade};
 pub use transaction::TransactionGuard;
 
-use alpm::{Alpm, LogLevel, Progress};
+use alpm::{Alpm, LogLevel, Package, Progress, Usage};
 use alpm_utils::alpm_with_conf;
 use anyhow::{Context, Result};
 use pacman_key::KeyValidity;
@@ -71,39 +71,42 @@ pub fn resolve_file_owners(handle: &Alpm, wanted: &HashSet<String>) -> HashMap<S
     owners
 }
 
-/// Find all packages with available updates by comparing local versions to sync databases.
+pub fn find_upgrade_candidate<'a>(handle: &'a Alpm, name: &str) -> Option<&'a Package> {
+    handle
+        .syncdbs()
+        .iter()
+        .filter(|db| db.usage().is_ok_and(|usage| usage.contains(Usage::UPGRADE)))
+        .find_map(|db| db.pkg(name).ok())
+}
+
 pub fn find_available_updates(handle: &Alpm, extra_ignored: &[String]) -> Vec<UpdateInfo> {
     let localdb = handle.localdb();
     let mut updates = Vec::new();
 
     for pkg in localdb.pkgs() {
-        for syncdb in handle.syncdbs() {
-            if let Ok(syncpkg) = syncdb.pkg(pkg.name()) {
-                if syncpkg.version() > pkg.version() {
-                    let ignored = handle.ignorepkgs().iter().any(|n| n == pkg.name())
-                        || handle.ignoregroups().iter().any(|g| {
-                            handle.syncdbs().iter().any(|db| {
-                                db.group(g)
-                                    .map(|grp| {
-                                        grp.packages().iter().any(|p| p.name() == pkg.name())
-                                    })
-                                    .unwrap_or(false)
-                            })
-                        })
-                        || extra_ignored.iter().any(|n| n == pkg.name());
-                    updates.push(UpdateInfo {
-                        name: pkg.name().to_string(),
-                        current_version: pkg.version().to_string(),
-                        new_version: syncpkg.version().to_string(),
-                        download_size: syncpkg.download_size(),
-                        current_size: pkg.isize(),
-                        new_size: syncpkg.isize(),
-                        repository: syncdb.name().to_string(),
-                        ignored,
-                    });
-                }
-                break;
-            }
+        if let Some(syncpkg) = find_upgrade_candidate(handle, pkg.name())
+            && syncpkg.version() > pkg.version()
+            && let Some(syncdb) = syncpkg.db()
+        {
+            let ignored = handle.ignorepkgs().iter().any(|n| n == pkg.name())
+                || handle.ignoregroups().iter().any(|g| {
+                    handle.syncdbs().iter().any(|db| {
+                        db.group(g)
+                            .map(|grp| grp.packages().iter().any(|p| p.name() == pkg.name()))
+                            .unwrap_or(false)
+                    })
+                })
+                || extra_ignored.iter().any(|n| n == pkg.name());
+            updates.push(UpdateInfo {
+                name: pkg.name().to_string(),
+                current_version: pkg.version().to_string(),
+                new_version: syncpkg.version().to_string(),
+                download_size: syncpkg.download_size(),
+                current_size: pkg.isize(),
+                new_size: syncpkg.isize(),
+                repository: syncdb.name().to_string(),
+                ignored,
+            });
         }
     }
 
@@ -155,3 +158,6 @@ pub fn log_level_to_string(level: LogLevel) -> &'static str {
         _ => "info",
     }
 }
+
+#[cfg(test)]
+mod candidate_tests;

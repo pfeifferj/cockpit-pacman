@@ -527,7 +527,7 @@ describe("App upgrade outcomes", () => {
   it("shows an unread badge naming the security updates", async () => {
     const advisory = (pkg: string) => ({
       package: pkg, severity: "High", advisory_type: "security", avg_name: "AVG-1", cve_ids: ["CVE-1"],
-      fixed_version: "2-1", affected_version: "1-1", installed_version: "1-1", status: "Vulnerable",
+      fixed_version: "2-1", fix_available: true, affected_version: "1-1", installed_version: "1-1", status: "Vulnerable",
     });
     answerBackend({
       "check-updates": () => ({ updates: [update("a"), update("b"), update("c")], warnings: [] }),
